@@ -16,6 +16,5 @@ else
   exit 1
 fi
 
-$BIOME format . --check
-$BIOME lint . --error-on-warnings
+$BIOME check . --error-on-warnings
 $BUN typecheck
