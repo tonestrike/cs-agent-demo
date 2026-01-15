@@ -52,6 +52,7 @@ wrangler dev --local
 ```
 
 RPC endpoints are served under `/rpc`.
+Customize tone and scope via `AGENT_TONE`, `AGENT_GREETING`, and `AGENT_OFFTOPIC_MESSAGE` in `apps/worker/.dev.vars`.
 
 ## Local dev (Web)
 

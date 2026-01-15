@@ -1,3 +1,4 @@
+import type { AgentPromptConfig } from "../agents/config";
 import type {
   AgentModelInput,
   AgentResponseInput,
@@ -31,7 +32,9 @@ const detectTool = (text: string) => {
   return "agent.fallback" as const;
 };
 
-export const createMockModelAdapter = (): ModelAdapter => {
+export const createMockModelAdapter = (
+  config?: AgentPromptConfig,
+): ModelAdapter => {
   return {
     name: "mock",
     modelId: "mock",
@@ -72,7 +75,10 @@ export const createMockModelAdapter = (): ModelAdapter => {
         case "agent.escalate":
           return "I have created a ticket for a specialist to follow up shortly.";
         default:
-          return "Thanks for the details. How else can I help?";
+          return (
+            config?.offTopicMessage ??
+            "Thanks for the details. How else can I help?"
+          );
       }
     },
   };

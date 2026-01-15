@@ -1,5 +1,6 @@
 import type { CrmAdapter } from "@pestcall/core";
 
+import { getAgentConfig } from "./agents/config";
 import { getCrmAdapter } from "./crm";
 import { type Env, envSchema } from "./env";
 import { getModelAdapter } from "./models";
@@ -10,6 +11,7 @@ export type Dependencies = {
   tickets: ReturnType<typeof createTicketRepository>;
   calls: ReturnType<typeof createCallRepository>;
   model: ReturnType<typeof getModelAdapter>;
+  agentConfig: ReturnType<typeof getAgentConfig>;
 };
 
 export type RequestContext = {
@@ -24,6 +26,7 @@ export const createDependencies = (env: Env): Dependencies => {
     tickets: createTicketRepository(env.DB),
     calls: createCallRepository(env.DB),
     model: getModelAdapter(env),
+    agentConfig: getAgentConfig(env),
   };
 };
 

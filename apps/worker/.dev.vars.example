@@ -1,3 +1,7 @@
 AGENT_MODEL=mock
+AGENT_TONE=warm
+AGENT_GREETING=Hi! Thanks for calling PestCall. How can I help today?
+AGENT_OFFTOPIC_MESSAGE=I can help with pest control appointments, billing, and service questions.
+AGENT_COMPANY_NAME=PestCall
 CRM_PROVIDER=mock
 DEMO_AUTH_TOKEN=dev-demo-token
