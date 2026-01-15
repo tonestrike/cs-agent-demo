@@ -11,6 +11,8 @@ export const Providers = ({ children }: { children: React.ReactNode }) => {
           queries: {
             retry: 1,
             refetchOnWindowFocus: false,
+            staleTime: 5_000,
+            gcTime: 5 * 60_000,
           },
         },
       }),

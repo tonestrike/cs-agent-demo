@@ -198,6 +198,31 @@ describeIf("agent e2e tool calls", () => {
     assertRealModelCalls(meta.modelCalls ?? []);
   });
 
+  it("avoids tool calls for off-topic requests", async () => {
+    const response = await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      phoneNumber,
+      text: "What is the weather like tomorrow?",
+    });
+
+    expect(response.replyText.length).toBeGreaterThan(0);
+
+    const meta = await getLatestAgentTurnMeta(response.callSessionId);
+    const toolNames = (meta.tools ?? []).map((tool) => tool.toolName);
+    const disallowed = [
+      "crm.getNextAppointment",
+      "crm.getOpenInvoices",
+      "crm.getAvailableSlots",
+      "crm.rescheduleAppointment",
+    ];
+    for (const toolName of disallowed) {
+      expect(toolNames).not.toContain(toolName);
+    }
+    assertRealModelCalls(meta.modelCalls ?? []);
+  });
+
   it("disambiguates multiple customers before disclosing details", async () => {
     const first = await callRpc<{
       callSessionId: string;

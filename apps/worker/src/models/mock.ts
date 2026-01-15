@@ -77,7 +77,7 @@ export const createMockModelAdapter = (
         default:
           return (
             config?.offTopicMessage ??
-            "Thanks for the details. How else can I help?"
+            "I can help with pest control appointments, billing, or service questions."
           );
       }
     },

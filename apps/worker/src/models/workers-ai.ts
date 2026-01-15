@@ -42,13 +42,13 @@ const buildPrompt = (input: AgentModelInput, config: AgentPromptConfig) => {
   const lines = [
     `You are a pest control support agent for ${config.companyName}.`,
     `Tone: ${config.tone}.`,
-    `Greeting to use for hellos: "${config.greeting}"`,
+    `Use this greeting when the caller just says hello: ${config.greeting}`,
     "Return JSON only, no prose.",
     "Choose one tool call or a final response.",
     "Tools: crm.getNextAppointment, crm.getOpenInvoices, agent.escalate.",
     "Never answer questions outside pest control appointments, billing, or service.",
-    `If out of scope, return a final message: "${config.offTopicMessage}"`,
-    "If you cannot answer, return a final message asking a clarifying question.",
+    `If out of scope, respond politely. Guidance: ${config.offTopicMessage}`,
+    "If the request is vague, ask how you can help without calling tools.",
   ];
 
   if (input.context) {
@@ -68,7 +68,7 @@ const buildPrompt = (input: AgentModelInput, config: AgentPromptConfig) => {
 
 export const createWorkersAiAdapter = (
   ai: Ai | undefined,
-  model = "@cf/meta/llama-3.1-8b-instruct",
+  model: string,
   config: AgentPromptConfig,
 ): ModelAdapter => {
   if (!ai) {
@@ -123,11 +123,11 @@ export const createWorkersAiAdapter = (
       const promptLines = [
         `You are a pest control support agent for ${config.companyName}.`,
         `Tone: ${config.tone}.`,
-        `Greeting to use for hellos: "${config.greeting}"`,
+        `Use this greeting when the caller just says hello: ${config.greeting}`,
         "Respond in 1-2 short sentences.",
         "Use the tool result to answer the customer.",
         "Do not mention internal tool names.",
-        `If out of scope, respond: "${config.offTopicMessage}"`,
+        `If out of scope, respond politely. Guidance: ${config.offTopicMessage}`,
       ];
 
       if (input.context) {

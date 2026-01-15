@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { Badge, Button, Card } from "../../components/ui";
@@ -89,6 +90,31 @@ export default function AgentDashboardPage() {
   });
 
   const callDetail = callDetailQuery.data?.turns ?? [];
+  const groupedCalls = useMemo(() => {
+    const map = new Map<
+      string,
+      { phoneE164: string; sessions: CallSession[] }
+    >();
+    for (const session of callsQuery.data?.items ?? []) {
+      const key = session.phoneE164;
+      const existing = map.get(key);
+      if (existing) {
+        existing.sessions.push(session);
+      } else {
+        map.set(key, { phoneE164: key, sessions: [session] });
+      }
+    }
+    return Array.from(map.values()).map((entry) => {
+      const sorted = entry.sessions.sort((a, b) =>
+        a.startedAt < b.startedAt ? 1 : -1,
+      );
+      return {
+        phoneE164: entry.phoneE164,
+        count: entry.sessions.length,
+        latest: sorted[0],
+      };
+    });
+  }, [callsQuery.data?.items]);
   const callTrace = useMemo(() => {
     return callDetail.map((turn) => ({
       ...turn,
@@ -127,30 +153,46 @@ export default function AgentDashboardPage() {
               </Button>
             </div>
             <div className="space-y-3">
-              {(callsQuery.data?.items ?? []).map((call) => (
-                <button
-                  key={call.id}
-                  type="button"
-                  onClick={() => setSelectedCall(call.id)}
-                  className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition ${
-                    selectedCall === call.id
-                      ? "border-ink/30 bg-ink/5"
-                      : "border-ink/10 bg-white/70 hover:border-ink/20"
-                  }`}
-                >
-                  <div>
-                    <p className="text-sm font-semibold text-ink">
-                      {maskPhone(call.phoneE164)}
-                    </p>
-                    <p className="text-xs text-ink/60">
-                      {formatDateTime(call.startedAt)} • {call.status}
-                    </p>
+              {groupedCalls.map((group) =>
+                group.latest ? (
+                  <div
+                    key={group.phoneE164}
+                    className="rounded-2xl border border-ink/10 bg-white/70 p-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-ink">
+                          {maskPhone(group.phoneE164)}
+                        </p>
+                        <p className="text-xs text-ink/60">
+                          {formatDateTime(group.latest.startedAt)} •{" "}
+                          {group.latest.status} • {group.count} sessions
+                        </p>
+                      </div>
+                      <span className="text-xs uppercase tracking-wide text-ink/50">
+                        {group.latest.transport}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        className="bg-moss hover:bg-ink"
+                        onClick={() =>
+                          setSelectedCall(group.latest?.id ?? null)
+                        }
+                      >
+                        View trace
+                      </Button>
+                      <Link
+                        href={`/agent/calls/${group.latest.id}`}
+                        className="rounded-full border border-ink/20 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-ink/70 transition hover:border-ink/40 hover:text-ink"
+                      >
+                        Full page
+                      </Link>
+                    </div>
                   </div>
-                  <span className="text-xs uppercase tracking-wide text-ink/50">
-                    {call.transport}
-                  </span>
-                </button>
-              ))}
+                ) : null,
+              )}
               {callsQuery.isLoading && (
                 <p className="text-sm text-ink/60">Loading calls...</p>
               )}
@@ -169,9 +211,10 @@ export default function AgentDashboardPage() {
             </div>
             <div className="space-y-3">
               {(ticketsQuery.data?.items ?? []).map((ticket) => (
-                <div
+                <Link
                   key={ticket.id}
-                  className="rounded-2xl border border-ink/10 bg-white/70 p-4"
+                  href={`/agent/tickets/${ticket.id}`}
+                  className="block rounded-2xl border border-ink/10 bg-white/70 p-4 transition hover:border-ink/30"
                 >
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-ink">
@@ -184,7 +227,7 @@ export default function AgentDashboardPage() {
                   <p className="mt-2 text-xs text-ink/60">
                     {ticket.category} • {ticket.priority}
                   </p>
-                </div>
+                </Link>
               ))}
               {ticketsQuery.isLoading && (
                 <p className="text-sm text-ink/60">Loading tickets...</p>

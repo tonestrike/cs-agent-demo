@@ -60,46 +60,6 @@ const hasPaymentRequest = (text: string) => {
   return lowered.includes("pay") || lowered.includes("payment");
 };
 
-const isGreeting = (text: string) => {
-  const lowered = text.toLowerCase();
-  return (
-    lowered.includes("hello") ||
-    lowered.includes("hi") ||
-    lowered.includes("hey") ||
-    lowered.includes("thanks")
-  );
-};
-
-const isOutOfScope = (text: string) => {
-  if (isGreeting(text)) {
-    return false;
-  }
-  const lowered = text.toLowerCase();
-  const keywords = [
-    "pest",
-    "bug",
-    "bugs",
-    "roach",
-    "rodent",
-    "mouse",
-    "mice",
-    "termite",
-    "ant",
-    "mosquito",
-    "appointment",
-    "schedule",
-    "reschedule",
-    "billing",
-    "invoice",
-    "balance",
-    "owe",
-    "payment",
-    "service",
-    "treatment",
-  ];
-  return !keywords.some((keyword) => lowered.includes(keyword));
-};
-
 type ToolCall = {
   toolName: string;
   latencyMs: number;
@@ -346,20 +306,15 @@ export const handleAgentMessage = async (
     };
   }
 
-  if (isOutOfScope(input.text)) {
-    const replyText = deps.agentConfig.offTopicMessage;
+  if (!input.text.trim()) {
+    const replyText = deps.agentConfig.greeting;
     await deps.calls.addTurn({
       id: crypto.randomUUID(),
       callSessionId,
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: {
-        intent: "off_topic",
-        tools,
-        modelCalls,
-        customerId: customer.id,
-      },
+      meta: { intent: "greeting", tools, modelCalls, customerId: customer.id },
     });
 
     return {

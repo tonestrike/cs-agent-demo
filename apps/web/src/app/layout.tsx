@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Fraunces, Manrope } from "next/font/google";
+import Link from "next/link";
 
 import "./globals.css";
 import { Providers } from "./providers";
@@ -29,7 +30,26 @@ export default function RootLayout({
       <body
         className={`${displayFont.variable} ${bodyFont.variable} min-h-screen`}
       >
-        <Providers>{children}</Providers>
+        <Providers>
+          <div className="flex min-h-screen flex-col">
+            <header className="border-b border-ink/10 bg-white/70">
+              <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-4">
+                <Link href="/" className="text-lg font-semibold text-ink">
+                  PestCall
+                </Link>
+                <nav className="flex flex-wrap items-center gap-4 text-sm font-semibold text-ink/70">
+                  <Link href="/customer" className="hover:text-ink">
+                    Customer
+                  </Link>
+                  <Link href="/agent" className="hover:text-ink">
+                    Agent
+                  </Link>
+                </nav>
+              </div>
+            </header>
+            <div className="flex-1">{children}</div>
+          </div>
+        </Providers>
       </body>
     </html>
   );

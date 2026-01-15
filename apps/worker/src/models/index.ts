@@ -8,5 +8,9 @@ export const getModelAdapter = (env: Env) => {
   if (env.AGENT_MODEL === "mock") {
     return createMockModelAdapter(config);
   }
-  return createWorkersAiAdapter(env.AI, "@cf/meta/llama-3.1-8b-instruct", config);
+  return createWorkersAiAdapter(
+    env.AI,
+    "@cf/meta/llama-3.1-8b-instruct",
+    config,
+  );
 };
