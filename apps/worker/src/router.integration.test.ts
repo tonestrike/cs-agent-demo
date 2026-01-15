@@ -4,7 +4,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getPlatformProxy } from "wrangler";
 
 import { RPCHandler } from "@orpc/server/fetch";
-import { type Env, router } from "./router";
+import { createContext } from "./context";
+import type { Env } from "./env";
+import { router } from "./router";
 
 type RpcResponse<T> = {
   json: T;
@@ -69,10 +71,7 @@ const callRpc = async <T>(
 
   const { matched, response } = await handler.handle(request, {
     prefix: "/rpc",
-    context: {
-      env: platform.env,
-      headers: request.headers,
-    },
+    context: createContext(platform.env, request.headers),
   });
 
   expect(matched).toBe(true);

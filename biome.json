@@ -9,7 +9,20 @@
     "enabled": true
   },
   "linter": {
-    "enabled": true
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noUnusedImports": "error"
+      },
+      "suspicious": {
+        "noExplicitAny": "warn"
+      },
+      "style": {
+        "noUnusedTemplateLiteral": "error"
+      }
+    }
   },
   "files": {
     "ignore": ["node_modules", "dist", ".next", ".wrangler"]

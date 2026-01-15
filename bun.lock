@@ -35,6 +35,9 @@
     "packages/core": {
       "name": "@pestcall/core",
       "version": "0.0.0",
+      "dependencies": {
+        "zod": "^3.23.8",
+      },
     },
   },
   "packages": {
