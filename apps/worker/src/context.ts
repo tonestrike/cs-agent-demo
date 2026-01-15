@@ -3,10 +3,10 @@ import type { CrmAdapter } from "@pestcall/core";
 import { getCrmAdapter } from "./crm";
 import type { Env } from "./env";
 import {
-  type CallRepository,
-  type TicketRepository,
   createCallRepository,
   createTicketRepository,
+  type CallRepository,
+  type TicketRepository,
 } from "./repositories";
 
 export type Dependencies = {

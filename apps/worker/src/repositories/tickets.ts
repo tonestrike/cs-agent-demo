@@ -7,8 +7,6 @@ import {
   mapTicketRow,
 } from "../db/mappers";
 
-import type { ListResult, TicketListParams, TicketRepository } from "./types";
-
 type TicketRowResult = TicketRow & { status: TicketStatus };
 
 type TicketEventInput = {
@@ -18,9 +16,14 @@ type TicketEventInput = {
   timestamp: string;
 };
 
-export const createTicketRepository = (db: D1Database): TicketRepository => {
+export const createTicketRepository = (db: D1Database) => {
   return {
-    async list(params: TicketListParams): Promise<ListResult<Ticket>> {
+    async list(params: {
+      status?: TicketStatus;
+      q?: string;
+      limit?: number;
+      cursor?: string;
+    }) {
       const limit = params.limit ?? 50;
       const queryParams: unknown[] = [];
       const conditions: string[] = [];
@@ -60,7 +63,7 @@ export const createTicketRepository = (db: D1Database): TicketRepository => {
         nextCursor,
       };
     },
-    async get(ticketId: string): Promise<Ticket | null> {
+    async get(ticketId: string) {
       const row = await db
         .prepare("SELECT * FROM tickets WHERE id = ?")
         .bind(ticketId)
@@ -68,7 +71,7 @@ export const createTicketRepository = (db: D1Database): TicketRepository => {
 
       return row ? mapTicketRow(row) : null;
     },
-    async insert(ticket: Ticket): Promise<void> {
+    async insert(ticket: Ticket) {
       await db
         .prepare(
           "INSERT INTO tickets (id, created_at, updated_at, status, priority, category, customer_cache_id, phone_e164, subject, description, assignee, source, external_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -90,7 +93,7 @@ export const createTicketRepository = (db: D1Database): TicketRepository => {
         )
         .run();
     },
-    async addEvent(input: TicketEventInput): Promise<TicketEvent> {
+    async addEvent(input: TicketEventInput) {
       const eventId = crypto.randomUUID();
       await db
         .prepare(
@@ -119,7 +122,7 @@ export const createTicketRepository = (db: D1Database): TicketRepository => {
       ticketId: string;
       status: TicketStatus;
       updatedAt: string;
-    }): Promise<void> {
+    }) {
       await db
         .prepare("UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?")
         .bind(input.status, input.updatedAt, input.ticketId)

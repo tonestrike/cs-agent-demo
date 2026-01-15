@@ -5,19 +5,12 @@ import {
   mapCallTurnRow,
 } from "../db/mappers";
 
-import type {
-  CallDetail,
-  CallRepository,
-  CallSession,
-  ListResult,
-} from "./types";
-
-export const createCallRepository = (db: D1Database): CallRepository => {
+export const createCallRepository = (db: D1Database) => {
   return {
     async list(params: {
       limit?: number;
       cursor?: string;
-    }): Promise<ListResult<CallSession>> {
+    }) {
       const limit = params.limit ?? 50;
       const queryParams: unknown[] = [];
       const conditions: string[] = [];
@@ -47,7 +40,7 @@ export const createCallRepository = (db: D1Database): CallRepository => {
         nextCursor,
       };
     },
-    async get(callSessionId: string): Promise<CallDetail | null> {
+    async get(callSessionId: string) {
       const session = await db
         .prepare("SELECT * FROM call_sessions WHERE id = ?")
         .bind(callSessionId)
@@ -77,7 +70,7 @@ export const createCallRepository = (db: D1Database): CallRepository => {
       status: string;
       transport: string;
       summary?: string | null;
-    }): Promise<void> {
+    }) {
       await db
         .prepare(
           "INSERT INTO call_sessions (id, started_at, ended_at, phone_e164, customer_cache_id, status, transport, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -101,7 +94,7 @@ export const createCallRepository = (db: D1Database): CallRepository => {
       speaker: string;
       text: string;
       meta: Record<string, unknown>;
-    }): Promise<void> {
+    }) {
       await db
         .prepare(
           "INSERT INTO call_turns (id, call_session_id, ts, speaker, text, meta_json) VALUES (?, ?, ?, ?, ?, ?)",

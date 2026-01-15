@@ -205,3 +205,18 @@ describe("crm RPC", () => {
     expect(slots.length).toBeGreaterThan(0);
   });
 });
+
+describe("agent RPC", () => {
+  it("creates a call session and replies with appointment info", async () => {
+    const response = await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>(platform, "agent/message", {
+      phoneNumber: "+15551234567",
+      text: "When is my next appointment?",
+    });
+
+    expect(response.callSessionId.length).toBeGreaterThan(0);
+    expect(response.replyText).toContain("Your next appointment is");
+  });
+});
