@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+if command -v bun >/dev/null 2>&1; then
+  BUN="bun"
+elif [ -x "$HOME/.bun/bin/bun" ]; then
+  BUN="$HOME/.bun/bin/bun"
+else
+  echo "bun not found; install bun to run checks." >&2
+  exit 1
+fi
+
+$BUN biome format . --check
+$BUN biome lint . --error-on-warnings
+$BUN typecheck

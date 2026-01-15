@@ -6,7 +6,10 @@
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "lint": "biome lint .",
+    "lint:fix": "biome lint . --write",
     "format": "biome format . --write",
+    "format:check": "biome format . --check",
+    "fix": "biome check . --write",
     "typecheck": "tsc -b",
     "test": "vitest run"
   },

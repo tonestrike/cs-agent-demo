@@ -3,7 +3,7 @@ import type { Ticket, TicketStatus } from "./types";
 const allowedTransitions: Record<TicketStatus, TicketStatus[]> = {
   open: ["in_progress", "resolved"],
   in_progress: ["open", "resolved"],
-  resolved: ["open"]
+  resolved: ["open"],
 };
 
 export type TicketStatusTransitionResult =
@@ -12,7 +12,7 @@ export type TicketStatusTransitionResult =
 
 export const isValidStatusTransition = (
   current: TicketStatus,
-  next: TicketStatus
+  next: TicketStatus,
 ): boolean => {
   return allowedTransitions[current].includes(next);
 };
@@ -20,7 +20,7 @@ export const isValidStatusTransition = (
 export const applyStatusTransition = (
   ticket: Ticket,
   next: TicketStatus,
-  nowIso: string
+  nowIso: string,
 ): TicketStatusTransitionResult => {
   if (ticket.status === next) {
     return { ok: true, ticket: { ...ticket, updatedAt: nowIso } };
@@ -29,7 +29,7 @@ export const applyStatusTransition = (
   if (!isValidStatusTransition(ticket.status, next)) {
     return {
       ok: false,
-      error: `Invalid status transition from ${ticket.status} to ${next}`
+      error: `Invalid status transition from ${ticket.status} to ${next}`,
     };
   }
 
@@ -38,7 +38,7 @@ export const applyStatusTransition = (
     ticket: {
       ...ticket,
       status: next,
-      updatedAt: nowIso
-    }
+      updatedAt: nowIso,
+    },
   };
 };
