@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Command } from "commander";
@@ -12,17 +12,14 @@ type D1DatabaseInfo = {
 const WORKER_DIR = resolve(process.cwd(), "apps/worker");
 const WRANGLER_CONFIG = resolve(WORKER_DIR, "wrangler.toml");
 
-const runWrangler = async (
-  args: string[],
-  options?: { quiet?: boolean },
-) => {
+const runWrangler = async (args: string[], options?: { quiet?: boolean }) => {
   return new Promise<{ stdout: string; stderr: string }>(
     (resolvePromise, reject) => {
       const proc: ChildProcessWithoutNullStreams = spawn(
         "bunx",
         ["wrangler", ...args],
         {
-        stdio: ["ignore", "pipe", "pipe"],
+          stdio: ["ignore", "pipe", "pipe"],
         },
       );
 
@@ -70,19 +67,44 @@ const updateDatabaseId = async (content: string, databaseId: string) => {
   await writeFile(WRANGLER_CONFIG, updated, "utf8");
 };
 
+const parseD1List = (output: string) => {
+  const lines = output.split("\n");
+  for (const line of lines) {
+    if (line.includes("│") && !line.includes("Account") && !line.includes("Name")) {
+      const parts = line
+        .split("│")
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (parts.length >= 2) {
+        const name = parts[0] ?? "";
+        const uuid = parts[1] ?? "";
+        if (name && uuid) {
+          return { name, uuid };
+        }
+      }
+    }
+  }
+  return null;
+};
+
+const parseD1Create = (output: string) => {
+  const uuidMatch = output.match(/[0-9a-f]{8}-[0-9a-f-]{27,}/i);
+  return uuidMatch?.[0] ?? null;
+};
+
 const getD1DatabaseId = async (dbName: string) => {
-  const list = await runWrangler(["d1", "list", "--json"], { quiet: true });
-  const databases = JSON.parse(list.stdout) as D1DatabaseInfo[];
-  const existing = databases.find((db) => db.name === dbName);
-  if (existing) {
-    return existing.uuid;
+  const list = await runWrangler(["d1", "list"], { quiet: true });
+  const parsed = parseD1List(list.stdout);
+  if (parsed && parsed.name === dbName) {
+    return parsed.uuid;
   }
 
-  const created = await runWrangler(["d1", "create", dbName, "--json"], {
-    quiet: true,
-  });
-  const result = JSON.parse(created.stdout) as D1DatabaseInfo;
-  return result.uuid;
+  const created = await runWrangler(["d1", "create", dbName], { quiet: true });
+  const uuid = parseD1Create(created.stdout) ?? parseD1Create(created.stderr);
+  if (!uuid) {
+    throw new Error("Could not determine D1 database id from wrangler output.");
+  }
+  return uuid;
 };
 
 const deploy = async (options: { seed: boolean }) => {
