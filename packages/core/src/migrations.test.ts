@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const migrationPath = resolve(
   process.cwd(),
-  "apps/worker/migrations/0001_init.sql"
+  "apps/worker/migrations/0001_init.sql",
 );
 
 const requiredTables = [
@@ -12,7 +12,7 @@ const requiredTables = [
   "call_sessions",
   "call_turns",
   "tickets",
-  "ticket_events"
+  "ticket_events",
 ];
 
 describe("D1 migration", () => {

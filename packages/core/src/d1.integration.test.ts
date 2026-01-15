@@ -7,7 +7,7 @@ const dbName = "pestcall_local";
 
 const runWrangler = (args: string[]): string => {
   return execFileSync(wranglerBin, args, {
-    encoding: "utf8"
+    encoding: "utf8",
   });
 };
 
@@ -20,7 +20,7 @@ describe("D1 integration", () => {
       dbName,
       "--local",
       "--config",
-      wranglerConfig
+      wranglerConfig,
     ]);
 
     const ticketId = `test-${Date.now()}`;
@@ -34,8 +34,7 @@ describe("D1 integration", () => {
       "--config",
       wranglerConfig,
       "--command",
-      `INSERT INTO tickets (id, created_at, updated_at, status, priority, category, subject, description, source)` +
-        ` VALUES ('${ticketId}', '${createdAt}', '${createdAt}', 'open', 'normal', 'general', 'Test ticket', 'Created by integration test', 'internal')`
+      `INSERT INTO tickets (id, created_at, updated_at, status, priority, category, subject, description, source) VALUES ('${ticketId}', '${createdAt}', '${createdAt}', 'open', 'normal', 'general', 'Test ticket', 'Created by integration test', 'internal')`,
     ]);
 
     const output = runWrangler([
@@ -47,7 +46,7 @@ describe("D1 integration", () => {
       wranglerConfig,
       "--command",
       `SELECT id, status FROM tickets WHERE id = '${ticketId}'`,
-      "--json"
+      "--json",
     ]);
 
     expect(output).toContain(ticketId);
