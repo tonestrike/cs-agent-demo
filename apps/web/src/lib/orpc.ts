@@ -1,7 +1,9 @@
 import type { Client } from "@orpc/client";
 import { createORPCClient } from "@orpc/client";
-import { RPCLink } from "@orpc/client/adapters/fetch";
+import { RPCLink } from "@orpc/client/fetch";
 import type {
+  AgentPromptConfigRecord,
+  AgentPromptConfigUpdate,
   CallDetail,
   CallIdInput,
   CallListInput,
@@ -43,10 +45,19 @@ type RpcClient = {
       unknown
     >;
   };
+  agentConfig: {
+    get: Client<RpcContext, undefined, AgentPromptConfigRecord, unknown>;
+    update: Client<
+      RpcContext,
+      AgentPromptConfigUpdate,
+      AgentPromptConfigRecord,
+      unknown
+    >;
+  };
 };
 
 const rpcLink = new RPCLink<RpcContext>({
-  url: (_options, path) =>
+  url: (_options, path, _input) =>
     new URL(`/rpc/${path.join("/")}`, apiBaseUrl).toString(),
   headers: () => {
     const headers: Record<string, string> = {};

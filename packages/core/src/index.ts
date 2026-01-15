@@ -1,6 +1,7 @@
 export const CORE_VERSION = "0.0.0";
 
 export * from "./tickets";
+export * from "./agent-config";
 export * from "./calls";
 export * from "./crm";
 export {

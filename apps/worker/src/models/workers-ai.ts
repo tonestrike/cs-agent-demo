@@ -1,7 +1,7 @@
 import type { Ai, AiModels } from "@cloudflare/workers-types";
 import { AppError } from "@pestcall/core";
 
-import type { AgentPromptConfig } from "../agents/config";
+import type { AgentPromptConfig } from "@pestcall/core";
 import {
   type AgentModelInput,
   type AgentResponseInput,
@@ -38,16 +38,26 @@ const responseToText = (response: unknown) => {
   return null;
 };
 
+const buildToolGuidanceLines = (config: AgentPromptConfig) => {
+  return [
+    "Tool guidance:",
+    `- crm.getNextAppointment: ${config.toolGuidance.getNextAppointment}`,
+    `- crm.getOpenInvoices: ${config.toolGuidance.getOpenInvoices}`,
+    `- crm.rescheduleAppointment: ${config.toolGuidance.rescheduleAppointment}`,
+    `- agent.escalate: ${config.toolGuidance.escalate}`,
+  ];
+};
+
 const buildPrompt = (input: AgentModelInput, config: AgentPromptConfig) => {
   const lines = [
-    `You are a pest control support agent for ${config.companyName}.`,
+    config.personaSummary,
+    `Company: ${config.companyName}.`,
     `Tone: ${config.tone}.`,
     `Use this greeting only for the first turn when the caller just says hello: ${config.greeting}`,
     "Return JSON only, no prose.",
     "Choose one tool call or a final response.",
-    "Tools: crm.getNextAppointment, crm.getOpenInvoices, agent.escalate.",
-    "Never answer questions outside pest control appointments, billing, or service.",
-    `If out of scope, respond politely. Guidance: ${config.offTopicMessage}`,
+    ...buildToolGuidanceLines(config),
+    `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
     "If the request is vague, ask how you can help without calling tools.",
     "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
   ];
@@ -90,7 +100,7 @@ export const createWorkersAiAdapter = (
       const prompt = buildPrompt(input, config);
       const response = await ai.run(model as keyof AiModels, {
         messages: [
-          { role: "system", content: `You are ${config.companyName}.` },
+          { role: "system", content: config.personaSummary },
           { role: "user", content: prompt },
         ],
       });
@@ -123,13 +133,15 @@ export const createWorkersAiAdapter = (
       }
 
       const promptLines = [
-        `You are a pest control support agent for ${config.companyName}.`,
+        config.personaSummary,
+        `Company: ${config.companyName}.`,
         `Tone: ${config.tone}.`,
         `Use this greeting only for the first turn when the caller just says hello: ${config.greeting}`,
         "Respond in 1-2 short sentences.",
         "Use the tool result to answer the customer.",
         "Do not mention internal tool names.",
-        `If out of scope, respond politely. Guidance: ${config.offTopicMessage}`,
+        ...buildToolGuidanceLines(config),
+        `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
         "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
       ];
 
@@ -149,7 +161,7 @@ export const createWorkersAiAdapter = (
 
       const response = await ai.run(model as keyof AiModels, {
         messages: [
-          { role: "system", content: "You are a helpful assistant." },
+          { role: "system", content: config.personaSummary },
           { role: "user", content: prompt },
         ],
       });

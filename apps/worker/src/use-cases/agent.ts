@@ -1,10 +1,6 @@
-import {
-  type ServiceAppointment,
-  TicketEventType,
-  normalizePhoneE164,
-} from "@pestcall/core";
+import { type ServiceAppointment, normalizePhoneE164 } from "@pestcall/core";
 import type { Dependencies } from "../context";
-import type { ToolResult } from "../models/types";
+import type { ModelAdapter, ToolResult } from "../models/types";
 import type { AgentMessageInput, AgentMessageOutput } from "../schemas/agent";
 import { getNextAppointment, rescheduleAppointment } from "./appointments";
 import { createTicketUseCase } from "./tickets";
@@ -86,56 +82,6 @@ const isAffirmative = (text: string) => {
     return true;
   }
   return tokens.has(trimmed.replace(/[!.?]/g, ""));
-};
-
-const isOffTopic = (text: string) => {
-  const trimmed = text.trim().toLowerCase();
-  if (!trimmed || trimmed.length < 3) {
-    return false;
-  }
-  const softIntents = ["hi", "hello", "hey", "thanks", "thank you", "help"];
-  if (softIntents.some((token) => trimmed === token)) {
-    return false;
-  }
-  const keywords = [
-    "pest",
-    "bug",
-    "bugs",
-    "roach",
-    "rodent",
-    "mouse",
-    "mice",
-    "termite",
-    "ant",
-    "mosquito",
-    "appointment",
-    "schedule",
-    "reschedule",
-    "billing",
-    "invoice",
-    "balance",
-    "owe",
-    "payment",
-    "service",
-    "treatment",
-  ];
-  return !keywords.some((keyword) => trimmed.includes(keyword));
-};
-
-const buildOffTopicPrompt = (message: string) => {
-  const suffix = "What can I help you with today?";
-  if (message.includes("?")) {
-    return message;
-  }
-  return `${message} ${suffix}`;
-};
-
-const buildOffTopicEscalation = (message: string) => {
-  const suffix = "Would you like me to connect you with a specialist?";
-  if (message.includes("?")) {
-    return message;
-  }
-  return `${message} ${suffix}`;
 };
 
 type ToolCall = {
@@ -228,7 +174,7 @@ const buildCustomerContext = (customer: {
 });
 
 const generateReply = async (
-  deps: Dependencies,
+  model: ModelAdapter,
   input: AgentMessageInput,
   customer: {
     id: string;
@@ -241,8 +187,8 @@ const generateReply = async (
   context: string,
   modelCalls: ModelCall[],
 ) => {
-  const responseCall = await recordModelCall(deps.model, "respond", () =>
-    deps.model.respond({
+  const responseCall = await recordModelCall(model, "respond", () =>
+    model.respond({
       text: input.text,
       customer: buildCustomerContext(customer),
       context,
@@ -271,6 +217,8 @@ export const handleAgentMessage = async (
   const phoneE164 = normalizePhoneE164(input.phoneNumber);
   const tools: ToolCall[] = [];
   const modelCalls: ModelCall[] = [];
+  const agentConfig = await deps.agentConfig.get(deps.agentConfigDefaults);
+  const model = deps.modelFactory(agentConfig);
 
   let callSessionId = input.callSessionId;
   let recentContext = "";
@@ -417,7 +365,7 @@ export const handleAgentMessage = async (
   }
 
   if (!input.text.trim()) {
-    const replyText = deps.agentConfig.greeting;
+    const replyText = agentConfig.greeting;
     await deps.calls.addTurn({
       id: crypto.randomUUID(),
       callSessionId,
@@ -557,82 +505,8 @@ export const handleAgentMessage = async (
     };
   }
 
-  if (isOffTopic(input.text)) {
-    if (lastAgentIntent !== "off_topic_prompt") {
-      const replyText = buildOffTopicPrompt(deps.agentConfig.offTopicMessage);
-
-      await deps.calls.addTurn({
-        id: crypto.randomUUID(),
-        callSessionId,
-        ts: new Date().toISOString(),
-        speaker: "agent",
-        text: replyText,
-        meta: {
-          intent: "off_topic_prompt",
-          tools,
-          modelCalls,
-          customerId: customer.id,
-          contextUsed: Boolean(recentContext),
-          contextTurns,
-        },
-      });
-
-      return {
-        callSessionId,
-        replyText,
-        actions,
-      };
-    }
-
-    const ticket = await createTicketUseCase(deps.tickets, {
-      subject: "Off-topic request",
-      description: `Caller asked: ${input.text}`,
-      category: "general",
-      source: "agent",
-      phoneE164,
-    });
-
-    await deps.tickets.addEvent({
-      ticketId: ticket.id,
-      type: TicketEventType.FollowUpRequired,
-      payload: {
-        reason: "off_topic",
-      },
-      timestamp: new Date().toISOString(),
-    });
-
-    actions.push("created_ticket");
-    actions.push("follow_up_required");
-
-    const replyText = buildOffTopicEscalation(deps.agentConfig.offTopicMessage);
-
-    await deps.calls.addTurn({
-      id: crypto.randomUUID(),
-      callSessionId,
-      ts: new Date().toISOString(),
-      speaker: "agent",
-      text: replyText,
-      meta: {
-        intent: "off_topic",
-        tools,
-        modelCalls,
-        ticketId: ticket.id,
-        customerId: customer.id,
-        contextUsed: Boolean(recentContext),
-        contextTurns,
-      },
-    });
-
-    return {
-      callSessionId,
-      replyText,
-      actions,
-      ticketId: ticket.id,
-    };
-  }
-
-  const modelDecision = await recordModelCall(deps.model, "decide", () =>
-    deps.model.generate({
+  const modelDecision = await recordModelCall(model, "decide", () =>
+    model.generate({
       text: input.text,
       customer: buildCustomerContext(customer),
       context: recentContext,
@@ -695,7 +569,7 @@ export const handleAgentMessage = async (
       actions.push("created_ticket");
 
       const replyText = await generateReply(
-        deps,
+        model,
         input,
         customer,
         {
@@ -743,7 +617,7 @@ export const handleAgentMessage = async (
       const slot = slots[0];
       if (slot) {
         const replyText = await generateReply(
-          deps,
+          model,
           input,
           customer,
           {
@@ -781,7 +655,7 @@ export const handleAgentMessage = async (
     }
 
     const replyText = await generateReply(
-      deps,
+      model,
       input,
       customer,
       {
@@ -863,7 +737,7 @@ export const handleAgentMessage = async (
     );
 
     const replyText = await generateReply(
-      deps,
+      model,
       input,
       customer,
       {
@@ -929,7 +803,7 @@ export const handleAgentMessage = async (
     actions.push("created_ticket");
 
     const replyText = await generateReply(
-      deps,
+      model,
       input,
       customer,
       {

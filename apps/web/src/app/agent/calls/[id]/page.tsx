@@ -3,6 +3,8 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
+import type { CallTurn } from "@pestcall/core";
+
 import { Badge, Card } from "../../../../components/ui";
 import { rpcClient } from "../../../../lib/orpc";
 
@@ -61,7 +63,7 @@ export default function CallDetailPage({
         <Card className="flex flex-col gap-4 animate-rise">
           <h2 className="text-lg font-semibold text-ink">Transcript</h2>
           <div className="scroll-area max-h-[60vh] space-y-3 overflow-y-auto pr-1">
-            {(callQuery.data?.turns ?? []).map((turn) => {
+            {(callQuery.data?.turns ?? []).map((turn: CallTurn) => {
               const meta = turn.meta as {
                 tools?: unknown[];
                 modelCalls?: unknown[];

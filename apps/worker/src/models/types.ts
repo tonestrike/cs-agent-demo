@@ -44,6 +44,11 @@ export const rescheduleResultSchema = z.object({
   timeWindow: z.string(),
 });
 
+export const availableSlotResultSchema = z.object({
+  date: z.string(),
+  timeWindow: z.string(),
+});
+
 export const escalateResultSchema = z.object({
   escalated: z.literal(true),
 });
@@ -53,6 +58,10 @@ export const toolResultSchema = z.discriminatedUnion("toolName", [
   z.object({
     toolName: z.literal("crm.getNextAppointment"),
     result: appointmentResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("crm.getAvailableSlots"),
+    result: availableSlotResultSchema,
   }),
   z.object({
     toolName: z.literal("crm.getOpenInvoices"),

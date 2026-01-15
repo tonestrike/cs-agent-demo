@@ -1,8 +1,13 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import type {
+  AgentPromptConfigRecord,
+  ServiceAppointment,
+  Ticket,
+} from "@pestcall/core";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { CallSession } from "@pestcall/core";
 
@@ -25,6 +30,15 @@ const formatDateTime = (iso: string) =>
 export default function AgentDashboardPage() {
   const [selectedCall, setSelectedCall] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [configDraft, setConfigDraft] =
+    useState<AgentPromptConfigRecord | null>(null);
+  const [saved, setSaved] = useState(false);
+  const queryClient = useQueryClient();
+  const modelOptions = [
+    "@cf/meta/llama-3.1-8b-instruct",
+    "@cf/meta/llama-3.1-70b-instruct",
+    "@cf/mistral/mistral-7b-instruct-v0.2",
+  ];
 
   const callsQuery = useQuery({
     queryKey: ["calls"],
@@ -40,6 +54,56 @@ export default function AgentDashboardPage() {
     queryKey: ["appointments"],
     queryFn: () => rpcClient.appointments.list({ limit: 10 }),
   });
+
+  const agentConfigQuery = useQuery({
+    queryKey: ["agent-config"],
+    queryFn: () => rpcClient.agentConfig.get(),
+  });
+
+  useEffect(() => {
+    if (!configDraft && agentConfigQuery.data) {
+      setConfigDraft(agentConfigQuery.data);
+    }
+  }, [agentConfigQuery.data, configDraft]);
+
+  const updateConfig = useMutation({
+    mutationFn: (input: AgentPromptConfigRecord) => {
+      const { updatedAt, ...payload } = input;
+      return rpcClient.agentConfig.update(payload);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["agent-config"], data);
+      setConfigDraft(data);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    },
+  });
+
+  const handleConfigChange = (
+    field: keyof AgentPromptConfigRecord,
+    value: string,
+  ) => {
+    setConfigDraft((prev: AgentPromptConfigRecord | null) =>
+      prev ? { ...prev, [field]: value } : prev,
+    );
+  };
+
+  const handleToolGuidanceChange = (
+    field: keyof AgentPromptConfigRecord["toolGuidance"],
+    value: string,
+  ) => {
+    setConfigDraft((prev: AgentPromptConfigRecord | null) =>
+      prev
+        ? {
+            ...prev,
+            toolGuidance: {
+              ...prev.toolGuidance,
+              [field]: value,
+            },
+          }
+        : prev,
+    );
+  };
 
   const groupedCalls = useMemo(() => {
     const map = new Map<
@@ -182,7 +246,7 @@ export default function AgentDashboardPage() {
                 </Button>
               </div>
               <div className="space-y-3">
-                {(ticketsQuery.data?.items ?? []).map((ticket) => (
+                {(ticketsQuery.data?.items ?? []).map((ticket: Ticket) => (
                   <Link
                     key={ticket.id}
                     href={`/agent/tickets/${ticket.id}`}
@@ -218,33 +282,187 @@ export default function AgentDashboardPage() {
                 </Button>
               </div>
               <div className="space-y-3">
-                {(appointmentsQuery.data?.items ?? []).map((appointment) => (
-                  <div
-                    key={appointment.id}
-                    className="rounded-2xl border border-ink/10 bg-white/70 p-4"
-                  >
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-ink">
-                        {maskPhone(appointment.phoneE164)}
+                {(appointmentsQuery.data?.items ?? []).map(
+                  (appointment: ServiceAppointment) => (
+                    <div
+                      key={appointment.id}
+                      className="rounded-2xl border border-ink/10 bg-white/70 p-4"
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-ink">
+                          {maskPhone(appointment.phoneE164)}
+                        </p>
+                        <span className="text-xs uppercase text-ink/50">
+                          {appointment.status}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-xs text-ink/60">
+                        {appointment.date} • {appointment.timeWindow}
                       </p>
-                      <span className="text-xs uppercase text-ink/50">
-                        {appointment.status}
-                      </span>
+                      {appointment.rescheduledFromId ? (
+                        <p className="mt-2 text-xs text-ink/50">
+                          Rescheduled from {appointment.rescheduledFromId}
+                        </p>
+                      ) : null}
                     </div>
-                    <p className="mt-2 text-xs text-ink/60">
-                      {appointment.date} • {appointment.timeWindow}
-                    </p>
-                    {appointment.rescheduledFromId ? (
-                      <p className="mt-2 text-xs text-ink/50">
-                        Rescheduled from {appointment.rescheduledFromId}
-                      </p>
-                    ) : null}
-                  </div>
-                ))}
+                  ),
+                )}
                 {appointmentsQuery.isLoading && (
                   <p className="text-sm text-ink/60">Loading appointments...</p>
                 )}
               </div>
+            </Card>
+
+            <Card className="flex flex-col gap-5 animate-rise">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold">Prompt Studio</h2>
+                  <p className="text-xs uppercase tracking-wide text-ink/50">
+                    Live edits, no deploys
+                  </p>
+                </div>
+                <Button
+                  className="bg-ink hover:bg-slate"
+                  disabled={!configDraft || updateConfig.isPending}
+                  onClick={() => {
+                    if (configDraft) {
+                      updateConfig.mutate(configDraft);
+                    }
+                  }}
+                >
+                  {updateConfig.isPending ? "Saving..." : "Save"}
+                </Button>
+              </div>
+              {saved ? (
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">
+                  Saved
+                </p>
+              ) : null}
+              {configDraft ? (
+                <div className="space-y-4 text-sm">
+                  <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                    Tone
+                    <select
+                      className="rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                      value={configDraft.tone}
+                      onChange={(event) =>
+                        handleConfigChange("tone", event.target.value)
+                      }
+                    >
+                      <option value="warm">Warm</option>
+                      <option value="neutral">Neutral</option>
+                      <option value="direct">Direct</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                    Company Name
+                    <input
+                      className="rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                      value={configDraft.companyName}
+                      onChange={(event) =>
+                        handleConfigChange("companyName", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                    Greeting
+                    <textarea
+                      className="min-h-[80px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                      value={configDraft.greeting}
+                      onChange={(event) =>
+                        handleConfigChange("greeting", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                    Scope Message
+                    <textarea
+                      className="min-h-[80px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                      value={configDraft.scopeMessage}
+                      onChange={(event) =>
+                        handleConfigChange("scopeMessage", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                    Persona Summary
+                    <textarea
+                      className="min-h-[120px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                      value={configDraft.personaSummary}
+                      onChange={(event) =>
+                        handleConfigChange("personaSummary", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                    Tool Guidance: Next Appointment
+                    <textarea
+                      className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                      value={configDraft.toolGuidance.getNextAppointment}
+                      onChange={(event) =>
+                        handleToolGuidanceChange(
+                          "getNextAppointment",
+                          event.target.value,
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                    Tool Guidance: Open Invoices
+                    <textarea
+                      className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                      value={configDraft.toolGuidance.getOpenInvoices}
+                      onChange={(event) =>
+                        handleToolGuidanceChange(
+                          "getOpenInvoices",
+                          event.target.value,
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                    Tool Guidance: Reschedule
+                    <textarea
+                      className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                      value={configDraft.toolGuidance.rescheduleAppointment}
+                      onChange={(event) =>
+                        handleToolGuidanceChange(
+                          "rescheduleAppointment",
+                          event.target.value,
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                    Tool Guidance: Escalation
+                    <textarea
+                      className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                      value={configDraft.toolGuidance.escalate}
+                      onChange={(event) =>
+                        handleToolGuidanceChange("escalate", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                    Model ID
+                    <select
+                      className="rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                      value={configDraft.modelId}
+                      onChange={(event) =>
+                        handleConfigChange("modelId", event.target.value)
+                      }
+                    >
+                      {modelOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ) : (
+                <p className="text-sm text-ink/60">Loading prompt config...</p>
+              )}
             </Card>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import type { AgentPromptConfig } from "../agents/config";
+import type { AgentPromptConfig } from "@pestcall/core";
 import type {
   AgentModelInput,
   AgentResponseInput,
@@ -76,7 +76,7 @@ export const createMockModelAdapter = (
           return "I have created a ticket for a specialist to follow up shortly.";
         default:
           return (
-            config?.offTopicMessage ??
+            config?.scopeMessage ??
             "I can help with pest control appointments, billing, or service questions."
           );
       }
