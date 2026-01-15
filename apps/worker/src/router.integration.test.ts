@@ -77,6 +77,10 @@ const callRpc = async <T>(
 
   expect(matched).toBe(true);
 
+  if (!response) {
+    throw new Error("Expected a response but got undefined");
+  }
+
   const data = (await response.json()) as RpcResponse<T>;
   return data.json;
 };
