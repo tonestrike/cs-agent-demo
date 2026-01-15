@@ -36,7 +36,10 @@ export const createMockModelAdapter = (): ModelAdapter => {
     name: "mock",
     modelId: "mock",
     async generate(input: AgentModelInput) {
-      const toolName = detectTool(input.text);
+      const combinedText = [input.context, input.text]
+        .filter(Boolean)
+        .join(" ");
+      const toolName = detectTool(combinedText);
       if (toolName === "agent.fallback") {
         return {
           type: "final",

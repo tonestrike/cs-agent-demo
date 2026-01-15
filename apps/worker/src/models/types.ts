@@ -78,6 +78,7 @@ export type AgentModelInput = {
     phoneE164: string;
     addressSummary: string;
   };
+  context?: string;
 };
 
 export type AgentResponseInput = {
@@ -88,6 +89,7 @@ export type AgentResponseInput = {
     phoneE164: string;
     addressSummary: string;
   };
+  context?: string;
 } & ToolResult;
 
 export type ModelAdapter = {

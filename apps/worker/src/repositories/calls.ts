@@ -109,5 +109,16 @@ export const createCallRepository = (db: D1Database) => {
         )
         .run();
     },
+    async getRecentTurns(input: { callSessionId: string; limit?: number }) {
+      const limit = input.limit ?? 6;
+      const result = await db
+        .prepare(
+          "SELECT * FROM call_turns WHERE call_session_id = ? ORDER BY ts DESC LIMIT ?",
+        )
+        .bind(input.callSessionId, limit)
+        .all<CallTurnRow>();
+
+      return (result.results ?? []).map(mapCallTurnRow).reverse();
+    },
   };
 };

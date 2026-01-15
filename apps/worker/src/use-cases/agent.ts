@@ -7,6 +7,49 @@ import { createTicketUseCase } from "./tickets";
 
 const zipRegex = /\b\d{5}\b/;
 
+const extractZip = (text: string) => text.match(zipRegex)?.[0] ?? null;
+
+const extractLastName = (displayName: string) => {
+  const parts = displayName.trim().split(/\s+/);
+  return parts.at(-1) ?? "";
+};
+
+const resolveCustomerMatch = (
+  matches: Array<{
+    id: string;
+    displayName: string;
+    phoneE164: string;
+    addressSummary: string;
+    zipCode?: string;
+  }>,
+  text: string,
+) => {
+  const zip = extractZip(text);
+  const lowered = text.toLowerCase();
+  const candidates = matches.filter((match) => {
+    const lastName = extractLastName(match.displayName).toLowerCase();
+    const hasLastName = lastName.length > 0 && lowered.includes(lastName);
+    const hasZip = match.zipCode ? zip === match.zipCode : false;
+    if (zip && match.zipCode) {
+      return hasLastName && hasZip;
+    }
+    return hasLastName;
+  });
+
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+
+  if (zip) {
+    const zipMatches = matches.filter((match) => match.zipCode === zip);
+    if (zipMatches.length === 1) {
+      return zipMatches[0];
+    }
+  }
+
+  return null;
+};
+
 const hasRescheduleRequest = (text: string) => {
   const lowered = text.toLowerCase();
   return lowered.includes("reschedule") || lowered.includes("change");
@@ -117,12 +160,14 @@ const generateReply = async (
   },
   toolResult: ToolResult,
   fallbackText: string,
+  context: string,
   modelCalls: ModelCall[],
 ) => {
   const responseCall = await recordModelCall(deps.model, "respond", () =>
     deps.model.respond({
       text: input.text,
       customer: buildCustomerContext(customer),
+      context,
       ...toolResult,
     }),
   );
@@ -149,6 +194,7 @@ export const handleAgentMessage = async (
   const modelCalls: ModelCall[] = [];
 
   let callSessionId = input.callSessionId;
+  let recentContext = "";
   if (!callSessionId) {
     callSessionId = crypto.randomUUID();
     await deps.calls.createSession({
@@ -158,6 +204,14 @@ export const handleAgentMessage = async (
       status: "active",
       transport: "web",
     });
+  } else {
+    const recentTurns = await deps.calls.getRecentTurns({
+      callSessionId,
+      limit: 6,
+    });
+    recentContext = recentTurns
+      .map((turn) => `${turn.speaker}: ${turn.text}`)
+      .join("\n");
   }
 
   await deps.calls.addTurn({
@@ -208,7 +262,10 @@ export const handleAgentMessage = async (
     };
   }
 
-  if (matches.length > 1) {
+  const resolvedCustomer =
+    matches.length > 1 ? resolveCustomerMatch(matches, input.text) : null;
+
+  if (matches.length > 1 && !resolvedCustomer) {
     const replyText =
       "I found multiple accounts. Please confirm your last name and ZIP code.";
 
@@ -228,7 +285,7 @@ export const handleAgentMessage = async (
     };
   }
 
-  const customer = matches[0];
+  const customer = resolvedCustomer ?? matches[0];
   if (!customer) {
     const replyText =
       "I could not identify your account. Can you confirm your phone number?";
@@ -253,6 +310,7 @@ export const handleAgentMessage = async (
     deps.model.generate({
       text: input.text,
       customer: buildCustomerContext(customer),
+      context: recentContext,
     }),
   );
   modelCalls.push(modelDecision.record);
@@ -271,7 +329,7 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent: "final", tools, modelCalls },
+      meta: { intent: "final", tools, modelCalls, customerId: customer.id },
     });
 
     return {
@@ -316,6 +374,7 @@ export const handleAgentMessage = async (
           result: null,
         },
         "I couldn't find a scheduled appointment. I've opened a ticket for our team.",
+        recentContext,
         modelCalls,
       );
 
@@ -325,7 +384,13 @@ export const handleAgentMessage = async (
         ts: new Date().toISOString(),
         speaker: "agent",
         text: replyText,
-        meta: { intent, tools, modelCalls, ticketId: ticket.id },
+        meta: {
+          intent,
+          tools,
+          modelCalls,
+          ticketId: ticket.id,
+          customerId: customer.id,
+        },
       });
 
       return {
@@ -366,6 +431,7 @@ export const handleAgentMessage = async (
             },
           },
           `I moved your appointment. Your new window is ${slot.date} ${slot.timeWindow}.`,
+          recentContext,
           modelCalls,
         );
 
@@ -375,7 +441,7 @@ export const handleAgentMessage = async (
           ts: new Date().toISOString(),
           speaker: "agent",
           text: replyText,
-          meta: { intent, tools, modelCalls },
+          meta: { intent, tools, modelCalls, customerId: customer.id },
         });
 
         return {
@@ -399,6 +465,7 @@ export const handleAgentMessage = async (
         },
       },
       `Your next appointment is ${appointment.date} ${appointment.timeWindow} at ${appointment.addressSummary}.`,
+      recentContext,
       modelCalls,
     );
 
@@ -408,7 +475,7 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent, tools, modelCalls },
+      meta: { intent, tools, modelCalls, customerId: customer.id },
     });
 
     return {
@@ -430,7 +497,7 @@ export const handleAgentMessage = async (
         ts: new Date().toISOString(),
         speaker: "agent",
         text: replyText,
-        meta: { intent, tools, modelCalls },
+        meta: { intent, tools, modelCalls, customerId: customer.id },
       });
 
       return {
@@ -467,6 +534,7 @@ export const handleAgentMessage = async (
       balanceCents === 0
         ? "You have no outstanding balance."
         : `Your current balance is $${(balanceCents / 100).toFixed(2)}.`,
+      recentContext,
       modelCalls,
     );
 
@@ -489,7 +557,7 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent, tools, modelCalls, ticketId },
+      meta: { intent, tools, modelCalls, ticketId, customerId: customer.id },
     });
 
     return {
@@ -519,6 +587,7 @@ export const handleAgentMessage = async (
         result: { escalated: true },
       },
       "I have created a ticket for a specialist to follow up shortly.",
+      recentContext,
       modelCalls,
     );
 
@@ -528,7 +597,13 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent, tools, modelCalls, ticketId: ticket.id },
+      meta: {
+        intent,
+        tools,
+        modelCalls,
+        ticketId: ticket.id,
+        customerId: customer.id,
+      },
     });
 
     return {
@@ -556,7 +631,13 @@ export const handleAgentMessage = async (
     ts: new Date().toISOString(),
     speaker: "agent",
     text: replyText,
-    meta: { intent: "fallback", tools, modelCalls, ticketId: ticket.id },
+    meta: {
+      intent: "fallback",
+      tools,
+      modelCalls,
+      ticketId: ticket.id,
+      customerId: customer.id,
+    },
   });
 
   return {

@@ -1,0 +1,29 @@
+/* stylelint-disable at-rule-no-unknown */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+/* stylelint-enable at-rule-no-unknown */
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-sand text-ink font-body;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(circle at 10% 20%, rgba(245, 165, 36, 0.2), transparent 45%),
+    radial-gradient(circle at 80% 0%, rgba(47, 93, 80, 0.18), transparent 40%),
+    linear-gradient(135deg, rgba(12, 27, 31, 0.05), rgba(201, 106, 75, 0.08));
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(12, 27, 31, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.grid-dots {
+  background-image: radial-gradient(rgba(12, 27, 31, 0.08) 1px, transparent 0);
+  background-size: 18px 18px;
+}
