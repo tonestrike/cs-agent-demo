@@ -4,6 +4,10 @@
   "type": "module",
   "dependencies": {
     "@orpc/server": "^1.13.4",
+    "@pestcall/core": "workspace:*",
     "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250115.0"
   }
 }

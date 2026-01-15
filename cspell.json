@@ -1,0 +1,6 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "dictionaries": ["typescript", "node", "npm", "softwareTerms", "misc"],
+  "words": []
+}
