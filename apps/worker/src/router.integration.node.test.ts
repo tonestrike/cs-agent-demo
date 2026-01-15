@@ -83,6 +83,7 @@ async function createTestEnv(): Promise<Platform> {
     persist: false,
     remoteBindings: false,
   });
+  platform.env.AGENT_MODEL = "mock";
   await applyMigrations(platform.env.DB);
   return platform;
 }

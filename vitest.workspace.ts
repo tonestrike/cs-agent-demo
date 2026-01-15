@@ -1,8 +1,1 @@
-import { defineConfig } from "vitest/config";
-
-export default defineConfig({
-  test: {
-    environment: "node",
-    include: ["packages/**/*.test.ts", "apps/**/*.node.test.ts"],
-  },
-});
+export default ["vitest.workers.config.ts", "vitest.node.config.ts"];
