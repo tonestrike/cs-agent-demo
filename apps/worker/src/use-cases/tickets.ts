@@ -2,6 +2,7 @@ import {
   TicketEventType,
   applyStatusTransition,
   createTicket,
+  type TicketEventTypeValue,
 } from "@pestcall/core";
 
 import type { createTicketRepository } from "../repositories";
@@ -69,7 +70,7 @@ export const addTicketEvent = async (
   repo: ReturnType<typeof createTicketRepository>,
   input: {
     ticketId: string;
-    type: import("@pestcall/core").TicketEventTypeValue;
+    type: TicketEventTypeValue;
     payload: Record<string, unknown>;
   },
   nowIso = new Date().toISOString(),

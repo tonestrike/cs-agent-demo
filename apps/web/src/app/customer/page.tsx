@@ -12,7 +12,12 @@ type ChatMessage = {
 };
 
 export default function CustomerPage() {
-  const [phoneNumber, setPhoneNumber] = useState("+14155552671");
+  const phoneOptions = [
+    { label: "Alex Rivera", value: "+14155552671" },
+    { label: "Morgan Lee", value: "+14155550987" },
+    { label: "Pat Quinn", value: "+14155551234" },
+  ];
+  const [phoneNumber, setPhoneNumber] = useState(phoneOptions[0]?.value ?? "");
   const [input, setInput] = useState("");
   const [callSessionId, setCallSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -44,6 +49,23 @@ export default function CustomerPage() {
     clientRef.current = client;
     sessionRef.current = sessionId;
     return client;
+  };
+
+  const resetSession = (nextPhone?: string) => {
+    const selected = nextPhone ?? phoneNumber;
+    setPhoneNumber(selected);
+    setCallSessionId(null);
+    setMessages([
+      {
+        id: "intro",
+        role: "agent",
+        text: "Hi! This is PestCall. How can I help today?",
+      },
+    ]);
+    setStatus("New session");
+    clientRef.current?.close();
+    clientRef.current = null;
+    sessionRef.current = null;
   };
 
   const handleSend = () => {
@@ -212,12 +234,23 @@ export default function CustomerPage() {
             >
               Phone Number
             </label>
-            <input
-              id="customer-phone"
-              className="rounded-2xl border border-ink/15 bg-white/80 px-4 py-2 text-sm"
-              value={phoneNumber}
-              onChange={(event) => setPhoneNumber(event.target.value)}
-            />
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <select
+                id="customer-phone"
+                className="flex-1 rounded-2xl border border-ink/15 bg-white/80 px-4 py-2 text-sm"
+                value={phoneNumber}
+                onChange={(event) => resetSession(event.target.value)}
+              >
+                {phoneOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label} ({option.value})
+                  </option>
+                ))}
+              </select>
+              <Button type="button" onClick={() => resetSession()}>
+                New session
+              </Button>
+            </div>
           </div>
 
           <div className="flex flex-col gap-3">
