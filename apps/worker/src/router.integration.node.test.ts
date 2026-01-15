@@ -79,7 +79,7 @@ const callRpc = async <T>(
  */
 async function createTestEnv(): Promise<Platform> {
   const platform = await getPlatformProxy<Env>({
-    configPath: "apps/worker/wrangler.toml",
+    configPath: "apps/worker/wrangler.test.toml",
     persist: false,
     remoteBindings: false,
   });
