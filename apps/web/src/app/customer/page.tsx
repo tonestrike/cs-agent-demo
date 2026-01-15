@@ -23,6 +23,7 @@ export default function CustomerPage() {
     },
   ]);
   const [status, setStatus] = useState("New session");
+  const [copied, setCopied] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const clientRef = useRef<ReturnType<typeof createAgentClient> | null>(null);
   const sessionRef = useRef<string | null>(null);
@@ -133,6 +134,17 @@ export default function CustomerPage() {
     return status;
   }, [status]);
 
+  const copyConversation = async () => {
+    const payload = {
+      callSessionId,
+      phoneNumber,
+      messages,
+    };
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   return (
     <main className="grid-dots min-h-screen px-6 py-10">
       <div className="mx-auto grid w-full max-w-5xl gap-8 lg:grid-cols-[1.2fr_0.8fr]">
@@ -144,9 +156,18 @@ export default function CustomerPage() {
                 Talk to PestCall
               </h1>
             </div>
-            <span className="text-xs uppercase tracking-wide text-ink/60">
-              {statusLabel}
-            </span>
+            <div className="flex flex-col items-end gap-2">
+              <span className="text-xs uppercase tracking-wide text-ink/60">
+                {statusLabel}
+              </span>
+              <button
+                type="button"
+                onClick={copyConversation}
+                className="text-xs font-semibold uppercase tracking-wide text-ink/50 hover:text-ink"
+              >
+                {copied ? "Copied" : "Copy JSON"}
+              </button>
+            </div>
           </div>
 
           <div

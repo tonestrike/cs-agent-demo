@@ -62,6 +62,7 @@ const formatDateTime = (iso: string) =>
 
 export default function AgentDashboardPage() {
   const [selectedCall, setSelectedCall] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const callsQuery = useQuery({
     queryKey: ["calls"],
@@ -126,6 +127,17 @@ export default function AgentDashboardPage() {
         : 0,
     }));
   }, [callDetail]);
+
+  const copyCallJson = async () => {
+    if (!callDetailQuery.data) {
+      return;
+    }
+    await navigator.clipboard.writeText(
+      JSON.stringify(callDetailQuery.data, null, 2),
+    );
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
 
   return (
     <main className="grid-dots min-h-screen px-6 py-10">
@@ -244,7 +256,18 @@ export default function AgentDashboardPage() {
                 {selectedCall ? `Session ${selectedCall}` : "Select a call"}
               </p>
             </div>
-            <Badge className="bg-white/80">Context + Tools</Badge>
+            <div className="flex items-center gap-3">
+              <Badge className="bg-white/80">Context + Tools</Badge>
+              {selectedCall ? (
+                <button
+                  type="button"
+                  onClick={copyCallJson}
+                  className="text-xs font-semibold uppercase tracking-wide text-ink/50 hover:text-ink"
+                >
+                  {copied ? "Copied" : "Copy JSON"}
+                </button>
+              ) : null}
+            </div>
           </div>
           {selectedCall ? (
             <div className="space-y-3">
@@ -262,6 +285,26 @@ export default function AgentDashboardPage() {
                     </span>
                   </div>
                   <p className="mt-2 text-sm text-ink">{turn.text}</p>
+                  {turn.meta.tools ? (
+                    <div className="mt-3 rounded-2xl border border-ink/10 bg-sand/60 p-3 text-xs text-ink/70">
+                      <p className="font-semibold uppercase tracking-wide text-ink/60">
+                        Tool Calls
+                      </p>
+                      <pre className="mt-2 whitespace-pre-wrap">
+                        {JSON.stringify(turn.meta.tools, null, 2)}
+                      </pre>
+                    </div>
+                  ) : null}
+                  {turn.meta.modelCalls ? (
+                    <div className="mt-3 rounded-2xl border border-ink/10 bg-white/80 p-3 text-xs text-ink/70">
+                      <p className="font-semibold uppercase tracking-wide text-ink/60">
+                        Model Calls
+                      </p>
+                      <pre className="mt-2 whitespace-pre-wrap">
+                        {JSON.stringify(turn.meta.modelCalls, null, 2)}
+                      </pre>
+                    </div>
+                  ) : null}
                 </div>
               ))}
               {callDetailQuery.isLoading && (
