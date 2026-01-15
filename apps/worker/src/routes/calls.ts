@@ -2,11 +2,11 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 
 import { authedProcedure } from "../middleware/auth";
-import { getCallDetail, listCalls } from "../usecases/calls";
+import { getCallDetail, listCalls } from "../use-cases/calls";
 
 const listCallsInputSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
-  cursor: z.string().optional()
+  cursor: z.string().optional(),
 });
 
 const callSessionOutputSchema = z.object({
@@ -17,7 +17,7 @@ const callSessionOutputSchema = z.object({
   customerCacheId: z.string().nullable(),
   status: z.string(),
   transport: z.string(),
-  summary: z.string().nullable()
+  summary: z.string().nullable(),
 });
 
 const callTurnOutputSchema = z.object({
@@ -26,12 +26,12 @@ const callTurnOutputSchema = z.object({
   ts: z.string(),
   speaker: z.string(),
   text: z.string(),
-  meta: z.record(z.unknown())
+  meta: z.record(z.unknown()),
 });
 
 const callDetailOutputSchema = z.object({
   session: callSessionOutputSchema,
-  turns: z.array(callTurnOutputSchema)
+  turns: z.array(callTurnOutputSchema),
 });
 
 export const callProcedures = {
@@ -40,8 +40,8 @@ export const callProcedures = {
     .output(
       z.object({
         items: z.array(callSessionOutputSchema),
-        nextCursor: z.string().nullable()
-      })
+        nextCursor: z.string().nullable(),
+      }),
     )
     .handler(async ({ input, context }) => {
       return listCalls(context.deps.calls, input);
@@ -50,11 +50,14 @@ export const callProcedures = {
     .input(z.object({ callSessionId: z.string().min(1) }))
     .output(callDetailOutputSchema)
     .handler(async ({ input, context }) => {
-      const detail = await getCallDetail(context.deps.calls, input.callSessionId);
+      const detail = await getCallDetail(
+        context.deps.calls,
+        input.callSessionId,
+      );
       if (!detail) {
         throw new ORPCError("NOT_FOUND", { message: "Call session not found" });
       }
 
       return detail;
-    })
+    }),
 };

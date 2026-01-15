@@ -11,8 +11,10 @@
     "format:check": "biome format . --check",
     "fix": "biome check . --write",
     "db:migrate:local": "wrangler d1 migrations apply pestcall_local --local --config apps/worker/wrangler.toml",
+    "db:seed:local": "wrangler d1 execute pestcall_local --local --config apps/worker/wrangler.toml --file apps/worker/seeds/20250201120000_seed.sql",
     "typecheck": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sync:rules": "npx rulesync generate"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

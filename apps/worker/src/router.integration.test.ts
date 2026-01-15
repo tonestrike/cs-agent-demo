@@ -150,3 +150,58 @@ describe("tickets RPC", () => {
     expect(updated.status).toBe("resolved");
   });
 });
+
+describe("crm RPC", () => {
+  it("returns mock customer data and appointment details", async () => {
+    const customers = await callRpc<
+      {
+        id: string;
+        displayName: string;
+        phoneE164: string;
+      }[]
+    >(platform, "crm/lookupCustomerByPhone", {
+      phoneE164: "+15551234567",
+    });
+
+    expect(customers).toHaveLength(1);
+    expect(customers[0]?.id).toBe("cust_001");
+
+    const appointment = await callRpc<{
+      id: string;
+      date: string;
+      timeWindow: string;
+    }>(platform, "crm/getNextAppointment", {
+      customerId: "cust_001",
+    });
+
+    expect(appointment?.id).toBe("appt_001");
+    expect(appointment?.date).toBe("2025-02-10");
+
+    const invoices = await callRpc<
+      {
+        id: string;
+        balanceCents: number;
+        status: string;
+      }[]
+    >(platform, "crm/getOpenInvoices", {
+      customerId: "cust_001",
+    });
+
+    expect(invoices).toHaveLength(1);
+    expect(invoices[0]?.balanceCents).toBe(12900);
+    expect(invoices[0]?.status).toBe("open");
+
+    const slots = await callRpc<
+      {
+        id: string;
+        date: string;
+        timeWindow: string;
+      }[]
+    >(platform, "crm/getAvailableSlots", {
+      customerId: "cust_001",
+      window: { from: "2025-02-13", to: "2025-02-20" },
+    });
+
+    expect(slots.length).toBeGreaterThan(0);
+  });
+});

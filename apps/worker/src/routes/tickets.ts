@@ -7,8 +7,8 @@ import {
   createTicketUseCase,
   getTicket,
   listTickets,
-  setTicketStatus
-} from "../usecases/tickets";
+  setTicketStatus,
+} from "../use-cases/tickets";
 
 const ticketStatusSchema = z.enum(["open", "in_progress", "resolved"]);
 const ticketPrioritySchema = z.enum(["low", "normal", "high", "urgent"]);
@@ -17,7 +17,7 @@ const ticketCategorySchema = z.enum([
   "billing",
   "service",
   "general",
-  "unknown"
+  "unknown",
 ]);
 const ticketSourceSchema = z.enum(["agent", "phone", "web", "internal"]);
 
@@ -34,19 +34,19 @@ const ticketOutputSchema = z.object({
   description: z.string(),
   assignee: z.string().optional(),
   source: ticketSourceSchema,
-  externalRef: z.string().optional()
+  externalRef: z.string().optional(),
 });
 
 const listTicketsInputSchema = z.object({
   status: ticketStatusSchema.optional(),
   q: z.string().optional(),
   limit: z.number().int().min(1).max(100).optional(),
-  cursor: z.string().optional()
+  cursor: z.string().optional(),
 });
 
 const listTicketsOutputSchema = z.object({
   items: z.array(ticketOutputSchema),
-  nextCursor: z.string().nullable()
+  nextCursor: z.string().nullable(),
 });
 
 const createTicketInputSchema = z.object({
@@ -58,22 +58,27 @@ const createTicketInputSchema = z.object({
   phoneE164: z.string().optional(),
   assignee: z.string().optional(),
   source: ticketSourceSchema.optional(),
-  externalRef: z.string().optional()
+  externalRef: z.string().optional(),
 });
 
 const ticketIdInputSchema = z.object({
-  ticketId: z.string().min(1)
+  ticketId: z.string().min(1),
 });
 
 const ticketEventInputSchema = z.object({
   ticketId: z.string().min(1),
-  type: z.enum(["created", "status_changed", "note_added", "assignment_changed"]),
-  payload: z.record(z.unknown())
+  type: z.enum([
+    "created",
+    "status_changed",
+    "note_added",
+    "assignment_changed",
+  ]),
+  payload: z.record(z.unknown()),
 });
 
 const ticketStatusUpdateSchema = z.object({
   ticketId: z.string().min(1),
-  status: ticketStatusSchema
+  status: ticketStatusSchema,
 });
 
 export const ticketProcedures = {
@@ -119,5 +124,5 @@ export const ticketProcedures = {
       }
 
       return result.ticket;
-    })
+    }),
 };

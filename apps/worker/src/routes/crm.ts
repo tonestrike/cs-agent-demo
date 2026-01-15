@@ -9,7 +9,7 @@ import {
   invoiceSchema,
   invoicesInputSchema,
   lookupCustomerInputSchema,
-  rescheduleInputSchema
+  rescheduleInputSchema,
 } from "@pestcall/core";
 
 import { authedProcedure } from "../middleware/auth";
@@ -19,8 +19,8 @@ import {
   getNextAppointment,
   getOpenInvoices,
   lookupCustomerByPhone,
-  rescheduleAppointment
-} from "../usecases/crm";
+  rescheduleAppointment,
+} from "../use-cases/crm";
 
 export const crmProcedures = {
   lookupCustomerByPhone: authedProcedure
@@ -53,12 +53,12 @@ export const crmProcedures = {
       const result = await rescheduleAppointment(
         context.deps.crm,
         input.appointmentId,
-        input.slotId
+        input.slotId,
       );
 
       if (!result.ok) {
         throw new ORPCError("BAD_REQUEST", {
-          message: "Unable to reschedule appointment"
+          message: "Unable to reschedule appointment",
         });
       }
 
@@ -68,6 +68,10 @@ export const crmProcedures = {
     .input(availableSlotsInputSchema)
     .output(availableSlotSchema.array())
     .handler(async ({ input, context }) => {
-      return getAvailableSlots(context.deps.crm, input.customerId, input.window);
-    })
+      return getAvailableSlots(
+        context.deps.crm,
+        input.customerId,
+        input.window,
+      );
+    }),
 };

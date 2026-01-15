@@ -1,0 +1,22 @@
+# Dependencies and build outputs
+node_modules/
+bun.lockb
+.dist/
+.next/
+.wrangler/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Environment and credentials
+.env
+.env.*
+credentials/
+
+# IDE and OS files
+.DS_Store
+.idea/
+.vscode/settings.json
+
+# Generated files
+identifier.sqlite
