@@ -25,6 +25,7 @@ export default function CustomerPage() {
   const [status, setStatus] = useState("New session");
   const [copied, setCopied] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScroll = useRef(true);
   const clientRef = useRef<ReturnType<typeof createAgentClient> | null>(null);
   const sessionRef = useRef<string | null>(null);
 
@@ -95,6 +96,11 @@ export default function CustomerPage() {
                 ),
               );
             }
+            requestAnimationFrame(() => {
+              if (shouldAutoScroll.current && listRef.current) {
+                listRef.current.scrollTop = listRef.current.scrollHeight;
+              }
+            });
           },
           onDone: (finalChunk) => {
             setStatus(`Session ${sessionId.slice(0, 8)}…`);
@@ -114,10 +120,12 @@ export default function CustomerPage() {
               }
             }
             requestAnimationFrame(() => {
-              listRef.current?.scrollTo({
-                top: listRef.current.scrollHeight,
-                behavior: "smooth",
-              });
+              if (shouldAutoScroll.current && listRef.current) {
+                listRef.current.scrollTo({
+                  top: listRef.current.scrollHeight,
+                  behavior: "smooth",
+                });
+              }
             });
           },
           onError: () => {
@@ -173,6 +181,12 @@ export default function CustomerPage() {
           <div
             ref={listRef}
             className="flex max-h-[420px] flex-col gap-4 overflow-y-auto rounded-2xl border border-ink/10 bg-white/70 p-4"
+            onScroll={(event) => {
+              const target = event.currentTarget;
+              const distanceFromBottom =
+                target.scrollHeight - target.scrollTop - target.clientHeight;
+              shouldAutoScroll.current = distanceFromBottom < 24;
+            }}
           >
             {messages.map((message) => (
               <div

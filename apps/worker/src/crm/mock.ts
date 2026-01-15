@@ -6,14 +6,50 @@ import type {
   Invoice,
 } from "@pestcall/core";
 
-import { appointments, availableSlots, customers, invoices } from "./fixtures";
+import {
+  appointments as appointmentFixtures,
+  availableSlots,
+  customers,
+  invoices,
+} from "./fixtures";
+
+let appointments = [...appointmentFixtures];
+
+const updateAppointment = (appointmentId: string, slotId: string) => {
+  const appointmentIndex = appointments.findIndex(
+    (appointment) => appointment.id === appointmentId,
+  );
+  if (appointmentIndex === -1) {
+    return null;
+  }
+  const appointment = appointments[appointmentIndex];
+  if (!appointment) {
+    return null;
+  }
+  const slot = availableSlots.find((entry) => entry.id === slotId);
+  if (!slot) {
+    return null;
+  }
+
+  const customer = findCustomerById(appointment.customerId);
+  const updated: Appointment = {
+    ...appointment,
+    date: slot.date,
+    timeWindow: slot.timeWindow,
+    addressSummary: customer?.addressSummary ?? appointment.addressSummary,
+  };
+
+  appointments = [
+    ...appointments.slice(0, appointmentIndex),
+    updated,
+    ...appointments.slice(appointmentIndex + 1),
+  ];
+
+  return updated;
+};
 
 const findCustomerById = (id: string): CustomerMatch | undefined => {
   return customers.find((customer) => customer.id === id);
-};
-
-const findAppointmentById = (id: string): Appointment | undefined => {
-  return appointments.find((appointment) => appointment.id === id);
 };
 
 export const mockCrmAdapter: CrmAdapter = {
@@ -39,21 +75,10 @@ export const mockCrmAdapter: CrmAdapter = {
     appointmentId: string,
     slotId: string,
   ): Promise<{ ok: boolean; appointment?: Appointment }> {
-    const appointment = findAppointmentById(appointmentId);
-    const slot = availableSlots.find((entry) => entry.id === slotId);
-
-    if (!appointment || !slot) {
+    const updated = updateAppointment(appointmentId, slotId);
+    if (!updated) {
       return { ok: false };
     }
-
-    const customer = findCustomerById(appointment.customerId);
-    const updated: Appointment = {
-      ...appointment,
-      date: slot.date,
-      timeWindow: slot.timeWindow,
-      addressSummary: customer?.addressSummary ?? appointment.addressSummary,
-    };
-
     return { ok: true, appointment: updated };
   },
   async getAvailableSlots(
