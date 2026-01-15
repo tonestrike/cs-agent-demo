@@ -6,3 +6,4 @@ bun.lockb
 .wrangler
 .vite
 coverage
+*.tsbuildinfo
