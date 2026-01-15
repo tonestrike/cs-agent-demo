@@ -18,19 +18,6 @@ type CallSession = {
   summary: string | null;
 };
 
-type CallTurn = {
-  id: string;
-  callSessionId: string;
-  ts: string;
-  speaker: string;
-  text: string;
-  meta: {
-    tools?: unknown[];
-    modelCalls?: unknown[];
-    [key: string]: unknown;
-  };
-};
-
 type Ticket = {
   id: string;
   createdAt: string;
@@ -81,16 +68,6 @@ export default function AgentDashboardPage() {
       }),
   });
 
-  const callDetailQuery = useQuery({
-    queryKey: ["call-detail", selectedCall],
-    queryFn: () =>
-      callRpc<{ session: CallSession; turns: CallTurn[] }>("calls/get", {
-        callSessionId: selectedCall,
-      }),
-    enabled: Boolean(selectedCall),
-  });
-
-  const callDetail = callDetailQuery.data?.turns ?? [];
   const groupedCalls = useMemo(() => {
     const map = new Map<
       string,
@@ -116,24 +93,12 @@ export default function AgentDashboardPage() {
       };
     });
   }, [callsQuery.data?.items]);
-  const callTrace = useMemo(() => {
-    return callDetail.map((turn) => ({
-      ...turn,
-      toolCount: Array.isArray(turn.meta.tools)
-        ? (turn.meta.tools as Array<unknown>).length
-        : 0,
-      modelCount: Array.isArray(turn.meta.modelCalls)
-        ? (turn.meta.modelCalls as Array<unknown>).length
-        : 0,
-    }));
-  }, [callDetail]);
-
   const copyCallJson = async () => {
-    if (!callDetailQuery.data) {
+    if (!selectedCall) {
       return;
     }
     await navigator.clipboard.writeText(
-      JSON.stringify(callDetailQuery.data, null, 2),
+      JSON.stringify({ callSessionId: selectedCall }, null, 2),
     );
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
@@ -270,46 +235,16 @@ export default function AgentDashboardPage() {
             </div>
           </div>
           {selectedCall ? (
-            <div className="space-y-3">
-              {callTrace.map((turn) => (
-                <div
-                  key={turn.id}
-                  className="rounded-2xl border border-ink/10 bg-white/80 p-4"
+            <div className="rounded-2xl border border-ink/10 bg-white/80 p-4 text-sm text-ink/70">
+              <p>
+                Use the full call page for the transcript and tool details.{" "}
+                <Link
+                  href={`/agent/calls/${selectedCall}`}
+                  className="font-semibold text-ink underline"
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs uppercase tracking-wide text-ink/60">
-                      {turn.speaker} • {formatDateTime(turn.ts)}
-                    </span>
-                    <span className="text-xs text-ink/50">
-                      {turn.toolCount} tools • {turn.modelCount} model calls
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm text-ink">{turn.text}</p>
-                  {turn.meta.tools ? (
-                    <div className="mt-3 rounded-2xl border border-ink/10 bg-sand/60 p-3 text-xs text-ink/70">
-                      <p className="font-semibold uppercase tracking-wide text-ink/60">
-                        Tool Calls
-                      </p>
-                      <pre className="mt-2 whitespace-pre-wrap">
-                        {JSON.stringify(turn.meta.tools, null, 2)}
-                      </pre>
-                    </div>
-                  ) : null}
-                  {turn.meta.modelCalls ? (
-                    <div className="mt-3 rounded-2xl border border-ink/10 bg-white/80 p-3 text-xs text-ink/70">
-                      <p className="font-semibold uppercase tracking-wide text-ink/60">
-                        Model Calls
-                      </p>
-                      <pre className="mt-2 whitespace-pre-wrap">
-                        {JSON.stringify(turn.meta.modelCalls, null, 2)}
-                      </pre>
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-              {callDetailQuery.isLoading && (
-                <p className="text-sm text-ink/60">Loading call trace...</p>
-              )}
+                  Open full call view →
+                </Link>
+              </p>
             </div>
           ) : (
             <p className="text-sm text-ink/60">
