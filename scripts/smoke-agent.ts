@@ -1,6 +1,8 @@
 import "dotenv/config";
 
-const endpoint = process.env.SMOKE_BASE_URL ?? "https://pestcall-worker.tonyvantur.workers.dev";
+const endpoint =
+  process.env.SMOKE_BASE_URL ??
+  "https://pestcall-worker.tonyvantur.workers.dev";
 const token = process.env.DEMO_AUTH_TOKEN ?? "";
 const phoneNumber = process.env.SMOKE_PHONE ?? "+14155552671";
 const text = process.env.SMOKE_TEXT ?? "When is my next appointment?";
