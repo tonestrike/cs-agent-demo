@@ -21,6 +21,12 @@ bun install
 cp .env.example .env
 ```
 
+Create web environment file (for API base URL + auth token):
+
+```sh
+cp apps/web/.env.example apps/web/.env.local
+```
+
 3. Run local D1 migrations:
 
 ```sh
@@ -41,10 +47,20 @@ Run the Worker with local bindings:
 
 ```sh
 cd apps/worker
+cp .dev.vars.example .dev.vars
 wrangler dev --local
 ```
 
 RPC endpoints are served under `/rpc`.
+
+## Local dev (Web)
+
+```sh
+cd apps/web
+bun dev
+```
+
+Set `NEXT_PUBLIC_API_BASE_URL` to your Worker URL (local or deployed).
 
 ## Deploy (Worker)
 
@@ -80,7 +96,7 @@ bun deploy:worker --seed
 ## Repo layout
 
 - `apps/worker` Cloudflare Worker API (oRPC)
-- `apps/web` Next.js UI (future)
+- `apps/web` Next.js UI (customer portal + agent dashboard)
 - `packages/core` shared domain logic and types
 - `docs/` project documentation
 
@@ -90,6 +106,8 @@ bun deploy:worker --seed
 - [CI/CD](docs/ci.md) - Continuous integration setup
 - [Styleguide](docs/styleguide.md) - Code style and patterns
 - [Documentation Styleguide](docs/docs-styleguide.md) - How to write docs
+- [MCP Setup](docs/mcp/README.md) - Model Context Protocol servers (Postman, Serena, Context7)
+- [Postman Setup](postman/README.md) - API testing with Postman collections and environments
 
 ## AI Coding Tools
 

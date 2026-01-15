@@ -24,6 +24,15 @@
       "command": "npx",
       "args": ["-y", "@upstash/context7-mcp"],
       "env": {}
+    },
+    "postman": {
+      "description": "Postman API management for CS-Agent collections and environments",
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@postman/postman-mcp-server", "--full", "--region", "us"],
+      "env": {
+        "POSTMAN_API_KEY": "${POSTMAN_API_KEY}"
+      }
     }
   }
 }

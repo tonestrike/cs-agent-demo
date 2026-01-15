@@ -78,6 +78,7 @@ export type AgentModelInput = {
     phoneE164: string;
     addressSummary: string;
   };
+  context?: string;
 };
 
 export type AgentResponseInput = {
@@ -88,9 +89,12 @@ export type AgentResponseInput = {
     phoneE164: string;
     addressSummary: string;
   };
+  context?: string;
 } & ToolResult;
 
 export type ModelAdapter = {
+  name: "mock" | "workers-ai";
+  modelId?: string;
   generate: (input: AgentModelInput) => Promise<AgentModelOutput>;
   respond: (input: AgentResponseInput) => Promise<string>;
 };

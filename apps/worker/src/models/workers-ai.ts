@@ -38,18 +38,27 @@ const responseToText = (response: unknown) => {
 };
 
 const buildPrompt = (input: AgentModelInput) => {
-  return [
+  const lines = [
     "You are a pest control support agent.",
     "Return JSON only, no prose.",
     "Choose one tool call or a final response.",
     "Tools: crm.getNextAppointment, crm.getOpenInvoices, agent.escalate.",
     "If you cannot answer, return a final message asking a clarifying question.",
+  ];
+
+  if (input.context) {
+    lines.push("Conversation so far:", input.context);
+  }
+
+  lines.push(
     `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
     `User: ${input.text}`,
     "JSON format:",
     '{"type":"tool_call","toolName":"crm.getNextAppointment","arguments":{"customerId":"cust_001"}}',
     '{"type":"final","text":"..."}',
-  ].join("\n");
+  );
+
+  return lines.join("\n");
 };
 
 export const createWorkersAiAdapter = (
@@ -61,6 +70,8 @@ export const createWorkersAiAdapter = (
   }
 
   return {
+    name: "workers-ai",
+    modelId: model,
     async generate(input: AgentModelInput) {
       if (!ai) {
         throw new AppError("Workers AI binding is not configured.", {
@@ -103,16 +114,25 @@ export const createWorkersAiAdapter = (
         });
       }
 
-      const prompt = [
+      const promptLines = [
         "You are a pest control support agent.",
         "Respond in 1-2 short sentences.",
         "Use the tool result to answer the customer.",
         "Do not mention internal tool names.",
+      ];
+
+      if (input.context) {
+        promptLines.push("Conversation so far:", input.context);
+      }
+
+      promptLines.push(
         `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
         `User: ${input.text}`,
         `Tool: ${input.toolName}`,
         `Tool Result: ${JSON.stringify(input.result)}`,
-      ].join("\n");
+      );
+
+      const prompt = promptLines.join("\n");
 
       const response = await ai.run(model as keyof AiModels, {
         messages: [

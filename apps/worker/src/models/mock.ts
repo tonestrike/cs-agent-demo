@@ -33,8 +33,13 @@ const detectTool = (text: string) => {
 
 export const createMockModelAdapter = (): ModelAdapter => {
   return {
+    name: "mock",
+    modelId: "mock",
     async generate(input: AgentModelInput) {
-      const toolName = detectTool(input.text);
+      const combinedText = [input.context, input.text]
+        .filter(Boolean)
+        .join(" ");
+      const toolName = detectTool(combinedText);
       if (toolName === "agent.fallback") {
         return {
           type: "final",
@@ -66,6 +71,8 @@ export const createMockModelAdapter = (): ModelAdapter => {
         }
         case "agent.escalate":
           return "I have created a ticket for a specialist to follow up shortly.";
+        default:
+          return "Thanks for the details. How else can I help?";
       }
     },
   };

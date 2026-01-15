@@ -9,6 +9,10 @@ export const customerMatchSchema = z.object({
   displayName: z.string(),
   phoneE164: phoneE164Schema,
   addressSummary: z.string(),
+  zipCode: z
+    .string()
+    .regex(/^\d{5}$/)
+    .optional(),
 });
 
 export type CustomerMatch = z.infer<typeof customerMatchSchema>;

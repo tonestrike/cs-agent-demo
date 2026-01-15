@@ -11,12 +11,28 @@ export const customers: CustomerMatch[] = [
     displayName: "Alex Rivera",
     phoneE164: "+14155552671",
     addressSummary: "742 Evergreen Terrace",
+    zipCode: "94107",
   },
   {
     id: "cust_002",
     displayName: "Morgan Lee",
     phoneE164: "+14155550987",
     addressSummary: "123 Harbor Drive",
+    zipCode: "98109",
+  },
+  {
+    id: "cust_003",
+    displayName: "Pat Quinn",
+    phoneE164: "+14155551234",
+    addressSummary: "88 Market Street",
+    zipCode: "60601",
+  },
+  {
+    id: "cust_004",
+    displayName: "Riley Hart",
+    phoneE164: "+14155551234",
+    addressSummary: "55 Pine Avenue",
+    zipCode: "60602",
   },
 ];
 
@@ -35,6 +51,20 @@ export const appointments: Appointment[] = [
     timeWindow: "14:00-16:00",
     addressSummary: "123 Harbor Drive",
   },
+  {
+    id: "appt_003",
+    customerId: "cust_003",
+    date: "2025-02-18",
+    timeWindow: "08:00-10:00",
+    addressSummary: "88 Market Street",
+  },
+  {
+    id: "appt_004",
+    customerId: "cust_004",
+    date: "2025-02-19",
+    timeWindow: "15:00-17:00",
+    addressSummary: "55 Pine Avenue",
+  },
 ];
 
 export const invoices: Invoice[] = [
@@ -51,6 +81,20 @@ export const invoices: Invoice[] = [
     balanceCents: 0,
     dueDate: "2025-01-15",
     status: "paid",
+  },
+  {
+    id: "inv_003",
+    customerId: "cust_003",
+    balanceCents: 4500,
+    dueDate: "2025-02-20",
+    status: "open",
+  },
+  {
+    id: "inv_004",
+    customerId: "cust_004",
+    balanceCents: 9900,
+    dueDate: "2025-02-22",
+    status: "open",
   },
 ];
 
