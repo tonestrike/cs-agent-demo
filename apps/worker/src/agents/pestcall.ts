@@ -1,4 +1,4 @@
-import { Agent, callable } from "agents";
+import { Agent, type StreamingResponse, callable } from "agents";
 
 import { createDependencies } from "../context";
 import type { Env } from "../env";
@@ -38,6 +38,23 @@ export class PestCallAgent extends Agent<Env, AgentState> {
       lastPhoneNumber: input.phoneNumber,
     });
     return response;
+  }
+
+  @callable({ streaming: true })
+  async messageStream(stream: StreamingResponse, input: AgentMessageInput) {
+    const deps = createDependencies(this.env);
+    const response = await handleAgentMessage(deps, input);
+    this.setState({
+      lastCallSessionId: response.callSessionId,
+      lastPhoneNumber: input.phoneNumber,
+    });
+
+    const chunks = response.replyText.split(/(\s+)/).filter(Boolean);
+    for (const chunk of chunks) {
+      stream.send({ type: "delta", text: chunk });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    stream.end({ type: "final", data: response });
   }
 
   override async onConnect(connection: { send: (data: string) => void }) {

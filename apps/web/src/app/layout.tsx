@@ -32,7 +32,7 @@ export default function RootLayout({
       >
         <Providers>
           <div className="flex min-h-screen flex-col">
-            <header className="border-b border-ink/10 bg-white/70">
+            <header className="sticky top-0 z-50 border-b border-ink/10 bg-white/80 backdrop-blur">
               <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-4">
                 <Link href="/" className="text-lg font-semibold text-ink">
                   PestCall

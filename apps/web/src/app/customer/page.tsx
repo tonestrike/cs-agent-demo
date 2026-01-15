@@ -1,10 +1,9 @@
 "use client";
 
-import { useMutation } from "@tanstack/react-query";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Button, Card } from "../../components/ui";
-import { callRpc } from "../../lib/api";
+import { createAgentClient } from "../../lib/agent-client";
 
 type ChatMessage = {
   id: string;
@@ -23,65 +22,116 @@ export default function CustomerPage() {
       text: "Hi! This is PestCall. How can I help today?",
     },
   ]);
+  const [status, setStatus] = useState("New session");
   const listRef = useRef<HTMLDivElement | null>(null);
+  const clientRef = useRef<ReturnType<typeof createAgentClient> | null>(null);
+  const sessionRef = useRef<string | null>(null);
 
-  const mutation = useMutation({
-    mutationFn: async () => {
-      const payload: {
-        phoneNumber: string;
-        text: string;
-        callSessionId?: string;
-      } = {
-        phoneNumber,
-        text: input,
-      };
-      if (callSessionId) {
-        payload.callSessionId = callSessionId;
-      }
-      return callRpc<{
-        callSessionId: string;
-        replyText: string;
-      }>("agent/message", payload);
-    },
-    onSuccess: (data) => {
-      setCallSessionId(data.callSessionId);
-      setMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), role: "agent", text: data.replyText },
-      ]);
-      setInput("");
-      requestAnimationFrame(() => {
-        listRef.current?.scrollTo({
-          top: listRef.current.scrollHeight,
-          behavior: "smooth",
-        });
-      });
-    },
-  });
+  useEffect(() => {
+    return () => {
+      clientRef.current?.close();
+    };
+  }, []);
+
+  const ensureClient = (sessionId: string) => {
+    if (clientRef.current && sessionRef.current === sessionId) {
+      return clientRef.current;
+    }
+    clientRef.current?.close();
+    const client = createAgentClient(sessionId);
+    clientRef.current = client;
+    sessionRef.current = sessionId;
+    return client;
+  };
 
   const handleSend = () => {
     const trimmed = input.trim();
-    if (!trimmed || mutation.isPending) {
+    if (!trimmed) {
       return;
+    }
+    const sessionId = callSessionId ?? crypto.randomUUID();
+    if (!callSessionId) {
+      setCallSessionId(sessionId);
     }
     setMessages((prev) => [
       ...prev,
       { id: crypto.randomUUID(), role: "customer", text: trimmed },
     ]);
-    mutation.mutate();
+    setInput("");
+    setStatus("Streaming reply...");
+
+    const responseId = crypto.randomUUID();
+    setMessages((prev) => [
+      ...prev,
+      { id: responseId, role: "agent", text: "" },
+    ]);
+
+    const client = ensureClient(sessionId);
+    client
+      .call(
+        "messageStream",
+        [
+          {
+            phoneNumber,
+            text: trimmed,
+            callSessionId: sessionId,
+          },
+        ],
+        {
+          onChunk: (chunk) => {
+            if (
+              chunk &&
+              typeof chunk === "object" &&
+              "type" in chunk &&
+              (chunk as { type?: unknown }).type === "delta"
+            ) {
+              const text = String((chunk as { text?: unknown }).text ?? "");
+              setMessages((prev) =>
+                prev.map((message) =>
+                  message.id === responseId
+                    ? { ...message, text: `${message.text}${text}` }
+                    : message,
+                ),
+              );
+            }
+          },
+          onDone: (finalChunk) => {
+            setStatus(`Session ${sessionId.slice(0, 8)}…`);
+            if (
+              finalChunk &&
+              typeof finalChunk === "object" &&
+              "type" in finalChunk &&
+              (finalChunk as { type?: unknown }).type === "final"
+            ) {
+              const data = (
+                finalChunk as {
+                  data?: { callSessionId?: string };
+                }
+              ).data;
+              if (data?.callSessionId) {
+                setCallSessionId(data.callSessionId);
+              }
+            }
+            requestAnimationFrame(() => {
+              listRef.current?.scrollTo({
+                top: listRef.current.scrollHeight,
+                behavior: "smooth",
+              });
+            });
+          },
+          onError: () => {
+            setStatus("Connection issue. Try again.");
+          },
+        },
+      )
+      .catch(() => {
+        setStatus("Connection issue. Try again.");
+      });
   };
 
   const statusLabel = useMemo(() => {
-    if (mutation.isPending) {
-      return "Agent is responding...";
-    }
-    if (mutation.isError) {
-      return "We hit a snag. Try again.";
-    }
-    return callSessionId
-      ? `Session ${callSessionId.slice(0, 8)}…`
-      : "New session";
-  }, [callSessionId, mutation.isError, mutation.isPending]);
+    return status;
+  }, [status]);
 
   return (
     <main className="grid-dots min-h-screen px-6 py-10">
@@ -155,9 +205,7 @@ export default function CustomerPage() {
                   }
                 }}
               />
-              <Button onClick={handleSend} disabled={mutation.isPending}>
-                Send
-              </Button>
+              <Button onClick={handleSend}>Send</Button>
             </div>
           </div>
         </Card>
