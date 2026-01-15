@@ -71,7 +71,7 @@ export const createMockModelAdapter = (): ModelAdapter => {
           return `I moved your appointment. Your new window is ${slot.date} ${slot.timeWindow}.`;
         }
         case "crm.getOpenInvoices": {
-          const balanceCents = Number(input.toolResult.balanceCents ?? 0);
+          const balanceCents = Number(input.toolResult["balanceCents"] ?? 0);
           return balanceCents === 0
             ? "You have no outstanding balance."
             : `Your current balance is $${(balanceCents / 100).toFixed(2)}.`;

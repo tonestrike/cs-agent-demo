@@ -16,6 +16,7 @@
     "db:seed:local": "wrangler d1 execute pestcall_local --local --config apps/worker/wrangler.toml --file apps/worker/seeds/20250201120000_seed.sql",
     "typecheck": "tsc -b",
     "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "sync:rules": "npx rulesync generate"
   },
   "devDependencies": {
