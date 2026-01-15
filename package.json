@@ -20,6 +20,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:e2e:remote": "E2E_BASE_URL=https://pestcall-worker.tonyvantur.workers.dev E2E_AUTH_TOKEN=dev-demo-token E2E_EXPECT_REAL_MODEL=true E2E_EXPECT_MODEL_NAME=workers-ai E2E_EXPECT_MODEL_ID=@cf/meta/llama-3.1-8b-instruct vitest run --config vitest.e2e.config.ts",
+    "vercel-build": "bun run --cwd apps/web build",
     "sync:rules": "npx rulesync generate"
   },
   "devDependencies": {

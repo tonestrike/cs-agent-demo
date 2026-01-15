@@ -47,6 +47,7 @@ Run the Worker with local bindings:
 
 ```sh
 cd apps/worker
+cp .dev.vars.example .dev.vars
 wrangler dev --local
 ```
 

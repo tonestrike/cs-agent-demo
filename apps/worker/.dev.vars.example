@@ -1,0 +1,3 @@
+AGENT_MODEL=mock
+CRM_PROVIDER=mock
+DEMO_AUTH_TOKEN=dev-demo-token
