@@ -5,7 +5,7 @@ export default defineConfig({
     environment: "node",
     include: ["packages/**/*.test.ts"],
     coverage: {
-      enabled: false
-    }
-  }
+      enabled: false,
+    },
+  },
 });
