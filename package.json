@@ -1,0 +1,23 @@
+{
+  "name": "pestcall",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "lint": "biome lint .",
+    "format": "biome format . --write",
+    "typecheck": "tsc -b",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.11",
+    "biome": "^1.9.4",
+    "oxlint": "^0.9.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
