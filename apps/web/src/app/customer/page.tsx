@@ -78,7 +78,9 @@ export default function CustomerPage() {
     if (mutation.isError) {
       return "We hit a snag. Try again.";
     }
-    return callSessionId ? `Session ${callSessionId.slice(0, 8)}…` : "New session";
+    return callSessionId
+      ? `Session ${callSessionId.slice(0, 8)}…`
+      : "New session";
   }, [callSessionId, mutation.isError, mutation.isPending]);
 
   return (
@@ -163,9 +165,7 @@ export default function CustomerPage() {
         <Card className="flex flex-col gap-5">
           <Badge className="w-fit">Tips</Badge>
           <div className="space-y-4 text-sm text-ink/70">
-            <p>
-              Try: “When is my next appointment?” or “Do I owe anything?”
-            </p>
+            <p>Try: “When is my next appointment?” or “Do I owe anything?”</p>
             <p>
               For billing, the agent will ask for your ZIP before sharing
               balances.

@@ -1,7 +1,10 @@
 import { clsx } from "clsx";
 import type { ButtonHTMLAttributes, HTMLAttributes } from "react";
 
-export const Card = ({ className, ...props }: HTMLAttributes<HTMLDivElement>) => (
+export const Card = ({
+  className,
+  ...props
+}: HTMLAttributes<HTMLDivElement>) => (
   <div
     className={clsx(
       "glass-panel rounded-3xl p-6 shadow-soft ring-1 ring-black/5",
@@ -11,7 +14,10 @@ export const Card = ({ className, ...props }: HTMLAttributes<HTMLDivElement>) =>
   />
 );
 
-export const Badge = ({ className, ...props }: HTMLAttributes<HTMLSpanElement>) => (
+export const Badge = ({
+  className,
+  ...props
+}: HTMLAttributes<HTMLSpanElement>) => (
   <span
     className={clsx(
       "inline-flex items-center rounded-full border border-ink/10 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-ink/80",
