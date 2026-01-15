@@ -22,21 +22,21 @@ const waitForServer = async (url: string, attempts = 40) => {
 };
 
 export default async function setup() {
-const wrangler = spawn(
-  "npx",
-  [
-    "wrangler",
-    "dev",
-    "--local",
-    "--port",
-    String(PORT),
-    "--config",
-    "apps/worker/wrangler.test.toml",
-  ],
-  {
-    stdio: "inherit",
-  },
-);
+  const wrangler = spawn(
+    "npx",
+    [
+      "wrangler",
+      "dev",
+      "--local",
+      "--port",
+      String(PORT),
+      "--config",
+      "apps/worker/wrangler.test.toml",
+    ],
+    {
+      stdio: "inherit",
+    },
+  );
 
   wrangler.on("error", (error) => {
     throw error;
