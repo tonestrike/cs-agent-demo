@@ -72,6 +72,7 @@ const ticketEventInputSchema = z.object({
     "status_changed",
     "note_added",
     "assignment_changed",
+    "follow_up_required",
   ]),
   payload: z.record(z.unknown()),
 });

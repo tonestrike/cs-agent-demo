@@ -60,6 +60,48 @@ const hasPaymentRequest = (text: string) => {
   return lowered.includes("pay") || lowered.includes("payment");
 };
 
+const isOffTopic = (text: string) => {
+  const trimmed = text.trim().toLowerCase();
+  if (!trimmed || trimmed.length < 3) {
+    return false;
+  }
+  const softIntents = ["hi", "hello", "hey", "thanks", "thank you", "help"];
+  if (softIntents.some((token) => trimmed === token)) {
+    return false;
+  }
+  const keywords = [
+    "pest",
+    "bug",
+    "bugs",
+    "roach",
+    "rodent",
+    "mouse",
+    "mice",
+    "termite",
+    "ant",
+    "mosquito",
+    "appointment",
+    "schedule",
+    "reschedule",
+    "billing",
+    "invoice",
+    "balance",
+    "owe",
+    "payment",
+    "service",
+    "treatment",
+  ];
+  return !keywords.some((keyword) => trimmed.includes(keyword));
+};
+
+const buildOffTopicReply = (message: string) => {
+  const suffix = "Would you like me to connect you with a specialist?";
+  if (message.includes("?")) {
+    return message;
+  }
+  return `${message} ${suffix}`;
+};
+
 type ToolCall = {
   toolName: string;
   latencyMs: number;
@@ -321,6 +363,52 @@ export const handleAgentMessage = async (
       callSessionId,
       replyText,
       actions,
+    };
+  }
+
+  if (isOffTopic(input.text)) {
+    const ticket = await createTicketUseCase(deps.tickets, {
+      subject: "Off-topic request",
+      description: `Caller asked: ${input.text}`,
+      category: "general",
+      source: "agent",
+      phoneE164,
+    });
+
+    await deps.tickets.addEvent({
+      ticketId: ticket.id,
+      type: "follow_up_required",
+      payload: {
+        reason: "off_topic",
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    actions.push("created_ticket");
+    actions.push("follow_up_required");
+
+    const replyText = buildOffTopicReply(deps.agentConfig.offTopicMessage);
+
+    await deps.calls.addTurn({
+      id: crypto.randomUUID(),
+      callSessionId,
+      ts: new Date().toISOString(),
+      speaker: "agent",
+      text: replyText,
+      meta: {
+        intent: "off_topic",
+        tools,
+        modelCalls,
+        ticketId: ticket.id,
+        customerId: customer.id,
+      },
+    });
+
+    return {
+      callSessionId,
+      replyText,
+      actions,
+      ticketId: ticket.id,
     };
   }
 

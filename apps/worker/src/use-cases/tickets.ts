@@ -65,7 +65,12 @@ export const addTicketEvent = async (
   repo: ReturnType<typeof createTicketRepository>,
   input: {
     ticketId: string;
-    type: "created" | "status_changed" | "note_added" | "assignment_changed";
+    type:
+      | "created"
+      | "status_changed"
+      | "note_added"
+      | "assignment_changed"
+      | "follow_up_required";
     payload: Record<string, unknown>;
   },
   nowIso = new Date().toISOString(),

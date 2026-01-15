@@ -31,7 +31,8 @@ export type TicketEventType =
   | "created"
   | "status_changed"
   | "note_added"
-  | "assignment_changed";
+  | "assignment_changed"
+  | "follow_up_required";
 
 export type TicketEvent = {
   id: string;

@@ -202,12 +202,15 @@ describeIf("agent e2e tool calls", () => {
     const response = await callRpc<{
       callSessionId: string;
       replyText: string;
+      ticketId?: string;
     }>("agent/message", {
       phoneNumber,
       text: "What is the weather like tomorrow?",
     });
 
     expect(response.replyText.length).toBeGreaterThan(0);
+    expect(response.replyText.toLowerCase()).toContain("specialist");
+    expect(response.ticketId).toBeTruthy();
 
     const meta = await getLatestAgentTurnMeta(response.callSessionId);
     const toolNames = (meta.tools ?? []).map((tool) => tool.toolName);
