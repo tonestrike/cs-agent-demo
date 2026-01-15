@@ -27,17 +27,20 @@ export type Ticket = {
   externalRef?: string;
 };
 
-export type TicketEventType =
-  | "created"
-  | "status_changed"
-  | "note_added"
-  | "assignment_changed"
-  | "follow_up_required";
+export enum TicketEventType {
+  Created = "created",
+  StatusChanged = "status_changed",
+  NoteAdded = "note_added",
+  AssignmentChanged = "assignment_changed",
+  FollowUpRequired = "follow_up_required",
+}
+
+export type TicketEventTypeValue = `${TicketEventType}`;
 
 export type TicketEvent = {
   id: string;
   ticketId: string;
   ts: string;
-  type: TicketEventType;
+  type: TicketEventTypeValue;
   payload: Record<string, unknown>;
 };

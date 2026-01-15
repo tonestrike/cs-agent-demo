@@ -1,4 +1,8 @@
-import { applyStatusTransition, createTicket } from "@pestcall/core";
+import {
+  TicketEventType,
+  applyStatusTransition,
+  createTicket,
+} from "@pestcall/core";
 
 import type { createTicketRepository } from "../repositories";
 
@@ -53,7 +57,7 @@ export const createTicketUseCase = async (
   await repo.insert(ticket);
   await repo.addEvent({
     ticketId: ticket.id,
-    type: "created",
+    type: TicketEventType.Created,
     payload: {},
     timestamp: nowIso,
   });
@@ -65,12 +69,7 @@ export const addTicketEvent = async (
   repo: ReturnType<typeof createTicketRepository>,
   input: {
     ticketId: string;
-    type:
-      | "created"
-      | "status_changed"
-      | "note_added"
-      | "assignment_changed"
-      | "follow_up_required";
+    type: import("@pestcall/core").TicketEventTypeValue;
     payload: Record<string, unknown>;
   },
   nowIso = new Date().toISOString(),
@@ -108,7 +107,7 @@ export const setTicketStatus = async (
   });
   await repo.addEvent({
     ticketId: ticket.id,
-    type: "status_changed",
+    type: TicketEventType.StatusChanged,
     payload: {
       from: ticket.status,
       to: transition.ticket.status,

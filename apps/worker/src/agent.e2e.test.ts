@@ -73,6 +73,7 @@ const getLatestAgentTurnMeta = async (callSessionId: string) => {
       success: boolean;
     }>;
     customerId?: string;
+    contextUsed?: boolean;
   };
 };
 
@@ -189,12 +190,14 @@ describeIf("agent e2e tool calls", () => {
     });
 
     expect(second.replyText.length).toBeGreaterThan(0);
+    expect(second.replyText.toLowerCase()).not.toContain("thanks for calling");
 
     const meta = await getLatestAgentTurnMeta(second.callSessionId);
     const toolNames = (meta.tools ?? []).map((tool) => tool.toolName);
     expect(toolNames).toContain("crm.getNextAppointment");
     expect(toolNames).toContain("crm.getAvailableSlots");
     expect(toolNames).toContain("crm.rescheduleAppointment");
+    expect(meta.contextUsed).toBe(true);
     assertRealModelCalls(meta.modelCalls ?? []);
   });
 

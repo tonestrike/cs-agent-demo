@@ -1,5 +1,6 @@
 import { normalizePhoneE164 } from "@pestcall/core";
 
+import { TicketEventType } from "@pestcall/core";
 import type { Dependencies } from "../context";
 import type { ToolResult } from "../models/types";
 import type { AgentMessageInput, AgentMessageOutput } from "../schemas/agent";
@@ -210,6 +211,7 @@ const generateReply = async (
       text: input.text,
       customer: buildCustomerContext(customer),
       context,
+      hasContext: Boolean(context),
       ...toolResult,
     }),
   );
@@ -237,6 +239,7 @@ export const handleAgentMessage = async (
 
   let callSessionId = input.callSessionId;
   let recentContext = "";
+  let contextTurns = 0;
   if (!callSessionId) {
     callSessionId = crypto.randomUUID();
     await deps.calls.createSession({
@@ -254,6 +257,7 @@ export const handleAgentMessage = async (
     recentContext = recentTurns
       .map((turn) => `${turn.speaker}: ${turn.text}`)
       .join("\n");
+    contextTurns = recentTurns.length;
   }
 
   await deps.calls.addTurn({
@@ -293,7 +297,14 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent: "lookup", tools, modelCalls, ticketId: ticket.id },
+      meta: {
+        intent: "lookup",
+        tools,
+        modelCalls,
+        ticketId: ticket.id,
+        contextUsed: Boolean(recentContext),
+        contextTurns,
+      },
     });
 
     return {
@@ -317,7 +328,13 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent: "lookup", tools, modelCalls },
+      meta: {
+        intent: "lookup",
+        tools,
+        modelCalls,
+        contextUsed: Boolean(recentContext),
+        contextTurns,
+      },
     });
 
     return {
@@ -338,7 +355,13 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent: "lookup", tools, modelCalls },
+      meta: {
+        intent: "lookup",
+        tools,
+        modelCalls,
+        contextUsed: Boolean(recentContext),
+        contextTurns,
+      },
     });
 
     return {
@@ -356,7 +379,14 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent: "greeting", tools, modelCalls, customerId: customer.id },
+      meta: {
+        intent: "greeting",
+        tools,
+        modelCalls,
+        customerId: customer.id,
+        contextUsed: Boolean(recentContext),
+        contextTurns,
+      },
     });
 
     return {
@@ -377,7 +407,7 @@ export const handleAgentMessage = async (
 
     await deps.tickets.addEvent({
       ticketId: ticket.id,
-      type: "follow_up_required",
+      type: TicketEventType.FollowUpRequired,
       payload: {
         reason: "off_topic",
       },
@@ -401,6 +431,8 @@ export const handleAgentMessage = async (
         modelCalls,
         ticketId: ticket.id,
         customerId: customer.id,
+        contextUsed: Boolean(recentContext),
+        contextTurns,
       },
     });
 
@@ -417,6 +449,7 @@ export const handleAgentMessage = async (
       text: input.text,
       customer: buildCustomerContext(customer),
       context: recentContext,
+      hasContext: Boolean(recentContext),
     }),
   );
   modelCalls.push(modelDecision.record);
@@ -435,7 +468,14 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent: "final", tools, modelCalls, customerId: customer.id },
+      meta: {
+        intent: "final",
+        tools,
+        modelCalls,
+        customerId: customer.id,
+        contextUsed: Boolean(recentContext),
+        contextTurns,
+      },
     });
 
     return {
@@ -547,7 +587,14 @@ export const handleAgentMessage = async (
           ts: new Date().toISOString(),
           speaker: "agent",
           text: replyText,
-          meta: { intent, tools, modelCalls, customerId: customer.id },
+          meta: {
+            intent,
+            tools,
+            modelCalls,
+            customerId: customer.id,
+            contextUsed: Boolean(recentContext),
+            contextTurns,
+          },
         });
 
         return {
@@ -581,7 +628,14 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent, tools, modelCalls, customerId: customer.id },
+      meta: {
+        intent,
+        tools,
+        modelCalls,
+        customerId: customer.id,
+        contextUsed: Boolean(recentContext),
+        contextTurns,
+      },
     });
 
     return {
@@ -603,7 +657,14 @@ export const handleAgentMessage = async (
         ts: new Date().toISOString(),
         speaker: "agent",
         text: replyText,
-        meta: { intent, tools, modelCalls, customerId: customer.id },
+        meta: {
+          intent,
+          tools,
+          modelCalls,
+          customerId: customer.id,
+          contextUsed: Boolean(recentContext),
+          contextTurns,
+        },
       });
 
       return {
@@ -663,7 +724,15 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent, tools, modelCalls, ticketId, customerId: customer.id },
+      meta: {
+        intent,
+        tools,
+        modelCalls,
+        ticketId,
+        customerId: customer.id,
+        contextUsed: Boolean(recentContext),
+        contextTurns,
+      },
     });
 
     return {
@@ -709,6 +778,8 @@ export const handleAgentMessage = async (
         modelCalls,
         ticketId: ticket.id,
         customerId: customer.id,
+        contextUsed: Boolean(recentContext),
+        contextTurns,
       },
     });
 
@@ -743,6 +814,8 @@ export const handleAgentMessage = async (
       modelCalls,
       ticketId: ticket.id,
       customerId: customer.id,
+      contextUsed: Boolean(recentContext),
+      contextTurns,
     },
   });
 

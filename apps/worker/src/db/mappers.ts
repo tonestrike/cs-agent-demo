@@ -1,7 +1,7 @@
 import type {
   Ticket,
   TicketEvent,
-  TicketEventType,
+  TicketEventTypeValue,
   TicketStatus,
 } from "@pestcall/core";
 
@@ -25,7 +25,7 @@ export type TicketEventRow = {
   id: string;
   ticket_id: string;
   ts: string;
-  type: TicketEventType;
+  type: TicketEventTypeValue;
   payload_json: string;
 };
 

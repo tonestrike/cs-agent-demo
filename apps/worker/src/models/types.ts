@@ -79,6 +79,7 @@ export type AgentModelInput = {
     addressSummary: string;
   };
   context?: string;
+  hasContext?: boolean;
 };
 
 export type AgentResponseInput = {
@@ -90,6 +91,7 @@ export type AgentResponseInput = {
     addressSummary: string;
   };
   context?: string;
+  hasContext?: boolean;
 } & ToolResult;
 
 export type ModelAdapter = {

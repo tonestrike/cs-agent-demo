@@ -1,4 +1,5 @@
 import { ORPCError } from "@orpc/server";
+import { TicketEventType } from "@pestcall/core";
 import { z } from "zod";
 
 import { authedProcedure } from "../middleware/auth";
@@ -67,13 +68,7 @@ const ticketIdInputSchema = z.object({
 
 const ticketEventInputSchema = z.object({
   ticketId: z.string().min(1),
-  type: z.enum([
-    "created",
-    "status_changed",
-    "note_added",
-    "assignment_changed",
-    "follow_up_required",
-  ]),
+  type: z.nativeEnum(TicketEventType),
   payload: z.record(z.unknown()),
 });
 

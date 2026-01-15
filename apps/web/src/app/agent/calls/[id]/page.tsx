@@ -97,6 +97,26 @@ export default function CallDetailPage({
                   </span>
                 </div>
                 <p className="mt-2 text-sm text-ink">{turn.text}</p>
+                {turn.meta.tools ? (
+                  <div className="mt-3 rounded-2xl border border-ink/10 bg-sand/60 p-3 text-xs text-ink/70">
+                    <p className="font-semibold uppercase tracking-wide text-ink/60">
+                      Tool Calls
+                    </p>
+                    <pre className="mt-2 whitespace-pre-wrap">
+                      {JSON.stringify(turn.meta.tools, null, 2)}
+                    </pre>
+                  </div>
+                ) : null}
+                {turn.meta.modelCalls ? (
+                  <div className="mt-3 rounded-2xl border border-ink/10 bg-white/80 p-3 text-xs text-ink/70">
+                    <p className="font-semibold uppercase tracking-wide text-ink/60">
+                      Model Calls
+                    </p>
+                    <pre className="mt-2 whitespace-pre-wrap">
+                      {JSON.stringify(turn.meta.modelCalls, null, 2)}
+                    </pre>
+                  </div>
+                ) : null}
               </div>
             ))}
             {callQuery.isLoading && (
