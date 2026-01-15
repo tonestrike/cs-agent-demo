@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { CORE_VERSION } from "./index";
+import { CORE_VERSION } from "../../packages/core/src";
 
 describe("core version", () => {
   it("is defined", () => {

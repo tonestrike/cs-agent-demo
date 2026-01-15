@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { describe, expect, it } from "vitest";
 
 type RpcResponse<T> = {
@@ -13,15 +14,11 @@ interface E2EEnv {
 }
 
 const env = process.env as E2EEnv;
-const baseUrl = env.E2E_BASE_URL;
+const baseUrl = env.E2E_BASE_URL ?? "http://127.0.0.1:8787";
 const authToken = env.E2E_AUTH_TOKEN ?? env.DEMO_AUTH_TOKEN;
 const phoneNumber = env.E2E_PHONE ?? "+14155552671";
 
-if (!baseUrl) {
-  throw new Error(
-    "Missing E2E_BASE_URL (e.g. https://pestcall-worker.<acct>.workers.dev).",
-  );
-}
+const describeIf = baseUrl ? describe : describe.skip;
 
 const callRpc = async <T>(
   path: string,
@@ -63,7 +60,7 @@ const getLatestAgentTools = async (callSessionId: string) => {
   return tools;
 };
 
-describe("agent e2e tool calls", () => {
+describeIf("agent e2e tool calls", () => {
   it("records appointment tool calls with expected data", async () => {
     const response = await callRpc<{
       callSessionId: string;
