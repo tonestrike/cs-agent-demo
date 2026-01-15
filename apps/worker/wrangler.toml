@@ -1,0 +1,25 @@
+name = "pestcall-worker"
+main = "src/index.ts"
+compatibility_date = "2024-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+CRM_PROVIDER = "mock"
+AGENT_MODEL = "workers-ai"
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pestcall_local"
+database_id = "b3a818ac-cbb2-4981-b3f2-2ee61f9a0baa"
+migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "PestCallAgent"
+class_name = "PestCallAgent"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PestCallAgent"]

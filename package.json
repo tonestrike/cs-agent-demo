@@ -6,15 +6,32 @@
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "lint": "biome lint .",
+    "lint:fix": "biome lint . --write",
     "format": "biome format . --write",
+    "format:check": "biome format . --check",
+    "fix": "biome check . --write",
+    "deploy:worker": "bun scripts/deploy-worker.ts",
+    "smoke:agent": "bun scripts/smoke-agent.ts",
+    "db:migrate:local": "wrangler d1 migrations apply pestcall_local --local --config apps/worker/wrangler.toml",
+    "db:seed:local": "wrangler d1 execute pestcall_local --local --config apps/worker/wrangler.toml --file apps/worker/seeds/20250201120000_seed.sql",
     "typecheck": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run --config vitest.unit.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "sync:rules": "npx rulesync generate"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@cloudflare/vitest-pool-workers": "^0.12.4",
+    "@cspell/dict-node": "^5.0.8",
+    "@cspell/dict-npm": "^5.2.29",
+    "@cspell/dict-typescript": "^3.2.3",
     "@types/node": "^20.16.11",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.7",
     "oxlint": "^0.9.0",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.4"
+    "vitest": "^2.1.4",
+    "wrangler": "4"
   }
 }
