@@ -7,3 +7,5 @@ bun.lockb
 .vite
 coverage
 *.tsbuildinfo
+
+.env
