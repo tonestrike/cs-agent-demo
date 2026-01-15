@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyStatusTransition, createTicket } from "../../packages/core/src";
+import { applyStatusTransition, createTicket } from "./index";
 
 const baseTicket = createTicket({
   id: "ticket-1",

@@ -19,4 +19,6 @@ jobs:
       - run: bun install
       - run: bun lint
       - run: bun typecheck
-      - run: node --run test
+      - run: bun run test
+      - run: bun run test:integration
+      - run: bun run test:e2e
