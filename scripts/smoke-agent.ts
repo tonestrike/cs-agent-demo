@@ -20,7 +20,10 @@ const response = await fetch(url, {
     "content-type": "application/json",
     ...(token ? { "x-demo-auth": token } : {}),
   },
-  body: JSON.stringify({ phoneNumber, text }),
+  body: JSON.stringify({
+    json: { phoneNumber, text },
+    meta: [],
+  }),
 });
 
 const body = await response.json().catch(() => null);
