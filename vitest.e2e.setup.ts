@@ -22,14 +22,36 @@ const waitForServer = async (url: string, attempts = 40) => {
 };
 
 export default async function setup() {
-  const wrangler = spawn(
+const wrangler = spawn(
+  "npx",
+  [
+    "wrangler",
+    "dev",
+    "--local",
+    "--port",
+    String(PORT),
+    "--config",
+    "apps/worker/wrangler.test.toml",
+  ],
+  {
+    stdio: "inherit",
+  },
+);
+
+  wrangler.on("error", (error) => {
+    throw error;
+  });
+
+  await waitForServer(BASE_URL);
+  const migrate = spawn(
     "npx",
     [
       "wrangler",
-      "dev",
+      "d1",
+      "migrations",
+      "apply",
+      "pestcall_local",
       "--local",
-      "--port",
-      String(PORT),
       "--config",
       "apps/worker/wrangler.test.toml",
     ],
@@ -37,12 +59,12 @@ export default async function setup() {
       stdio: "inherit",
     },
   );
-
-  wrangler.on("error", (error) => {
-    throw error;
+  const migrateExit = await new Promise<number>((resolve) => {
+    migrate.on("close", (code) => resolve(code ?? 1));
   });
-
-  await waitForServer(BASE_URL);
+  if (migrateExit !== 0) {
+    throw new Error("Failed to apply local D1 migrations for e2e.");
+  }
   process.env.E2E_BASE_URL = BASE_URL;
 
   return async () => {

@@ -31,6 +31,8 @@ bun db:migrate:local
 
 ```sh
 bun run test
+bun run test:integration
+bun run test:e2e
 ```
 
 ## Local dev (Worker)
@@ -71,6 +73,8 @@ bun deploy:worker --seed
 - `bun format`
 - `bun typecheck`
 - `bun run test`
+- `bun run test:integration`
+- `bun run test:e2e`
 - `bun db:migrate:local`
 
 ## Repo layout

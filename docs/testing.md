@@ -5,18 +5,23 @@ Tests use [Vitest](https://vitest.dev/) with Cloudflare's [`getPlatformProxy`](h
 ## Running tests
 
 ```bash
-bun test          # All tests
-bun test --watch  # Watch mode
+bun run test            # Unit tests
+bun run test:integration # Integration tests
+bun run test:e2e        # E2E tests (starts local worker)
 ```
 
 ## Test structure
 
-All tests run in Node.js environment using [Vitest](https://vitest.dev/):
+All tests run in Node.js using [Vitest](https://vitest.dev/):
 
-- **Integration tests** (`*.node.test.ts`): Use `getPlatformProxy` for D1 and Workers bindings
-- **Unit tests** (`*.test.ts`): Pure TypeScript/business logic tests
+- **Unit tests** (`*.unit.test.ts`): Pure TypeScript/business logic tests
+- **Integration tests** (`*.integration.test.ts`): D1 + Workers bindings via `getPlatformProxy`
+- **E2E tests** (`*.e2e.test.ts`): Hit a running Worker (local by default)
 
-See [`vitest.workspace.ts`](../vitest.workspace.ts).
+Config files:
+- `vitest.unit.config.ts`
+- `vitest.integration.config.ts`
+- `vitest.e2e.config.ts`
 
 ### Why Node tests for Workers code?
 
@@ -49,7 +54,7 @@ it("creates a ticket", async () => {
 });
 ```
 
-Each test gets its own isolated environment. See [`router.integration.node.test.ts`](../apps/worker/src/router.integration.node.test.ts) for complete example.
+Each test gets its own isolated environment. See [`router.integration.test.ts`](../apps/worker/src/router.integration.test.ts).
 
 ### Unit test example
 
@@ -62,7 +67,7 @@ it("transitions ticket status", () => {
 });
 ```
 
-See [`status.test.ts`](../packages/core/src/tickets/status.test.ts).
+See [`status.unit.test.ts`](../packages/core/src/tickets/status.unit.test.ts).
 
 ## Database migrations in tests
 
@@ -110,7 +115,7 @@ Benefits:
 - **Parallel execution**: Tests can run concurrently without conflicts
 - **No cleanup needed**: No shared state between tests
 
-See [`router.integration.node.test.ts`](../apps/worker/src/router.integration.node.test.ts) for the `createTestEnv()` helper.
+See [`router.integration.test.ts`](../apps/worker/src/router.integration.test.ts) for the `createTestEnv()` helper.
 
 ## Timeouts
 
@@ -123,6 +128,11 @@ it("applies migrations", async () => {
 ```
 
 Default timeout is 5 seconds.
+
+## E2E runner
+
+`bun run test:e2e` starts a local worker via `wrangler dev --local` and runs the e2e suite.
+Set `E2E_BASE_URL` to target a deployed worker instead.
 
 ## References
 
