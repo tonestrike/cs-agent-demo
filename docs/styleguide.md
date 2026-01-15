@@ -14,69 +14,16 @@ This guide captures the conventions established in the repo so far.
 - `packages/core` shared domain + schemas (no Cloudflare bindings).
 - `docs` project docs and plans.
 
+## Utilities
+- Place shared helpers in `packages/core/src/utils`.
+- Use third-party utilities before creating new ones.
+- Keep utilities small and single-purpose. See [`phone.ts`](../packages/core/src/utils/phone.ts).
+
 ## Patterns
-
-### Routing
-Route handlers in [`apps/worker/src/routes/`](../apps/worker/src/routes/) define oRPC endpoints. Keep them thin—extract params, call use-case, return response.
-
-```typescript
-// routes/tickets.ts
-export const getTicket = factory.rpc({
-  route: '/tickets/:id',
-  handler: async (c) => {
-    const { id } = c.req.param();
-    const ticket = await getTicketUseCase(c, { id });
-    if (!ticket) return c.json({ error: 'Not found' }, 404);
-    return c.json(ticket);
-  },
-});
-```
-
-### Use Cases
-Use cases in [`apps/worker/src/use-cases/`](../apps/worker/src/use-cases/) orchestrate domain logic. Call repositories, apply business rules, return data.
-
-```typescript
-// use-cases/tickets.ts
-export async function getTicketUseCase(c: Context, params: { id: string }) {
-  const repo = getTicketRepository(c);
-  return await repo.getById(params.id);
-}
-```
-
-### Repositories
-Repositories in [`apps/worker/src/repositories/`](../apps/worker/src/repositories/) abstract D1 database access. All SQL goes here. Return domain types from [`packages/core`](../packages/core/src/).
-
-```typescript
-// repositories/tickets.ts
-export function getTicketRepository(c: Context) {
-  const db = c.env.DB;
-  
-  return {
-    async getById(id: string): Promise<Ticket | null> {
-      const row = await db.prepare('SELECT * FROM tickets WHERE id = ?')
-        .bind(id)
-        .first();
-      return row ? mapRowToTicket(row) : null;
-    },
-  };
-}
-```
-
-### Context
-[`createContext`](../apps/worker/src/context.ts) wires dependencies per request. Pass context through the call chain.
-
-```typescript
-// context.ts
-export function createContext(c: HonoContext) {
-  return {
-    env: c.env,
-    // Add other dependencies here
-  };
-}
-
-// Usage in routes
-const ticket = await getTicketUseCase(c, { id });
-```
+- **Routing**: `routes/*` define oRPC handlers only.
+- **Use-cases**: `use-cases/*` orchestrate domain logic.
+- **Repositories**: `repositories/*` abstract D1 access.
+- **Context**: `createContext` wires dependencies per request.
 
 ## Testing
 - Prefer integration tests for Worker/D1 behavior.

@@ -1,5 +1,5 @@
+import { normalizePhoneE164 } from "@pestcall/core";
 import type { Dependencies } from "../context";
-import { AppError } from "@pestcall/core";
 
 import { createTicketUseCase } from "./tickets";
 
@@ -17,28 +17,6 @@ export type AgentMessageOutput = {
 };
 
 const zipRegex = /\b\d{5}\b/;
-
-const normalizePhone = (value: string): string => {
-  const cleaned = value.replace(/[^\d+]/g, "");
-  if (cleaned.startsWith("+")) {
-    return cleaned;
-  }
-
-  const digits = cleaned.replace(/\D/g, "");
-  if (digits.length === 10) {
-    return `+1${digits}`;
-  }
-
-  if (digits.length === 11 && digits.startsWith("1")) {
-    return `+${digits}`;
-  }
-
-  throw new AppError("Invalid phone number", {
-    code: "INVALID_PHONE",
-    status: 400,
-    meta: { input: value }
-  });
-};
 
 const detectIntent = (text: string) => {
   const lowered = text.toLowerCase();
@@ -117,7 +95,7 @@ export const handleAgentMessage = async (
   input: AgentMessageInput,
   nowIso = new Date().toISOString(),
 ): Promise<AgentMessageOutput> => {
-  const phoneE164 = normalizePhone(input.phoneNumber);
+  const phoneE164 = normalizePhoneE164(input.phoneNumber);
   const tools: ToolCall[] = [];
 
   let callSessionId = input.callSessionId;
