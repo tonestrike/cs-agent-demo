@@ -5,6 +5,11 @@ import { resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { Command } from "commander";
 
+type D1DatabaseInfo = {
+  name: string;
+  uuid: string;
+};
+
 const WORKER_DIR = resolve(process.cwd(), "apps/worker");
 const WRANGLER_CONFIG = resolve(WORKER_DIR, "wrangler.toml");
 
@@ -64,6 +69,7 @@ const updateDatabaseId = async (content: string, databaseId: string) => {
 };
 
 const parseD1List = (output: string) => {
+  const entries: D1DatabaseInfo[] = [];
   const lines = output.split("\n");
   for (const line of lines) {
     if (
@@ -76,15 +82,15 @@ const parseD1List = (output: string) => {
         .map((part) => part.trim())
         .filter(Boolean);
       if (parts.length >= 2) {
-        const name = parts[0] ?? "";
-        const uuid = parts[1] ?? "";
+        const uuid = parts[0] ?? "";
+        const name = parts[1] ?? "";
         if (name && uuid) {
-          return { name, uuid };
+          entries.push({ name, uuid });
         }
       }
     }
   }
-  return null;
+  return entries;
 };
 
 const parseD1Create = (output: string) => {
@@ -95,8 +101,9 @@ const parseD1Create = (output: string) => {
 const getD1DatabaseId = async (dbName: string) => {
   const list = await runWrangler(["d1", "list"], { quiet: true });
   const parsed = parseD1List(list.stdout);
-  if (parsed && parsed.name === dbName) {
-    return parsed.uuid;
+  const existing = parsed.find((db) => db.name === dbName);
+  if (existing) {
+    return existing.uuid;
   }
 
   const created = await runWrangler(["d1", "create", dbName], { quiet: true });
