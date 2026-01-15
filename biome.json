@@ -25,6 +25,20 @@
     }
   },
   "files": {
-    "ignore": ["node_modules", "dist", ".next", ".wrangler"]
+    "ignore": [
+      "node_modules",
+      "dist",
+      ".next",
+      ".wrangler",
+      "**/AGENTS.md",
+      "**/.claude/**",
+      "**/.cursor/**",
+      "**/.github/copilot-instructions.md",
+      "**/.github/prompts/**",
+      "**/.github/agents/**",
+      "**/.mcp.json",
+      "**/.vscode/mcp.json",
+      "**/.cursorignore"
+    ]
   }
 }

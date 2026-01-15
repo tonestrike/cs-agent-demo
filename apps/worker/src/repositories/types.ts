@@ -59,4 +59,21 @@ export type CallRepository = {
     ListResult<CallSession>
   >;
   get: (callSessionId: string) => Promise<CallDetail | null>;
+  createSession: (input: {
+    id: string;
+    startedAt: string;
+    phoneE164: string;
+    customerCacheId?: string | null;
+    status: string;
+    transport: string;
+    summary?: string | null;
+  }) => Promise<void>;
+  addTurn: (input: {
+    id: string;
+    callSessionId: string;
+    ts: string;
+    speaker: string;
+    text: string;
+    meta: Record<string, unknown>;
+  }) => Promise<void>;
 };

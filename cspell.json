@@ -2,5 +2,20 @@
   "version": "0.2",
   "language": "en",
   "dictionaries": ["typescript", "node", "npm", "softwareTerms", "misc"],
-  "words": []
+  "words": [],
+  "ignorePaths": [
+    "node_modules",
+    "dist",
+    ".next",
+    ".wrangler",
+    "**/AGENTS.md",
+    "**/.claude/**",
+    "**/.cursor/**",
+    "**/.github/copilot-instructions.md",
+    "**/.github/prompts/**",
+    "**/.github/agents/**",
+    "**/.mcp.json",
+    "**/.vscode/mcp.json",
+    "**/.cursorignore"
+  ]
 }

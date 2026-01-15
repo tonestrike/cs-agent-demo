@@ -69,5 +69,52 @@ export const createCallRepository = (db: D1Database): CallRepository => {
         turns: (turnsResult.results ?? []).map(mapCallTurnRow),
       };
     },
+    async createSession(input: {
+      id: string;
+      startedAt: string;
+      phoneE164: string;
+      customerCacheId?: string | null;
+      status: string;
+      transport: string;
+      summary?: string | null;
+    }): Promise<void> {
+      await db
+        .prepare(
+          "INSERT INTO call_sessions (id, started_at, ended_at, phone_e164, customer_cache_id, status, transport, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(
+          input.id,
+          input.startedAt,
+          null,
+          input.phoneE164,
+          input.customerCacheId ?? null,
+          input.status,
+          input.transport,
+          input.summary ?? null,
+        )
+        .run();
+    },
+    async addTurn(input: {
+      id: string;
+      callSessionId: string;
+      ts: string;
+      speaker: string;
+      text: string;
+      meta: Record<string, unknown>;
+    }): Promise<void> {
+      await db
+        .prepare(
+          "INSERT INTO call_turns (id, call_session_id, ts, speaker, text, meta_json) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(
+          input.id,
+          input.callSessionId,
+          input.ts,
+          input.speaker,
+          input.text,
+          JSON.stringify(input.meta),
+        )
+        .run();
+    },
   };
 };
