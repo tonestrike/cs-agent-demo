@@ -1,6 +1,6 @@
 import { applyStatusTransition, createTicket } from "@pestcall/core";
 
-import type { TicketRepository } from "../repositories";
+import type { createTicketRepository } from "../repositories";
 
 export type CreateTicketInput = {
   subject: string;
@@ -15,7 +15,7 @@ export type CreateTicketInput = {
 };
 
 export const listTickets = (
-  repo: TicketRepository,
+  repo: ReturnType<typeof createTicketRepository>,
   params: {
     status?: "open" | "in_progress" | "resolved";
     q?: string;
@@ -24,12 +24,15 @@ export const listTickets = (
   },
 ) => repo.list(params);
 
-export const getTicket = (repo: TicketRepository, ticketId: string) => {
+export const getTicket = (
+  repo: ReturnType<typeof createTicketRepository>,
+  ticketId: string,
+) => {
   return repo.get(ticketId);
 };
 
 export const createTicketUseCase = async (
-  repo: TicketRepository,
+  repo: ReturnType<typeof createTicketRepository>,
   input: CreateTicketInput,
   nowIso = new Date().toISOString(),
 ) => {
@@ -59,7 +62,7 @@ export const createTicketUseCase = async (
 };
 
 export const addTicketEvent = async (
-  repo: TicketRepository,
+  repo: ReturnType<typeof createTicketRepository>,
   input: {
     ticketId: string;
     type: "created" | "status_changed" | "note_added" | "assignment_changed";
@@ -76,7 +79,7 @@ export const addTicketEvent = async (
 };
 
 export const setTicketStatus = async (
-  repo: TicketRepository,
+  repo: ReturnType<typeof createTicketRepository>,
   input: {
     ticketId: string;
     status: "open" | "in_progress" | "resolved";

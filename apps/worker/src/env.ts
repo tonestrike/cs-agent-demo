@@ -1,10 +1,20 @@
-export type CrmProvider = "mock" | "http";
+import { z } from "zod";
 
-export type Env = {
-  DB: D1Database;
-  DEMO_AUTH_TOKEN?: string;
-  LOG_LEVEL?: string;
-  CRM_PROVIDER?: CrmProvider;
-  CRM_BASE_URL?: string;
-  CRM_API_KEY?: string;
-};
+export const crmProviderSchema = z.enum(["mock", "http"]);
+export type CrmProvider = z.infer<typeof crmProviderSchema>;
+
+export const agentModelSchema = z.enum(["mock", "workers-ai"]);
+
+export const envSchema = z.object({
+  DB: z.custom<D1Database>(),
+  DEMO_AUTH_TOKEN: z.string().optional(),
+  LOG_LEVEL: z.string().optional(),
+  CRM_PROVIDER: crmProviderSchema.optional(),
+  CRM_BASE_URL: z.string().optional(),
+  CRM_API_KEY: z.string().optional(),
+  AGENT_MODEL: agentModelSchema.optional(),
+  AI: z.custom<Ai>().optional(),
+  PestCallAgent: z.custom<DurableObjectNamespace>().optional(),
+});
+
+export type Env = z.infer<typeof envSchema>;

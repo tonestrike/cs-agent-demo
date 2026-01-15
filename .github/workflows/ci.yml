@@ -16,7 +16,4 @@ jobs:
       - run: bun install
       - run: bun lint
       - run: bun typecheck
-      - name: Run tests
-        run: bun test
-        env:
-          NODE_ENV: test
+      - run: bun test

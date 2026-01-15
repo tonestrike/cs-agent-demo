@@ -64,6 +64,14 @@ RPC endpoints are served under `/rpc`.
 - `apps/worker` Cloudflare Worker API (oRPC)
 - `apps/web` Next.js UI (future)
 - `packages/core` shared domain logic and types
+- `docs/` project documentation
+
+## Documentation
+
+- [Testing](docs/testing.md) - Test structure and best practices
+- [CI/CD](docs/ci.md) - Continuous integration setup
+- [Styleguide](docs/styleguide.md) - Code style and patterns
+- [Documentation Styleguide](docs/docs-styleguide.md) - How to write docs
 
 ## AI Coding Tools
 

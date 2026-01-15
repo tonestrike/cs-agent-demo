@@ -1,18 +1,15 @@
 import type { CrmAdapter } from "@pestcall/core";
 
 import { getCrmAdapter } from "./crm";
-import type { Env } from "./env";
-import {
-  type CallRepository,
-  type TicketRepository,
-  createCallRepository,
-  createTicketRepository,
-} from "./repositories";
+import { envSchema, type Env } from "./env";
+import { getModelAdapter } from "./models";
+import { createCallRepository, createTicketRepository } from "./repositories";
 
 export type Dependencies = {
   crm: CrmAdapter;
-  tickets: TicketRepository;
-  calls: CallRepository;
+  tickets: ReturnType<typeof createTicketRepository>;
+  calls: ReturnType<typeof createCallRepository>;
+  model: ReturnType<typeof getModelAdapter>;
 };
 
 export type RequestContext = {
@@ -26,13 +23,15 @@ export const createDependencies = (env: Env): Dependencies => {
     crm: getCrmAdapter(env),
     tickets: createTicketRepository(env.DB),
     calls: createCallRepository(env.DB),
+    model: getModelAdapter(env),
   };
 };
 
 export const createContext = (env: Env, headers: Headers): RequestContext => {
+  const validatedEnv = envSchema.parse(env);
   return {
-    env,
+    env: validatedEnv,
     headers,
-    deps: createDependencies(env),
+    deps: createDependencies(validatedEnv),
   };
 };

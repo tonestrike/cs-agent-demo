@@ -1,49 +1,10 @@
 import { normalizePhoneE164 } from "@pestcall/core";
-import type { Dependencies } from "../context";
 
+import type { Dependencies } from "../context";
+import type { AgentMessageInput, AgentMessageOutput } from "../schemas/agent";
 import { createTicketUseCase } from "./tickets";
 
-export type AgentMessageInput = {
-  callSessionId?: string;
-  phoneNumber: string;
-  text: string;
-};
-
-export type AgentMessageOutput = {
-  callSessionId: string;
-  replyText: string;
-  actions: string[];
-  ticketId?: string;
-};
-
 const zipRegex = /\b\d{5}\b/;
-
-const detectIntent = (text: string) => {
-  const lowered = text.toLowerCase();
-  if (
-    lowered.includes("agent") ||
-    lowered.includes("human") ||
-    lowered.includes("representative")
-  ) {
-    return "escalation" as const;
-  }
-  if (
-    lowered.includes("appointment") ||
-    lowered.includes("schedule") ||
-    lowered.includes("reschedule")
-  ) {
-    return "appointment" as const;
-  }
-  if (
-    lowered.includes("bill") ||
-    lowered.includes("invoice") ||
-    lowered.includes("balance") ||
-    lowered.includes("owe")
-  ) {
-    return "billing" as const;
-  }
-  return "unknown" as const;
-};
 
 const hasRescheduleRequest = (text: string) => {
   const lowered = text.toLowerCase();
@@ -119,8 +80,6 @@ export const handleAgentMessage = async (
     meta: {},
   });
 
-  const intent = detectIntent(input.text);
-
   const lookup = await recordToolCall("crm.lookupCustomerByPhone", () =>
     deps.crm.lookupCustomerByPhone(phoneE164),
   );
@@ -149,7 +108,7 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent, tools, ticketId: ticket.id },
+      meta: { intent: "lookup", tools, ticketId: ticket.id },
     });
 
     return {
@@ -170,7 +129,7 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent, tools },
+      meta: { intent: "lookup", tools },
     });
 
     return {
@@ -191,7 +150,7 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent, tools },
+      meta: { intent: "lookup", tools },
     });
 
     return {
@@ -201,7 +160,37 @@ export const handleAgentMessage = async (
     };
   }
 
-  if (intent === "appointment") {
+  const modelOutput = await deps.model.generate({
+    text: input.text,
+    customer: {
+      id: customer.id,
+      displayName: customer.displayName,
+      phoneE164: customer.phoneE164,
+      addressSummary: customer.addressSummary,
+    },
+  });
+
+  if (modelOutput.type === "final") {
+    const replyText = modelOutput.text;
+    await deps.calls.addTurn({
+      id: crypto.randomUUID(),
+      callSessionId,
+      ts: new Date().toISOString(),
+      speaker: "agent",
+      text: replyText,
+      meta: { intent: "final", tools },
+    });
+
+    return {
+      callSessionId,
+      replyText,
+      actions,
+    };
+  }
+
+  const intent = modelOutput.toolName;
+
+  if (modelOutput.toolName === "crm.getNextAppointment") {
     const appointmentCall = await recordToolCall("crm.getNextAppointment", () =>
       deps.crm.getNextAppointment(customer.id),
     );
@@ -302,7 +291,7 @@ export const handleAgentMessage = async (
     };
   }
 
-  if (intent === "billing") {
+  if (modelOutput.toolName === "crm.getOpenInvoices") {
     const hasZip = zipRegex.test(input.text);
     if (!hasZip) {
       const replyText =
@@ -372,7 +361,7 @@ export const handleAgentMessage = async (
     };
   }
 
-  if (intent === "escalation") {
+  if (modelOutput.toolName === "agent.escalate") {
     const ticket = await createTicketUseCase(deps.tickets, {
       subject: "Customer requested human",
       description: `Customer asked for a human. Message: ${input.text}`,
@@ -419,7 +408,7 @@ export const handleAgentMessage = async (
     ts: new Date().toISOString(),
     speaker: "agent",
     text: replyText,
-    meta: { intent, tools, ticketId: ticket.id },
+    meta: { intent: "fallback", tools, ticketId: ticket.id },
   });
 
   return {

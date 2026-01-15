@@ -7,6 +7,7 @@ This guide captures the conventions established in the repo so far.
 - Zod schemas are the source of truth; infer types from schemas when possible.
 - Keep handlers thin; put logic in use-cases and repositories.
 - Prefer function-based dependency injection (context factories).
+- Prefer inference over extra type aliases unless multiple implementations exist.
 - Prefer standard packages over custom implementations when they meet the need.
 
 ## Structure

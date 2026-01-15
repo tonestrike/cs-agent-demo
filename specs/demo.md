@@ -1,35 +1,31 @@
 # PestCall Demo Plan
 
-## Goals
-- Demo an AI customer service flow for pest control.
-- Identify caller by phone number, answer appointment/billing questions, and escalate to tickets.
-- Provide ticketing and call trace UI for operators.
+AI-powered customer service agent for pest control with ticketing, call traces, and a worker-first API.
 
 ## Current State
-- Monorepo scaffold with Bun, TS, Biome, Vitest.
-- D1 schema and local migrations in `apps/worker/migrations`.
-- oRPC Worker API with tickets, calls, CRM (mock) routes.
-- Core domain for tickets and CRM schemas (Zod as source of truth).
-- Integration tests for D1 and Worker RPC.
+- Bun + TypeScript + Biome + Vitest scaffold.
+- D1 migrations and local seeding in `apps/worker/migrations` and `apps/worker/seeds`.
+- oRPC Worker API: tickets, calls, CRM mock, and agent RPC.
+- Agent use-case logs call sessions and turns in D1.
+- CRM mock fixtures with appointments/invoices for demos.
+- Agents SDK wired with `PestCallAgent` Durable Object and WebSocket handling. See [`pestcall.ts`](../apps/worker/src/agents/pestcall.ts).
+- Model adapter scaffold with mock tool-calling loop in [`models`](../apps/worker/src/models/).
 
-## Key Decisions
-- Cloudflare-first architecture (Workers, D1, KV, Durable Objects).
-- oRPC for typed API, Zod for schema validation.
-- Dependency injection via context factory (simple function-based DI).
-- Repositories + use-cases for logic reuse.
+## Near-Term Plan
+- Add model adapter (Workers AI first) and tool-calling loop.
+- Include compact state summaries in prompts and tool-call logs in D1.
+- Add agent playground in the web UI for HTTP + WebSocket flows.
+- Expand call trace UI to show tool latency and failures.
 
-## Mock CRM Fixtures
-- Two customers, appointments, invoices, and available slots.
-- Mock adapter used by default via `CRM_PROVIDER=mock`.
-
-## Next Work Items
-1) Add CRM integration tests (lookup, appointment, invoices, slots).
-2) Agent HTTP loop with tool calls + D1 tracing.
-3) Durable Object for call session state.
-4) Next.js UI (tickets, calls, agent playground).
+## Demo Flow
+1) Caller identified by phone.
+2) Appointment/billing answered.
+3) Ticket created on escalation or failure.
+4) Call trace visible in UI.
 
 ## Local Commands
-- Install: `bun install`
-- Migrate: `bun db:migrate:local`
-- Tests: `bun run test`
-- Worker dev: `cd apps/worker && wrangler dev --local`
+- `bun install`
+- `bun db:migrate:local`
+- `bun db:seed:local`
+- `bun run test`
+- `cd apps/worker && wrangler dev --local`
