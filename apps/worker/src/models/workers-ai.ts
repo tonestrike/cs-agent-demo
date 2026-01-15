@@ -58,7 +58,7 @@ export const createWorkersAiAdapter = (
   if (!ai) {
     throw new AppError("AI binding not configured", { code: "config_error" });
   }
-  
+
   return {
     async generate(input: AgentModelInput) {
       if (!ai) {

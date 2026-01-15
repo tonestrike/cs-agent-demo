@@ -1,7 +1,7 @@
 import type { CrmAdapter } from "@pestcall/core";
 
 import { getCrmAdapter } from "./crm";
-import { envSchema, type Env } from "./env";
+import { type Env, envSchema } from "./env";
 import { getModelAdapter } from "./models";
 import { createCallRepository, createTicketRepository } from "./repositories";
 
