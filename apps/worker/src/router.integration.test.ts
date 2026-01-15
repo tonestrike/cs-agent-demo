@@ -81,6 +81,9 @@ const callRpc = async <T>(
   }
 
   const data = (await response.json()) as RpcResponse<T>;
+  if (!response.ok) {
+    throw new Error(JSON.stringify(data.json));
+  }
   return data.json;
 };
 

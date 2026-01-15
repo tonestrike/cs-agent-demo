@@ -1,10 +1,13 @@
-import { parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js";
+import {
+  type CountryCode,
+  parsePhoneNumberFromString,
+} from "libphonenumber-js";
 
 import { AppError } from "../errors";
 
 export const normalizePhoneE164 = (
   value: string,
-  defaultCountry: CountryCode = "US"
+  defaultCountry: CountryCode = "US",
 ) => {
   const parsed = parsePhoneNumberFromString(value, {
     defaultCountry,
