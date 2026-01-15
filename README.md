@@ -44,6 +44,20 @@ wrangler dev --local
 
 RPC endpoints are served under `/rpc`.
 
+## Deploy (Worker)
+
+Use the scripted deploy to create the D1 database if missing, apply migrations, and deploy:
+
+```sh
+bun deploy:worker
+```
+
+Seed demo data with:
+
+```sh
+bun deploy:worker --seed
+```
+
 ## Database layout
 
 - Migrations live in `apps/worker/migrations`.
