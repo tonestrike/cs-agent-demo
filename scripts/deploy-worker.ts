@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Command } from "commander";
@@ -12,20 +12,27 @@ type D1DatabaseInfo = {
 const WORKER_DIR = resolve(process.cwd(), "apps/worker");
 const WRANGLER_CONFIG = resolve(WORKER_DIR, "wrangler.toml");
 
-const runWrangler = async (args: string[], options?: { quiet?: boolean }) => {
+const runWrangler = async (
+  args: string[],
+  options?: { quiet?: boolean },
+) => {
   return new Promise<{ stdout: string; stderr: string }>(
     (resolvePromise, reject) => {
-      const proc = spawn("bunx", ["wrangler", ...args], {
+      const proc: ChildProcessWithoutNullStreams = spawn(
+        "bunx",
+        ["wrangler", ...args],
+        {
         stdio: ["ignore", "pipe", "pipe"],
-      });
+        },
+      );
 
       let stdout = "";
       let stderr = "";
 
-      proc.stdout.on("data", (chunk) => {
+      proc.stdout.on("data", (chunk: Buffer) => {
         stdout += chunk.toString();
       });
-      proc.stderr.on("data", (chunk) => {
+      proc.stderr.on("data", (chunk: Buffer) => {
         stderr += chunk.toString();
       });
       proc.on("error", (error) => {
@@ -80,7 +87,9 @@ const getD1DatabaseId = async (dbName: string) => {
 
 const deploy = async (options: { seed: boolean }) => {
   if (!process.env.CLOUDFLARE_API_TOKEN) {
-    throw new Error("Missing CLOUDFLARE_API_TOKEN in environment.");
+    console.warn(
+      "CLOUDFLARE_API_TOKEN is not set. Falling back to Wrangler login session.",
+    );
   }
 
   const wranglerToml = await readFile(WRANGLER_CONFIG, "utf8");
@@ -125,9 +134,9 @@ program
   .name("deploy-worker")
   .description("Deploy the PestCall Worker and D1 database.")
   .option("--seed", "Seed demo data")
-  .action(async (options) => {
+  .action(async (options: { seed?: boolean }) => {
     try {
-      await deploy({ seed: options.seed });
+      await deploy({ seed: options.seed ?? false });
     } catch (error) {
       console.error(
         error instanceof Error ? error.message : "Deployment failed.",
