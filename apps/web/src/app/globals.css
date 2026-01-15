@@ -6,27 +6,133 @@
 
 :root {
   color-scheme: light;
+  --panel-bg: rgba(255, 255, 255, 0.82);
+  --panel-border: rgba(12, 27, 31, 0.12);
+  --panel-highlight: rgba(245, 165, 36, 0.22);
+  --panel-shadow: 0 20px 60px rgba(12, 27, 31, 0.18);
+  --accent-gradient: linear-gradient(120deg, #f5a524, #c96a4b, #2f5d50);
 }
 
 body {
   @apply bg-sand text-ink font-body;
   min-height: 100vh;
   background-image: radial-gradient(
-      circle at 10% 20%,
-      rgba(245, 165, 36, 0.2),
+      circle at 15% 20%,
+      rgba(245, 165, 36, 0.22),
       transparent 45%
     ),
-    radial-gradient(circle at 80% 0%, rgba(47, 93, 80, 0.18), transparent 40%),
-    linear-gradient(135deg, rgba(12, 27, 31, 0.05), rgba(201, 106, 75, 0.08));
+    radial-gradient(circle at 85% 10%, rgba(47, 93, 80, 0.22), transparent 40%),
+    radial-gradient(
+      circle at 70% 85%,
+      rgba(201, 106, 75, 0.18),
+      transparent 45%
+    ), linear-gradient(135deg, rgba(12, 27, 31, 0.06), rgba(246, 241, 231, 0.6));
+  background-attachment: fixed;
 }
 
 .glass-panel {
-  background: rgba(255, 255, 255, 0.75);
-  border: 1px solid rgba(12, 27, 31, 0.08);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--panel-shadow);
   backdrop-filter: blur(12px);
 }
 
 .grid-dots {
-  background-image: radial-gradient(rgba(12, 27, 31, 0.08) 1px, transparent 0);
-  background-size: 18px 18px;
+  background-image: radial-gradient(rgba(12, 27, 31, 0.07) 1px, transparent 0);
+  background-size: 20px 20px;
+}
+
+.card-sheen {
+  position: relative;
+  overflow: hidden;
+}
+
+.card-sheen::after {
+  content: "";
+  position: absolute;
+  inset: -30%;
+  background: radial-gradient(
+    circle at 20% 20%,
+    var(--panel-highlight),
+    transparent 45%
+  );
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.accent-text {
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(12, 27, 31, 0.3) transparent;
+}
+
+.scroll-area::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scroll-area::-webkit-scrollbar-thumb {
+  background: rgba(12, 27, 31, 0.3);
+  border-radius: 999px;
+}
+
+.scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes rise {
+  0% {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-30%);
+  }
+  100% {
+    transform: translateX(30%);
+  }
+}
+
+.animate-rise {
+  animation: rise 0.35s ease-out both;
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-shimmer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    120deg,
+    transparent,
+    rgba(255, 255, 255, 0.35),
+    transparent
+  );
+  transform: translateX(-30%);
+  animation: shimmer 2.6s ease-in-out infinite;
+  pointer-events: none;
 }

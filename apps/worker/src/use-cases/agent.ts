@@ -1,9 +1,12 @@
-import { normalizePhoneE164 } from "@pestcall/core";
-
-import { TicketEventType } from "@pestcall/core";
+import {
+  type ServiceAppointment,
+  TicketEventType,
+  normalizePhoneE164,
+} from "@pestcall/core";
 import type { Dependencies } from "../context";
 import type { ToolResult } from "../models/types";
 import type { AgentMessageInput, AgentMessageOutput } from "../schemas/agent";
+import { getNextAppointment, rescheduleAppointment } from "./appointments";
 import { createTicketUseCase } from "./tickets";
 
 const zipRegex = /\b\d{5}\b/;
@@ -61,6 +64,30 @@ const hasPaymentRequest = (text: string) => {
   return lowered.includes("pay") || lowered.includes("payment");
 };
 
+const isAffirmative = (text: string) => {
+  const trimmed = text.trim().toLowerCase();
+  if (!trimmed) {
+    return false;
+  }
+  const tokens = new Set([
+    "yes",
+    "yep",
+    "yeah",
+    "yup",
+    "sure",
+    "ok",
+    "okay",
+    "please",
+    "sounds good",
+    "go ahead",
+    "do it",
+  ]);
+  if (tokens.has(trimmed)) {
+    return true;
+  }
+  return tokens.has(trimmed.replace(/[!.?]/g, ""));
+};
+
 const isOffTopic = (text: string) => {
   const trimmed = text.trim().toLowerCase();
   if (!trimmed || trimmed.length < 3) {
@@ -95,7 +122,15 @@ const isOffTopic = (text: string) => {
   return !keywords.some((keyword) => trimmed.includes(keyword));
 };
 
-const buildOffTopicReply = (message: string) => {
+const buildOffTopicPrompt = (message: string) => {
+  const suffix = "What can I help you with today?";
+  if (message.includes("?")) {
+    return message;
+  }
+  return `${message} ${suffix}`;
+};
+
+const buildOffTopicEscalation = (message: string) => {
   const suffix = "Would you like me to connect you with a specialist?";
   if (message.includes("?")) {
     return message;
@@ -240,6 +275,8 @@ export const handleAgentMessage = async (
   let callSessionId = input.callSessionId;
   let recentContext = "";
   let contextTurns = 0;
+  let lastAgentIntent: string | null = null;
+  let lastAgentText: string | null = null;
   if (!callSessionId) {
     callSessionId = crypto.randomUUID();
     await deps.calls.createSession({
@@ -258,6 +295,14 @@ export const handleAgentMessage = async (
       .map((turn) => `${turn.speaker}: ${turn.text}`)
       .join("\n");
     contextTurns = recentTurns.length;
+    for (const turn of [...recentTurns].reverse()) {
+      if (turn.speaker === "agent") {
+        const meta = turn.meta as { intent?: string };
+        lastAgentIntent = meta.intent ?? null;
+        lastAgentText = turn.text ?? null;
+        break;
+      }
+    }
   }
 
   await deps.calls.addTurn({
@@ -396,7 +441,149 @@ export const handleAgentMessage = async (
     };
   }
 
+  const shouldConfirmReschedule =
+    isAffirmative(input.text) &&
+    (lastAgentIntent === "reschedule_offer" ||
+      (lastAgentIntent === "crm.getNextAppointment" &&
+        Boolean(
+          lastAgentText?.toLowerCase().match(/resched|update|move|change/),
+        )));
+
+  if (shouldConfirmReschedule) {
+    const appointmentCall = await recordToolCall(
+      "appointments.getNextAppointment",
+      () => getNextAppointment(deps.appointments, customer.id),
+    );
+    tools.push(appointmentCall.record);
+
+    const appointment = appointmentCall.result as ServiceAppointment | null;
+    if (!appointment) {
+      const replyText =
+        "I couldn't find a scheduled appointment. I've opened a ticket for our team.";
+
+      await deps.calls.addTurn({
+        id: crypto.randomUUID(),
+        callSessionId,
+        ts: new Date().toISOString(),
+        speaker: "agent",
+        text: replyText,
+        meta: {
+          intent: "crm.getNextAppointment",
+          tools,
+          modelCalls,
+          customerId: customer.id,
+          contextUsed: Boolean(recentContext),
+          contextTurns,
+        },
+      });
+
+      return {
+        callSessionId,
+        replyText,
+        actions,
+      };
+    }
+
+    const slotsCall = await recordToolCall("crm.getAvailableSlots", () =>
+      deps.crm.getAvailableSlots(customer.id, {
+        from: appointment.date,
+        to: appointment.date,
+      }),
+    );
+    tools.push(slotsCall.record);
+
+    const slots = Array.isArray(slotsCall.result) ? slotsCall.result : [];
+    const slot = slots[0];
+    if (!slot) {
+      const replyText =
+        "I couldn't find any alternate times right now. Want me to open a ticket for a specialist?";
+
+      await deps.calls.addTurn({
+        id: crypto.randomUUID(),
+        callSessionId,
+        ts: new Date().toISOString(),
+        speaker: "agent",
+        text: replyText,
+        meta: {
+          intent: "crm.getNextAppointment",
+          tools,
+          modelCalls,
+          customerId: customer.id,
+          contextUsed: Boolean(recentContext),
+          contextTurns,
+        },
+      });
+
+      return {
+        callSessionId,
+        replyText,
+        actions,
+      };
+    }
+
+    const rescheduled = await recordToolCall("appointments.reschedule", () =>
+      rescheduleAppointment(deps.appointments, {
+        appointment,
+        slot: {
+          date: slot.date,
+          timeWindow: slot.timeWindow,
+        },
+      }),
+    );
+    tools.push(rescheduled.record);
+
+    const replyText = `All set. Your appointment is now ${slot.date} ${slot.timeWindow}.`;
+
+    await deps.calls.addTurn({
+      id: crypto.randomUUID(),
+      callSessionId,
+      ts: new Date().toISOString(),
+      speaker: "agent",
+      text: replyText,
+      meta: {
+        intent: "crm.getNextAppointment",
+        tools,
+        modelCalls,
+        customerId: customer.id,
+        contextUsed: Boolean(recentContext),
+        contextTurns,
+      },
+    });
+
+    return {
+      callSessionId,
+      replyText,
+      actions,
+    };
+  }
+
   if (isOffTopic(input.text)) {
+    if (lastAgentIntent !== "off_topic_prompt") {
+      const replyText = buildOffTopicPrompt(deps.agentConfig.offTopicMessage);
+
+      await deps.calls.addTurn({
+        id: crypto.randomUUID(),
+        callSessionId,
+        ts: new Date().toISOString(),
+        speaker: "agent",
+        text: replyText,
+        meta: {
+          intent: "off_topic_prompt",
+          tools,
+          modelCalls,
+          customerId: customer.id,
+          contextUsed: Boolean(recentContext),
+          contextTurns,
+        },
+      });
+
+      return {
+        callSessionId,
+        replyText,
+        actions,
+      };
+    }
+
     const ticket = await createTicketUseCase(deps.tickets, {
       subject: "Off-topic request",
       description: `Caller asked: ${input.text}`,
@@ -417,7 +604,7 @@ export const handleAgentMessage = async (
     actions.push("created_ticket");
     actions.push("follow_up_required");
 
-    const replyText = buildOffTopicReply(deps.agentConfig.offTopicMessage);
+    const replyText = buildOffTopicEscalation(deps.agentConfig.offTopicMessage);
 
     await deps.calls.addTurn({
       id: crypto.randomUUID(),
@@ -488,17 +675,13 @@ export const handleAgentMessage = async (
   const intent = modelOutput.toolName;
 
   if (modelOutput.toolName === "crm.getNextAppointment") {
-    const appointmentCall = await recordToolCall("crm.getNextAppointment", () =>
-      deps.crm.getNextAppointment(customer.id),
+    const appointmentCall = await recordToolCall(
+      "appointments.getNextAppointment",
+      () => getNextAppointment(deps.appointments, customer.id),
     );
     tools.push(appointmentCall.record);
 
-    const appointment = appointmentCall.result as {
-      id: string;
-      date: string;
-      timeWindow: string;
-      addressSummary: string;
-    } | null;
+    const appointment = appointmentCall.result as ServiceAppointment | null;
 
     if (!appointment) {
       const ticket = await createTicketUseCase(deps.tickets, {
@@ -559,24 +742,15 @@ export const handleAgentMessage = async (
       const slots = Array.isArray(slotsCall.result) ? slotsCall.result : [];
       const slot = slots[0];
       if (slot) {
-        const rescheduleCall = await recordToolCall(
-          "crm.rescheduleAppointment",
-          () => deps.crm.rescheduleAppointment(appointment.id, slot.id),
-        );
-        tools.push(rescheduleCall.record);
-
         const replyText = await generateReply(
           deps,
           input,
           customer,
           {
-            toolName: "crm.rescheduleAppointment",
-            result: {
-              date: slot.date,
-              timeWindow: slot.timeWindow,
-            },
+            toolName: "crm.getAvailableSlots",
+            result: slot,
           },
-          `I moved your appointment. Your new window is ${slot.date} ${slot.timeWindow}.`,
+          `I can move your appointment to ${slot.date} ${slot.timeWindow}. Should I update it?`,
           recentContext,
           modelCalls,
         );
@@ -588,10 +762,11 @@ export const handleAgentMessage = async (
           speaker: "agent",
           text: replyText,
           meta: {
-            intent,
+            intent: "reschedule_offer",
             tools,
             modelCalls,
             customerId: customer.id,
+            suggestedSlot: slot,
             contextUsed: Boolean(recentContext),
             contextTurns,
           },

@@ -20,3 +20,44 @@ VALUES
 INSERT INTO ticket_events (id, ticket_id, ts, type, payload_json)
 VALUES
   ('event_seed_001', 'ticket_seed_001', '2025-02-02T12:00:00Z', 'created', '{}');
+
+INSERT INTO appointments (
+  id,
+  customer_id,
+  phone_e164,
+  address_summary,
+  date,
+  time_window,
+  status,
+  rescheduled_from_id,
+  rescheduled_to_id,
+  created_at,
+  updated_at
+)
+VALUES
+  (
+    'appt_seed_001',
+    'cust_001',
+    '+14155552671',
+    '742 Evergreen Terrace',
+    '2025-02-10',
+    '10:00-12:00',
+    'scheduled',
+    NULL,
+    NULL,
+    '2025-02-01T10:00:00Z',
+    '2025-02-01T10:00:00Z'
+  ),
+  (
+    'appt_seed_002',
+    'cust_002',
+    '+14155550987',
+    '123 Harbor Drive',
+    '2025-02-12',
+    '14:00-16:00',
+    'scheduled',
+    NULL,
+    NULL,
+    '2025-02-01T11:00:00Z',
+    '2025-02-01T11:00:00Z'
+  );

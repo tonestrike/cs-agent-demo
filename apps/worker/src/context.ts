@@ -4,7 +4,11 @@ import { getAgentConfig } from "./agents/config";
 import { getCrmAdapter } from "./crm";
 import { type Env, envSchema } from "./env";
 import { getModelAdapter } from "./models";
-import { createCallRepository, createTicketRepository } from "./repositories";
+import {
+  createAppointmentRepository,
+  createCallRepository,
+  createTicketRepository,
+} from "./repositories";
 
 export type Dependencies = {
   crm: CrmAdapter;
@@ -12,6 +16,7 @@ export type Dependencies = {
   calls: ReturnType<typeof createCallRepository>;
   model: ReturnType<typeof getModelAdapter>;
   agentConfig: ReturnType<typeof getAgentConfig>;
+  appointments: ReturnType<typeof createAppointmentRepository>;
 };
 
 export type RequestContext = {
@@ -25,6 +30,7 @@ export const createDependencies = (env: Env): Dependencies => {
     crm: getCrmAdapter(env),
     tickets: createTicketRepository(env.DB),
     calls: createCallRepository(env.DB),
+    appointments: createAppointmentRepository(env.DB),
     model: getModelAdapter(env),
     agentConfig: getAgentConfig(env),
   };

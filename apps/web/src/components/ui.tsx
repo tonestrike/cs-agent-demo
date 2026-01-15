@@ -7,7 +7,7 @@ export const Card = ({
 }: HTMLAttributes<HTMLDivElement>) => (
   <div
     className={clsx(
-      "glass-panel rounded-3xl p-6 shadow-soft ring-1 ring-black/5",
+      "glass-panel card-sheen rounded-[28px] p-6 shadow-soft ring-1 ring-black/5",
       className,
     )}
     {...props}
@@ -20,7 +20,7 @@ export const Badge = ({
 }: HTMLAttributes<HTMLSpanElement>) => (
   <span
     className={clsx(
-      "inline-flex items-center rounded-full border border-ink/10 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-ink/80",
+      "inline-flex items-center rounded-full border border-ink/15 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-ink/80",
       className,
     )}
     {...props}
@@ -33,7 +33,7 @@ export const Button = ({
 }: ButtonHTMLAttributes<HTMLButtonElement>) => (
   <button
     className={clsx(
-      "inline-flex items-center justify-center rounded-full bg-ink px-4 py-2 text-sm font-semibold text-sand shadow-soft transition hover:-translate-y-0.5 hover:bg-slate disabled:cursor-not-allowed disabled:bg-ink/60",
+      "relative inline-flex items-center justify-center rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-sand shadow-soft transition duration-200 hover:-translate-y-0.5 hover:bg-slate hover:shadow-[0_18px_40px_rgba(12,27,31,0.28)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 disabled:cursor-not-allowed disabled:bg-ink/60",
       className,
     )}
     {...props}

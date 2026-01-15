@@ -1,4 +1,5 @@
 import type {
+  ServiceAppointment,
   Ticket,
   TicketEvent,
   TicketEventTypeValue,
@@ -47,6 +48,20 @@ export type CallTurnRow = {
   speaker: string;
   text: string;
   meta_json: string;
+};
+
+export type AppointmentRow = {
+  id: string;
+  customer_id: string;
+  phone_e164: string;
+  address_summary: string;
+  date: string;
+  time_window: string;
+  status: ServiceAppointment["status"];
+  rescheduled_from_id: string | null;
+  rescheduled_to_id: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 const safeJsonParse = (value: string): Record<string, unknown> => {
@@ -110,5 +125,21 @@ export const mapCallTurnRow = (row: CallTurnRow) => {
     speaker: row.speaker,
     text: row.text,
     meta: safeJsonParse(row.meta_json),
+  };
+};
+
+export const mapAppointmentRow = (row: AppointmentRow): ServiceAppointment => {
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    phoneE164: row.phone_e164,
+    addressSummary: row.address_summary,
+    date: row.date,
+    timeWindow: row.time_window,
+    status: row.status,
+    rescheduledFromId: row.rescheduled_from_id ?? undefined,
+    rescheduledToId: row.rescheduled_to_id ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 };

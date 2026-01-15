@@ -35,13 +35,21 @@ export default function RootLayout({
             <header className="sticky top-0 z-50 border-b border-ink/10 bg-white/80 backdrop-blur">
               <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-4">
                 <Link href="/" className="text-lg font-semibold text-ink">
-                  PestCall
+                  <span className="accent-text font-display text-xl">
+                    PestCall
+                  </span>
                 </Link>
-                <nav className="flex flex-wrap items-center gap-4 text-sm font-semibold text-ink/70">
-                  <Link href="/customer" className="hover:text-ink">
+                <nav className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink/70">
+                  <Link
+                    href="/customer"
+                    className="rounded-full border border-ink/10 bg-white/70 px-4 py-2 transition hover:border-ink/30 hover:text-ink"
+                  >
                     Customer
                   </Link>
-                  <Link href="/agent" className="hover:text-ink">
+                  <Link
+                    href="/agent"
+                    className="rounded-full border border-ink/10 bg-white/70 px-4 py-2 transition hover:border-ink/30 hover:text-ink"
+                  >
                     Agent
                   </Link>
                 </nav>

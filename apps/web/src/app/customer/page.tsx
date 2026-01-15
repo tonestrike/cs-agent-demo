@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Button, Card } from "../../components/ui";
@@ -177,19 +178,30 @@ export default function CustomerPage() {
 
   return (
     <main className="grid-dots min-h-screen px-6 py-10">
-      <div className="mx-auto grid w-full max-w-5xl gap-8 lg:grid-cols-[1.2fr_0.8fr]">
-        <Card className="flex flex-col gap-6">
+      <div className="mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-[1.3fr_0.7fr]">
+        <Card className="flex flex-col gap-6 animate-rise">
           <div className="flex items-start justify-between">
             <div>
               <Badge className="w-fit">Customer Portal</Badge>
-              <h1 className="mt-3 text-3xl font-semibold text-ink">
-                Talk to PestCall
+              <h1 className="mt-3 text-3xl font-semibold text-ink sm:text-4xl">
+                Talk to <span className="accent-text">PestCall</span>
               </h1>
+              <p className="mt-2 text-sm text-ink/70">
+                Fast answers for appointments, billing, and service updates.
+              </p>
             </div>
             <div className="flex flex-col items-end gap-2">
-              <span className="text-xs uppercase tracking-wide text-ink/60">
+              <span className="rounded-full border border-ink/10 bg-white/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">
                 {statusLabel}
               </span>
+              {callSessionId ? (
+                <Link
+                  href={`/agent/calls/${callSessionId}`}
+                  className="text-xs font-semibold uppercase tracking-wide text-ink/60 hover:text-ink"
+                >
+                  View in agent mode
+                </Link>
+              ) : null}
               <button
                 type="button"
                 onClick={copyConversation}
@@ -202,7 +214,7 @@ export default function CustomerPage() {
 
           <div
             ref={listRef}
-            className="flex max-h-[420px] flex-col gap-4 overflow-y-auto rounded-2xl border border-ink/10 bg-white/70 p-4"
+            className="scroll-area flex h-[min(60vh,520px)] flex-col gap-4 overflow-y-auto rounded-3xl border border-ink/10 bg-white/70 p-4 shadow-[inset_0_0_0_1px_rgba(12,27,31,0.04)]"
             onScroll={(event) => {
               const target = event.currentTarget;
               const distanceFromBottom =
@@ -213,10 +225,10 @@ export default function CustomerPage() {
             {messages.map((message) => (
               <div
                 key={message.id}
-                className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                className={`animate-rise max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   message.role === "customer"
-                    ? "ml-auto bg-ink text-sand"
-                    : "bg-sand text-ink"
+                    ? "ml-auto bg-ink text-sand shadow-soft"
+                    : "bg-sand text-ink shadow-soft"
                 }`}
               >
                 <p className="text-xs uppercase tracking-wide opacity-60">
@@ -237,7 +249,7 @@ export default function CustomerPage() {
             <div className="flex flex-col gap-3 sm:flex-row">
               <select
                 id="customer-phone"
-                className="flex-1 rounded-2xl border border-ink/15 bg-white/80 px-4 py-2 text-sm"
+                className="flex-1 rounded-2xl border border-ink/15 bg-white/80 px-4 py-2 text-sm shadow-soft"
                 value={phoneNumber}
                 onChange={(event) => resetSession(event.target.value)}
               >
@@ -263,7 +275,7 @@ export default function CustomerPage() {
             <div className="flex flex-col gap-3 sm:flex-row">
               <input
                 id="customer-message"
-                className="flex-1 rounded-2xl border border-ink/15 bg-white/80 px-4 py-2 text-sm"
+                className="flex-1 rounded-2xl border border-ink/15 bg-white/80 px-4 py-2 text-sm shadow-soft"
                 placeholder="Ask about appointments or billing..."
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
@@ -278,7 +290,7 @@ export default function CustomerPage() {
           </div>
         </Card>
 
-        <Card className="flex flex-col gap-5">
+        <Card className="flex flex-col gap-5 animate-rise">
           <Badge className="w-fit">Tips</Badge>
           <div className="space-y-4 text-sm text-ink/70">
             <p>Try: “When is my next appointment?” or “Do I owe anything?”</p>

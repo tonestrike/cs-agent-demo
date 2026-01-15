@@ -4,23 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
 import { Badge, Card } from "../../../../components/ui";
-import { callRpc } from "../../../../lib/api";
-
-type Ticket = {
-  id: string;
-  createdAt: string;
-  updatedAt: string;
-  status: string;
-  priority: string;
-  category: string;
-  customerCacheId?: string;
-  phoneE164?: string;
-  subject: string;
-  description: string;
-  assignee?: string;
-  source: string;
-  externalRef?: string;
-};
+import { rpcClient } from "../../../../lib/orpc";
 
 const formatDateTime = (iso: string) =>
   new Date(iso).toLocaleString("en-US", {
@@ -46,18 +30,18 @@ export default function TicketDetailPage({
   const ticketQuery = useQuery({
     queryKey: ["ticket", params.id],
     queryFn: () =>
-      callRpc<Ticket>("tickets/get", {
+      rpcClient.tickets.get({
         ticketId: params.id,
       }),
   });
 
   return (
     <main className="grid-dots min-h-screen px-6 py-10">
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <Link href="/agent" className="text-xs uppercase text-ink/60">
           ← Back to dashboard
         </Link>
-        <Card className="flex flex-col gap-3">
+        <Card className="flex flex-col gap-3 animate-rise">
           <Badge className="w-fit">Ticket Detail</Badge>
           {ticketQuery.data ? (
             <>
@@ -78,7 +62,7 @@ export default function TicketDetailPage({
           )}
         </Card>
 
-        <Card className="flex flex-col gap-4">
+        <Card className="flex flex-col gap-4 animate-rise">
           <h2 className="text-lg font-semibold text-ink">Description</h2>
           <p className="text-sm text-ink/80">
             {ticketQuery.data?.description ?? "Loading details..."}

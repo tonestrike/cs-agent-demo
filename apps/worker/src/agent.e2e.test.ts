@@ -120,7 +120,7 @@ describeIf("agent e2e tool calls", () => {
     const tools = meta.tools ?? [];
     const toolNames = tools.map((tool) => tool.toolName);
     expect(toolNames).toContain("crm.lookupCustomerByPhone");
-    expect(toolNames).toContain("crm.getNextAppointment");
+    expect(toolNames).toContain("appointments.getNextAppointment");
 
     const modelCalls = meta.modelCalls ?? [];
     expect(modelCalls.length).toBeGreaterThan(0);
@@ -194,11 +194,41 @@ describeIf("agent e2e tool calls", () => {
 
     const meta = await getLatestAgentTurnMeta(second.callSessionId);
     const toolNames = (meta.tools ?? []).map((tool) => tool.toolName);
-    expect(toolNames).toContain("crm.getNextAppointment");
+    expect(toolNames).toContain("appointments.getNextAppointment");
     expect(toolNames).toContain("crm.getAvailableSlots");
-    expect(toolNames).toContain("crm.rescheduleAppointment");
     expect(meta.contextUsed).toBe(true);
     assertRealModelCalls(meta.modelCalls ?? []);
+
+    const third = await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      callSessionId: second.callSessionId,
+      phoneNumber,
+      text: "Yes, please.",
+    });
+
+    expect(third.replyText.length).toBeGreaterThan(0);
+
+    const thirdMeta = await getLatestAgentTurnMeta(third.callSessionId);
+    const thirdToolNames = (thirdMeta.tools ?? []).map((tool) => tool.toolName);
+    expect(thirdToolNames).toContain("appointments.reschedule");
+
+    const appointments = await callRpc<{
+      items: Array<{
+        id: string;
+        customerId: string;
+        status: string;
+        rescheduledFromId?: string;
+      }>;
+    }>("appointments/list", {
+      customerId: "cust_001",
+      limit: 5,
+    });
+    const rescheduled = appointments.items.find(
+      (item) => item.rescheduledFromId,
+    );
+    expect(rescheduled).toBeTruthy();
   });
 
   it("avoids tool calls for off-topic requests", async () => {
@@ -218,10 +248,10 @@ describeIf("agent e2e tool calls", () => {
     const meta = await getLatestAgentTurnMeta(response.callSessionId);
     const toolNames = (meta.tools ?? []).map((tool) => tool.toolName);
     const disallowed = [
-      "crm.getNextAppointment",
+      "appointments.getNextAppointment",
       "crm.getOpenInvoices",
       "crm.getAvailableSlots",
-      "crm.rescheduleAppointment",
+      "appointments.reschedule",
     ];
     for (const toolName of disallowed) {
       expect(toolNames).not.toContain(toolName);
@@ -256,7 +286,7 @@ describeIf("agent e2e tool calls", () => {
     const tools = meta.tools ?? [];
     const toolNames = tools.map((tool) => tool.toolName);
     expect(toolNames).toContain("crm.lookupCustomerByPhone");
-    expect(toolNames).toContain("crm.getNextAppointment");
+    expect(toolNames).toContain("appointments.getNextAppointment");
     expect(meta.customerId).toBe("cust_003");
 
     const modelCalls = meta.modelCalls ?? [];

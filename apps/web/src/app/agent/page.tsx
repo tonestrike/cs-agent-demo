@@ -4,35 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import type { CallSession } from "@pestcall/core";
+
 import { Badge, Button, Card } from "../../components/ui";
-import { callRpc } from "../../lib/api";
-
-type CallSession = {
-  id: string;
-  startedAt: string;
-  endedAt: string | null;
-  phoneE164: string;
-  customerCacheId: string | null;
-  status: string;
-  transport: string;
-  summary: string | null;
-};
-
-type Ticket = {
-  id: string;
-  createdAt: string;
-  updatedAt: string;
-  status: string;
-  priority: string;
-  category: string;
-  customerCacheId?: string;
-  phoneE164?: string;
-  subject: string;
-  description: string;
-  assignee?: string;
-  source: string;
-  externalRef?: string;
-};
+import { rpcClient } from "../../lib/orpc";
 
 const maskPhone = (phoneE164: string) => {
   const last4 = phoneE164.slice(-4);
@@ -53,33 +28,41 @@ export default function AgentDashboardPage() {
 
   const callsQuery = useQuery({
     queryKey: ["calls"],
-    queryFn: () =>
-      callRpc<{ items: CallSession[]; nextCursor: string | null }>(
-        "calls/list",
-        { limit: 20 },
-      ),
+    queryFn: () => rpcClient.calls.list({ limit: 20 }),
   });
 
   const ticketsQuery = useQuery({
     queryKey: ["tickets"],
-    queryFn: () =>
-      callRpc<{ items: Ticket[]; nextCursor: string | null }>("tickets/list", {
-        limit: 12,
-      }),
+    queryFn: () => rpcClient.tickets.list({ limit: 12 }),
+  });
+
+  const appointmentsQuery = useQuery({
+    queryKey: ["appointments"],
+    queryFn: () => rpcClient.appointments.list({ limit: 10 }),
   });
 
   const groupedCalls = useMemo(() => {
     const map = new Map<
       string,
-      { phoneE164: string; sessions: CallSession[] }
+      {
+        key: string;
+        phoneE164: string;
+        customerCacheId: string | null;
+        sessions: CallSession[];
+      }
     >();
     for (const session of callsQuery.data?.items ?? []) {
-      const key = session.phoneE164;
+      const key = session.customerCacheId ?? session.phoneE164;
       const existing = map.get(key);
       if (existing) {
         existing.sessions.push(session);
       } else {
-        map.set(key, { phoneE164: key, sessions: [session] });
+        map.set(key, {
+          key,
+          phoneE164: session.phoneE164,
+          customerCacheId: session.customerCacheId,
+          sessions: [session],
+        });
       }
     }
     return Array.from(map.values()).map((entry) => {
@@ -87,9 +70,9 @@ export default function AgentDashboardPage() {
         a.startedAt < b.startedAt ? 1 : -1,
       );
       return {
-        phoneE164: entry.phoneE164,
-        count: entry.sessions.length,
-        latest: sorted[0],
+        ...entry,
+        sessions: sorted,
+        count: sorted.length,
       };
     });
   }, [callsQuery.data?.items]);
@@ -110,18 +93,18 @@ export default function AgentDashboardPage() {
         <header className="flex flex-col gap-4">
           <Badge className="w-fit">Agent Dashboard</Badge>
           <h1 className="text-3xl font-semibold text-ink sm:text-4xl">
-            Calls, tickets, and live traces in one place.
+            The <span className="accent-text">PestCall</span> operations hub.
           </h1>
           <p className="max-w-3xl text-ink/70">
-            Review recent sessions, monitor ticket status, and inspect model +
-            tool usage per turn.
+            Track call sessions, inspect model/tool behavior, and manage tickets
+            without leaving the command center.
           </p>
         </header>
 
         <div className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
-          <Card className="flex flex-col gap-5">
+          <Card className="flex flex-col gap-5 animate-rise">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">Recent Calls</h2>
+              <h2 className="text-xl font-semibold">Calls by Customer</h2>
               <Button
                 className="bg-moss hover:bg-ink"
                 onClick={() => callsQuery.refetch()}
@@ -129,91 +112,144 @@ export default function AgentDashboardPage() {
                 Refresh
               </Button>
             </div>
-            <div className="space-y-3">
-              {groupedCalls.map((group) =>
-                group.latest ? (
-                  <div
-                    key={group.phoneE164}
-                    className="rounded-2xl border border-ink/10 bg-white/70 p-4"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-ink">
-                          {maskPhone(group.phoneE164)}
-                        </p>
-                        <p className="text-xs text-ink/60">
-                          {formatDateTime(group.latest.startedAt)} •{" "}
-                          {group.latest.status} • {group.count} sessions
-                        </p>
-                      </div>
-                      <span className="text-xs uppercase tracking-wide text-ink/50">
-                        {group.latest.transport}
-                      </span>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        className="bg-moss hover:bg-ink"
-                        onClick={() =>
-                          setSelectedCall(group.latest?.id ?? null)
-                        }
-                      >
-                        View trace
-                      </Button>
-                      <Link
-                        href={`/agent/calls/${group.latest.id}`}
-                        className="rounded-full border border-ink/20 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-ink/70 transition hover:border-ink/40 hover:text-ink"
-                      >
-                        Full page
-                      </Link>
+            <div className="scroll-area max-h-[520px] space-y-3 overflow-y-auto pr-1">
+              {groupedCalls.map((group) => (
+                <div
+                  key={group.key}
+                  className="rounded-2xl border border-ink/10 bg-white/70 p-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-ink">
+                        {maskPhone(group.phoneE164)}
+                      </p>
+                      <p className="text-xs text-ink/60">
+                        {group.customerCacheId ?? "Unknown customer"} •{" "}
+                        {group.count} sessions
+                      </p>
                     </div>
                   </div>
-                ) : null,
-              )}
+                  <div className="mt-3 space-y-2">
+                    {group.sessions.map((session) => (
+                      <div
+                        key={session.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-ink/10 bg-white/80 p-3"
+                      >
+                        <div>
+                          <p className="text-xs text-ink/60">
+                            {formatDateTime(session.startedAt)} •{" "}
+                            {session.status}
+                          </p>
+                          <p className="text-[11px] uppercase tracking-wide text-ink/50">
+                            {session.transport}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            className="bg-moss hover:bg-ink"
+                            onClick={() => setSelectedCall(session.id)}
+                          >
+                            View trace
+                          </Button>
+                          <Link
+                            href={`/agent/calls/${session.id}`}
+                            className="rounded-full border border-ink/20 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-ink/70 transition hover:border-ink/40 hover:text-ink"
+                          >
+                            Full page
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
               {callsQuery.isLoading && (
                 <p className="text-sm text-ink/60">Loading calls...</p>
               )}
             </div>
           </Card>
 
-          <Card className="flex flex-col gap-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">Open Tickets</h2>
-              <Button
-                className="bg-clay hover:bg-ink"
-                onClick={() => ticketsQuery.refetch()}
-              >
-                Refresh
-              </Button>
-            </div>
-            <div className="space-y-3">
-              {(ticketsQuery.data?.items ?? []).map((ticket) => (
-                <Link
-                  key={ticket.id}
-                  href={`/agent/tickets/${ticket.id}`}
-                  className="block rounded-2xl border border-ink/10 bg-white/70 p-4 transition hover:border-ink/30"
+          <div className="flex flex-col gap-6">
+            <Card className="flex flex-col gap-5 animate-rise">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold">Open Tickets</h2>
+                <Button
+                  className="bg-clay hover:bg-ink"
+                  onClick={() => ticketsQuery.refetch()}
                 >
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-ink">
-                      {ticket.subject}
+                  Refresh
+                </Button>
+              </div>
+              <div className="space-y-3">
+                {(ticketsQuery.data?.items ?? []).map((ticket) => (
+                  <Link
+                    key={ticket.id}
+                    href={`/agent/tickets/${ticket.id}`}
+                    className="block rounded-2xl border border-ink/10 bg-white/70 p-4 transition hover:border-ink/30"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-ink">
+                        {ticket.subject}
+                      </p>
+                      <span className="text-xs uppercase text-ink/50">
+                        {ticket.status}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-ink/60">
+                      {ticket.category} • {ticket.priority}
                     </p>
-                    <span className="text-xs uppercase text-ink/50">
-                      {ticket.status}
-                    </span>
+                  </Link>
+                ))}
+                {ticketsQuery.isLoading && (
+                  <p className="text-sm text-ink/60">Loading tickets...</p>
+                )}
+              </div>
+            </Card>
+
+            <Card className="flex flex-col gap-5 animate-rise">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold">Appointments</h2>
+                <Button
+                  className="bg-moss hover:bg-ink"
+                  onClick={() => appointmentsQuery.refetch()}
+                >
+                  Refresh
+                </Button>
+              </div>
+              <div className="space-y-3">
+                {(appointmentsQuery.data?.items ?? []).map((appointment) => (
+                  <div
+                    key={appointment.id}
+                    className="rounded-2xl border border-ink/10 bg-white/70 p-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-ink">
+                        {maskPhone(appointment.phoneE164)}
+                      </p>
+                      <span className="text-xs uppercase text-ink/50">
+                        {appointment.status}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-ink/60">
+                      {appointment.date} • {appointment.timeWindow}
+                    </p>
+                    {appointment.rescheduledFromId ? (
+                      <p className="mt-2 text-xs text-ink/50">
+                        Rescheduled from {appointment.rescheduledFromId}
+                      </p>
+                    ) : null}
                   </div>
-                  <p className="mt-2 text-xs text-ink/60">
-                    {ticket.category} • {ticket.priority}
-                  </p>
-                </Link>
-              ))}
-              {ticketsQuery.isLoading && (
-                <p className="text-sm text-ink/60">Loading tickets...</p>
-              )}
-            </div>
-          </Card>
+                ))}
+                {appointmentsQuery.isLoading && (
+                  <p className="text-sm text-ink/60">Loading appointments...</p>
+                )}
+              </div>
+            </Card>
+          </div>
         </div>
 
-        <Card className="flex flex-col gap-4">
+        <Card className="flex flex-col gap-4 animate-rise">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-xl font-semibold">Call Trace</h2>
