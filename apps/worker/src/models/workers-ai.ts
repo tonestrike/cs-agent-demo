@@ -61,6 +61,8 @@ export const createWorkersAiAdapter = (
   }
 
   return {
+    name: "workers-ai",
+    modelId: model,
     async generate(input: AgentModelInput) {
       if (!ai) {
         throw new AppError("Workers AI binding is not configured.", {

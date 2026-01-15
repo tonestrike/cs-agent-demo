@@ -11,12 +11,18 @@ interface E2EEnv {
   E2E_AUTH_TOKEN?: string;
   DEMO_AUTH_TOKEN?: string;
   E2E_PHONE?: string;
+  E2E_EXPECT_REAL_MODEL?: string;
+  E2E_EXPECT_MODEL_NAME?: string;
+  E2E_EXPECT_MODEL_ID?: string;
 }
 
 const env = process.env as E2EEnv;
 const baseUrl = env.E2E_BASE_URL ?? "http://127.0.0.1:8787";
 const authToken = env.E2E_AUTH_TOKEN ?? env.DEMO_AUTH_TOKEN;
 const phoneNumber = env.E2E_PHONE ?? "+14155552671";
+const expectRealModel = env.E2E_EXPECT_REAL_MODEL === "true";
+const expectedModelName = env.E2E_EXPECT_MODEL_NAME;
+const expectedModelId = env.E2E_EXPECT_MODEL_ID;
 
 const describeIf = baseUrl ? describe : describe.skip;
 
@@ -44,7 +50,7 @@ const callRpc = async <T>(
   return data.json;
 };
 
-const getLatestAgentTools = async (callSessionId: string) => {
+const getLatestAgentTurnMeta = async (callSessionId: string) => {
   const detail = await callRpc<{
     turns: Array<{
       speaker: string;
@@ -55,9 +61,47 @@ const getLatestAgentTools = async (callSessionId: string) => {
   const agentTurn = [...detail.turns]
     .reverse()
     .find((turn) => turn.speaker === "agent");
-  const meta = agentTurn?.meta as { tools?: Array<{ toolName: string }> };
-  const tools = meta?.tools ?? [];
-  return tools;
+  return (agentTurn?.meta ?? {}) as {
+    tools?: Array<{ toolName: string }>;
+    modelCalls?: Array<{
+      modelName: string;
+      modelId?: string;
+      kind: string;
+      latencyMs: number;
+      success: boolean;
+    }>;
+  };
+};
+
+const assertRealModelCalls = (
+  modelCalls: Array<{
+    modelName: string;
+    modelId?: string;
+    kind: string;
+    latencyMs: number;
+    success: boolean;
+  }>,
+) => {
+  console.log("expectRealModel", expectRealModel);
+  console.log("modelCalls", modelCalls);
+  console.log("expectedModelName", expectedModelName);
+  console.log("expectedModelId", expectedModelId);
+  if (!expectRealModel) {
+    return;
+  }
+
+  const nonMockCalls = modelCalls.filter((call) => call.modelName !== "mock");
+  expect(nonMockCalls.length).toBeGreaterThan(0);
+  for (const call of nonMockCalls) {
+    if (expectedModelName) {
+      expect(call.modelName).toBe(expectedModelName);
+    }
+    if (expectedModelId) {
+      expect(call.modelId).toBe(expectedModelId);
+    } else if (call.modelId) {
+      expect(call.modelId).not.toBe("mock");
+    }
+  }
 };
 
 describeIf("agent e2e tool calls", () => {
@@ -72,10 +116,19 @@ describeIf("agent e2e tool calls", () => {
 
     expect(response.replyText.length).toBeGreaterThan(0);
 
-    const tools = await getLatestAgentTools(response.callSessionId);
+    const meta = await getLatestAgentTurnMeta(response.callSessionId);
+    const tools = meta.tools ?? [];
     const toolNames = tools.map((tool) => tool.toolName);
     expect(toolNames).toContain("crm.lookupCustomerByPhone");
     expect(toolNames).toContain("crm.getNextAppointment");
+
+    const modelCalls = meta.modelCalls ?? [];
+    expect(modelCalls.length).toBeGreaterThan(0);
+    expect(modelCalls[0]?.modelName).toBeTypeOf("string");
+    if (modelCalls[0]?.modelId) {
+      expect(modelCalls[0]?.modelId).toBeTypeOf("string");
+    }
+    assertRealModelCalls(modelCalls);
   });
 
   it("records billing tool calls when zip is provided", async () => {
@@ -89,9 +142,18 @@ describeIf("agent e2e tool calls", () => {
 
     expect(response.replyText.length).toBeGreaterThan(0);
 
-    const tools = await getLatestAgentTools(response.callSessionId);
+    const meta = await getLatestAgentTurnMeta(response.callSessionId);
+    const tools = meta.tools ?? [];
     const toolNames = tools.map((tool) => tool.toolName);
     expect(toolNames).toContain("crm.lookupCustomerByPhone");
     expect(toolNames).toContain("crm.getOpenInvoices");
+
+    const modelCalls = meta.modelCalls ?? [];
+    expect(modelCalls.length).toBeGreaterThan(0);
+    expect(modelCalls[0]?.modelName).toBeTypeOf("string");
+    if (modelCalls[0]?.modelId) {
+      expect(modelCalls[0]?.modelId).toBeTypeOf("string");
+    }
+    assertRealModelCalls(modelCalls);
   });
 });

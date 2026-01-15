@@ -90,6 +90,8 @@ bun deploy:worker --seed
 - [CI/CD](docs/ci.md) - Continuous integration setup
 - [Styleguide](docs/styleguide.md) - Code style and patterns
 - [Documentation Styleguide](docs/docs-styleguide.md) - How to write docs
+- [MCP Setup](docs/mcp/README.md) - Model Context Protocol servers (Postman, Serena, Context7)
+- [Postman Setup](postman/README.md) - API testing with Postman collections and environments
 
 ## AI Coding Tools
 

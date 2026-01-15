@@ -24,6 +24,15 @@ type ToolCall = {
   errorCode?: string;
 };
 
+type ModelCall = {
+  modelName: string;
+  modelId?: string;
+  kind: "decide" | "respond";
+  latencyMs: number;
+  success: boolean;
+  errorCode?: string;
+};
+
 const recordToolCall = async <T>(
   toolName: string,
   call: () => Promise<T>,
@@ -44,6 +53,39 @@ const recordToolCall = async <T>(
       result: error as T,
       record: {
         toolName,
+        latencyMs: Date.now() - start,
+        success: false,
+        errorCode: error instanceof Error ? error.message : "unknown",
+      },
+    };
+  }
+};
+
+const recordModelCall = async <T>(
+  model: { name: string; modelId?: string },
+  kind: ModelCall["kind"],
+  call: () => Promise<T>,
+): Promise<{ result: T; record: ModelCall }> => {
+  const start = Date.now();
+  try {
+    const result = await call();
+    return {
+      result,
+      record: {
+        modelName: model.name,
+        modelId: model.modelId,
+        kind,
+        latencyMs: Date.now() - start,
+        success: true,
+      },
+    };
+  } catch (error) {
+    return {
+      result: error as T,
+      record: {
+        modelName: model.name,
+        modelId: model.modelId,
+        kind,
         latencyMs: Date.now() - start,
         success: false,
         errorCode: error instanceof Error ? error.message : "unknown",
@@ -75,13 +117,23 @@ const generateReply = async (
   },
   toolResult: ToolResult,
   fallbackText: string,
+  modelCalls: ModelCall[],
 ) => {
-  try {
-    return await deps.model.respond({
+  const responseCall = await recordModelCall(deps.model, "respond", () =>
+    deps.model.respond({
       text: input.text,
       customer: buildCustomerContext(customer),
       ...toolResult,
-    });
+    }),
+  );
+  modelCalls.push(responseCall.record);
+
+  if (responseCall.record.success) {
+    return responseCall.result;
+  }
+
+  try {
+    throw responseCall.result;
   } catch {
     return fallbackText;
   }
@@ -94,6 +146,7 @@ export const handleAgentMessage = async (
 ): Promise<AgentMessageOutput> => {
   const phoneE164 = normalizePhoneE164(input.phoneNumber);
   const tools: ToolCall[] = [];
+  const modelCalls: ModelCall[] = [];
 
   let callSessionId = input.callSessionId;
   if (!callSessionId) {
@@ -144,7 +197,7 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent: "lookup", tools, ticketId: ticket.id },
+      meta: { intent: "lookup", tools, modelCalls, ticketId: ticket.id },
     });
 
     return {
@@ -165,7 +218,7 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent: "lookup", tools },
+      meta: { intent: "lookup", tools, modelCalls },
     });
 
     return {
@@ -186,7 +239,7 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent: "lookup", tools },
+      meta: { intent: "lookup", tools, modelCalls },
     });
 
     return {
@@ -196,10 +249,19 @@ export const handleAgentMessage = async (
     };
   }
 
-  const modelOutput = await deps.model.generate({
-    text: input.text,
-    customer: buildCustomerContext(customer),
-  });
+  const modelDecision = await recordModelCall(deps.model, "decide", () =>
+    deps.model.generate({
+      text: input.text,
+      customer: buildCustomerContext(customer),
+    }),
+  );
+  modelCalls.push(modelDecision.record);
+
+  if (!modelDecision.record.success) {
+    throw modelDecision.result;
+  }
+
+  const modelOutput = modelDecision.result;
 
   if (modelOutput.type === "final") {
     const replyText = modelOutput.text;
@@ -209,7 +271,7 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent: "final", tools },
+      meta: { intent: "final", tools, modelCalls },
     });
 
     return {
@@ -254,6 +316,7 @@ export const handleAgentMessage = async (
           result: null,
         },
         "I couldn't find a scheduled appointment. I've opened a ticket for our team.",
+        modelCalls,
       );
 
       await deps.calls.addTurn({
@@ -262,7 +325,7 @@ export const handleAgentMessage = async (
         ts: new Date().toISOString(),
         speaker: "agent",
         text: replyText,
-        meta: { intent, tools, ticketId: ticket.id },
+        meta: { intent, tools, modelCalls, ticketId: ticket.id },
       });
 
       return {
@@ -303,6 +366,7 @@ export const handleAgentMessage = async (
             },
           },
           `I moved your appointment. Your new window is ${slot.date} ${slot.timeWindow}.`,
+          modelCalls,
         );
 
         await deps.calls.addTurn({
@@ -311,7 +375,7 @@ export const handleAgentMessage = async (
           ts: new Date().toISOString(),
           speaker: "agent",
           text: replyText,
-          meta: { intent, tools },
+          meta: { intent, tools, modelCalls },
         });
 
         return {
@@ -335,6 +399,7 @@ export const handleAgentMessage = async (
         },
       },
       `Your next appointment is ${appointment.date} ${appointment.timeWindow} at ${appointment.addressSummary}.`,
+      modelCalls,
     );
 
     await deps.calls.addTurn({
@@ -343,7 +408,7 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent, tools },
+      meta: { intent, tools, modelCalls },
     });
 
     return {
@@ -365,7 +430,7 @@ export const handleAgentMessage = async (
         ts: new Date().toISOString(),
         speaker: "agent",
         text: replyText,
-        meta: { intent, tools },
+        meta: { intent, tools, modelCalls },
       });
 
       return {
@@ -402,6 +467,7 @@ export const handleAgentMessage = async (
       balanceCents === 0
         ? "You have no outstanding balance."
         : `Your current balance is $${(balanceCents / 100).toFixed(2)}.`,
+      modelCalls,
     );
 
     let ticketId: string | undefined;
@@ -423,7 +489,7 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent, tools, ticketId },
+      meta: { intent, tools, modelCalls, ticketId },
     });
 
     return {
@@ -453,6 +519,7 @@ export const handleAgentMessage = async (
         result: { escalated: true },
       },
       "I have created a ticket for a specialist to follow up shortly.",
+      modelCalls,
     );
 
     await deps.calls.addTurn({
@@ -461,7 +528,7 @@ export const handleAgentMessage = async (
       ts: new Date().toISOString(),
       speaker: "agent",
       text: replyText,
-      meta: { intent, tools, ticketId: ticket.id },
+      meta: { intent, tools, modelCalls, ticketId: ticket.id },
     });
 
     return {
@@ -489,7 +556,7 @@ export const handleAgentMessage = async (
     ts: new Date().toISOString(),
     speaker: "agent",
     text: replyText,
-    meta: { intent: "fallback", tools, ticketId: ticket.id },
+    meta: { intent: "fallback", tools, modelCalls, ticketId: ticket.id },
   });
 
   return {

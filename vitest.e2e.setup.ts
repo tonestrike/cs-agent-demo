@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const PORT = Number(process.env.E2E_PORT ?? 8787);
 const BASE_URL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${PORT}`;
+const useRemote = Boolean(process.env.E2E_BASE_URL);
 
 const waitForServer = async (url: string, attempts = 40) => {
   for (let i = 0; i < attempts; i += 1) {
@@ -22,6 +23,11 @@ const waitForServer = async (url: string, attempts = 40) => {
 };
 
 export default async function setup() {
+  if (useRemote) {
+    process.env.E2E_BASE_URL = BASE_URL;
+    return async () => {};
+  }
+
   const wrangler = spawn(
     "npx",
     [

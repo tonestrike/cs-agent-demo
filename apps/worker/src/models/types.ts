@@ -91,6 +91,8 @@ export type AgentResponseInput = {
 } & ToolResult;
 
 export type ModelAdapter = {
+  name: "mock" | "workers-ai";
+  modelId?: string;
   generate: (input: AgentModelInput) => Promise<AgentModelOutput>;
   respond: (input: AgentResponseInput) => Promise<string>;
 };
