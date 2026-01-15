@@ -1,8 +1,8 @@
 import {
   TicketEventType,
+  type TicketEventTypeValue,
   applyStatusTransition,
   createTicket,
-  type TicketEventTypeValue,
 } from "@pestcall/core";
 
 import type { createTicketRepository } from "../repositories";
