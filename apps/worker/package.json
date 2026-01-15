@@ -1,5 +1,9 @@
 {
   "name": "@pestcall/worker",
   "version": "0.0.0",
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@orpc/server": "^1.13.4",
+    "zod": "^3.23.8"
+  }
 }
