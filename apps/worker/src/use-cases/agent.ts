@@ -51,6 +51,43 @@ const recordToolCall = async <T>(
   }
 };
 
+const buildCustomerContext = (customer: {
+  id: string;
+  displayName: string;
+  phoneE164: string;
+  addressSummary: string;
+}) => ({
+  id: customer.id,
+  displayName: customer.displayName,
+  phoneE164: customer.phoneE164,
+  addressSummary: customer.addressSummary,
+});
+
+const generateReply = async (
+  deps: Dependencies,
+  input: AgentMessageInput,
+  customer: {
+    id: string;
+    displayName: string;
+    phoneE164: string;
+    addressSummary: string;
+  },
+  toolName: string,
+  toolResult: Record<string, unknown>,
+  fallbackText: string,
+) => {
+  try {
+    return await deps.model.respond({
+      text: input.text,
+      customer: buildCustomerContext(customer),
+      toolName,
+      toolResult,
+    });
+  } catch {
+    return fallbackText;
+  }
+};
+
 export const handleAgentMessage = async (
   deps: Dependencies,
   input: AgentMessageInput,
@@ -162,12 +199,7 @@ export const handleAgentMessage = async (
 
   const modelOutput = await deps.model.generate({
     text: input.text,
-    customer: {
-      id: customer.id,
-      displayName: customer.displayName,
-      phoneE164: customer.phoneE164,
-      addressSummary: customer.addressSummary,
-    },
+    customer: buildCustomerContext(customer),
   });
 
   if (modelOutput.type === "final") {
@@ -214,8 +246,16 @@ export const handleAgentMessage = async (
 
       actions.push("created_ticket");
 
-      const replyText =
-        "I couldn't find a scheduled appointment. I've opened a ticket for our team.";
+      const replyText = await generateReply(
+        deps,
+        input,
+        customer,
+        "crm.getNextAppointment",
+        {
+          appointmentFound: false,
+        },
+        "I couldn't find a scheduled appointment. I've opened a ticket for our team.",
+      );
 
       await deps.calls.addTurn({
         id: crypto.randomUUID(),
@@ -252,7 +292,17 @@ export const handleAgentMessage = async (
         );
         tools.push(rescheduleCall.record);
 
-        const replyText = `I moved your appointment. Your new window is ${slot.date} ${slot.timeWindow}.`;
+        const replyText = await generateReply(
+          deps,
+          input,
+          customer,
+          "crm.rescheduleAppointment",
+          {
+            date: slot.date,
+            timeWindow: slot.timeWindow,
+          },
+          `I moved your appointment. Your new window is ${slot.date} ${slot.timeWindow}.`,
+        );
 
         await deps.calls.addTurn({
           id: crypto.randomUUID(),
@@ -271,9 +321,18 @@ export const handleAgentMessage = async (
       }
     }
 
-    const replyText =
-      `Your next appointment is ${appointment.date} ` +
-      `${appointment.timeWindow} at ${appointment.addressSummary}.`;
+    const replyText = await generateReply(
+      deps,
+      input,
+      customer,
+      "crm.getNextAppointment",
+      {
+        date: appointment.date,
+        timeWindow: appointment.timeWindow,
+        addressSummary: appointment.addressSummary,
+      },
+      `Your next appointment is ${appointment.date} ${appointment.timeWindow} at ${appointment.addressSummary}.`,
+    );
 
     await deps.calls.addTurn({
       id: crypto.randomUUID(),
@@ -326,10 +385,19 @@ export const handleAgentMessage = async (
       0,
     );
 
-    const replyText =
+    const replyText = await generateReply(
+      deps,
+      input,
+      customer,
+      "crm.getOpenInvoices",
+      {
+        balanceCents,
+        invoiceCount: invoices.length,
+      },
       balanceCents === 0
         ? "You have no outstanding balance."
-        : `Your current balance is $${(balanceCents / 100).toFixed(2)}.`;
+        : `Your current balance is $${(balanceCents / 100).toFixed(2)}.`,
+    );
 
     let ticketId: string | undefined;
     if (hasPaymentRequest(input.text)) {
@@ -371,8 +439,14 @@ export const handleAgentMessage = async (
     });
     actions.push("created_ticket");
 
-    const replyText =
-      "I have created a ticket for a specialist to follow up shortly.";
+    const replyText = await generateReply(
+      deps,
+      input,
+      customer,
+      "agent.escalate",
+      { ticketId: ticket.id },
+      "I have created a ticket for a specialist to follow up shortly.",
+    );
 
     await deps.calls.addTurn({
       id: crypto.randomUUID(),

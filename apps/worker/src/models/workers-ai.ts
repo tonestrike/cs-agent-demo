@@ -3,6 +3,7 @@ import { AppError } from "@pestcall/core";
 
 import {
   type AgentModelInput,
+  type AgentResponseInput,
   type ModelAdapter,
   agentModelOutputSchema,
 } from "./types";
@@ -94,6 +95,33 @@ export const createWorkersAiAdapter = (
         type: "final",
         text: "I could not interpret the request. Can you rephrase?",
       };
+    },
+    async respond(input: AgentResponseInput) {
+      if (!ai) {
+        throw new AppError("Workers AI binding is not configured.", {
+          code: "AI_NOT_CONFIGURED",
+        });
+      }
+
+      const prompt = [
+        "You are a pest control support agent.",
+        "Respond in 1-2 short sentences.",
+        "Use the tool result to answer the customer.",
+        "Do not mention internal tool names.",
+        `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
+        `User: ${input.text}`,
+        `Tool: ${input.toolName}`,
+        `Tool Result: ${JSON.stringify(input.toolResult)}`,
+      ].join("\n");
+
+      const response = await ai.run(model as keyof AiModels, {
+        messages: [
+          { role: "system", content: "You are a helpful assistant." },
+          { role: "user", content: prompt },
+        ],
+      });
+      const text = responseToText(response);
+      return text ?? "Thanks for the details. How else can I help?";
     },
   };
 };

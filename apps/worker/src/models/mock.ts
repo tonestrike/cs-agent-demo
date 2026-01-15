@@ -1,4 +1,8 @@
-import type { AgentModelInput, ModelAdapter } from "./types";
+import type {
+  AgentModelInput,
+  AgentResponseInput,
+  ModelAdapter,
+} from "./types";
 
 const detectTool = (text: string) => {
   const lowered = text.toLowerCase();
@@ -42,6 +46,41 @@ export const createMockModelAdapter = (): ModelAdapter => {
         toolName,
         arguments: { customerId: input.customer.id },
       };
+    },
+    async respond(input: AgentResponseInput) {
+      switch (input.toolName) {
+        case "crm.getNextAppointment": {
+          const appointment = input.toolResult as {
+            date?: string;
+            timeWindow?: string;
+            addressSummary?: string;
+          };
+          if (!appointment?.date || !appointment?.timeWindow) {
+            return "I couldn't find a scheduled appointment.";
+          }
+          return `Your next appointment is ${appointment.date} ${appointment.timeWindow} at ${appointment.addressSummary ?? "your address"}.`;
+        }
+        case "crm.rescheduleAppointment": {
+          const slot = input.toolResult as {
+            date?: string;
+            timeWindow?: string;
+          };
+          if (!slot?.date || !slot?.timeWindow) {
+            return "I couldn't reschedule the appointment yet.";
+          }
+          return `I moved your appointment. Your new window is ${slot.date} ${slot.timeWindow}.`;
+        }
+        case "crm.getOpenInvoices": {
+          const balanceCents = Number(input.toolResult.balanceCents ?? 0);
+          return balanceCents === 0
+            ? "You have no outstanding balance."
+            : `Your current balance is $${(balanceCents / 100).toFixed(2)}.`;
+        }
+        case "agent.escalate":
+          return "I have created a ticket for a specialist to follow up shortly.";
+        default:
+          return "Thanks for the details. How else can I help?";
+      }
     },
   };
 };

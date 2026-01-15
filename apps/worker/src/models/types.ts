@@ -35,6 +35,19 @@ export type AgentModelInput = {
   };
 };
 
+export type AgentResponseInput = {
+  text: string;
+  customer: {
+    id: string;
+    displayName: string;
+    phoneE164: string;
+    addressSummary: string;
+  };
+  toolName: string;
+  toolResult: Record<string, unknown>;
+};
+
 export type ModelAdapter = {
   generate: (input: AgentModelInput) => Promise<AgentModelOutput>;
+  respond: (input: AgentResponseInput) => Promise<string>;
 };
