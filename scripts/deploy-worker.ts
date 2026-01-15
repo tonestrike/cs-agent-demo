@@ -1,13 +1,9 @@
 import "dotenv/config";
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { type ChildProcessByStdio, spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import type { Readable } from "node:stream";
 import { Command } from "commander";
-
-type D1DatabaseInfo = {
-  name: string;
-  uuid: string;
-};
 
 const WORKER_DIR = resolve(process.cwd(), "apps/worker");
 const WRANGLER_CONFIG = resolve(WORKER_DIR, "wrangler.toml");
@@ -15,7 +11,7 @@ const WRANGLER_CONFIG = resolve(WORKER_DIR, "wrangler.toml");
 const runWrangler = async (args: string[], options?: { quiet?: boolean }) => {
   return new Promise<{ stdout: string; stderr: string }>(
     (resolvePromise, reject) => {
-      const proc: ChildProcessWithoutNullStreams = spawn(
+      const proc: ChildProcessByStdio<null, Readable, Readable> = spawn(
         "bunx",
         ["wrangler", ...args],
         {
@@ -70,7 +66,11 @@ const updateDatabaseId = async (content: string, databaseId: string) => {
 const parseD1List = (output: string) => {
   const lines = output.split("\n");
   for (const line of lines) {
-    if (line.includes("│") && !line.includes("Account") && !line.includes("Name")) {
+    if (
+      line.includes("│") &&
+      !line.includes("Account") &&
+      !line.includes("Name")
+    ) {
       const parts = line
         .split("│")
         .map((part) => part.trim())
@@ -131,6 +131,7 @@ const deploy = async (options: { seed: boolean }) => {
     "migrations",
     "apply",
     dbName,
+    "--remote",
     "--config",
     WRANGLER_CONFIG,
   ]);
@@ -140,6 +141,7 @@ const deploy = async (options: { seed: boolean }) => {
       "d1",
       "execute",
       dbName,
+      "--remote",
       "--config",
       WRANGLER_CONFIG,
       "--file",

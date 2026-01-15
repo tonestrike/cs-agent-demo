@@ -13,7 +13,7 @@ binding = "AI"
 [[d1_databases]]
 binding = "DB"
 database_name = "pestcall_local"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "b3a818ac-cbb2-4981-b3f2-2ee61f9a0baa"
 migrations_dir = "migrations"
 
 [[durable_objects.bindings]]
