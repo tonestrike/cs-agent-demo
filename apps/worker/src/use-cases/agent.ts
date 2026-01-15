@@ -1,6 +1,7 @@
 import { normalizePhoneE164 } from "@pestcall/core";
 
 import type { Dependencies } from "../context";
+import type { ToolResult } from "../models/types";
 import type { AgentMessageInput, AgentMessageOutput } from "../schemas/agent";
 import { createTicketUseCase } from "./tickets";
 
@@ -72,16 +73,14 @@ const generateReply = async (
     phoneE164: string;
     addressSummary: string;
   },
-  toolName: string,
-  toolResult: Record<string, unknown>,
+  toolResult: ToolResult,
   fallbackText: string,
 ) => {
   try {
     return await deps.model.respond({
       text: input.text,
       customer: buildCustomerContext(customer),
-      toolName,
-      toolResult,
+      ...toolResult,
     });
   } catch {
     return fallbackText;
@@ -250,9 +249,9 @@ export const handleAgentMessage = async (
         deps,
         input,
         customer,
-        "crm.getNextAppointment",
         {
-          appointmentFound: false,
+          toolName: "crm.getNextAppointment",
+          result: null,
         },
         "I couldn't find a scheduled appointment. I've opened a ticket for our team.",
       );
@@ -296,10 +295,12 @@ export const handleAgentMessage = async (
           deps,
           input,
           customer,
-          "crm.rescheduleAppointment",
           {
-            date: slot.date,
-            timeWindow: slot.timeWindow,
+            toolName: "crm.rescheduleAppointment",
+            result: {
+              date: slot.date,
+              timeWindow: slot.timeWindow,
+            },
           },
           `I moved your appointment. Your new window is ${slot.date} ${slot.timeWindow}.`,
         );
@@ -325,11 +326,13 @@ export const handleAgentMessage = async (
       deps,
       input,
       customer,
-      "crm.getNextAppointment",
       {
-        date: appointment.date,
-        timeWindow: appointment.timeWindow,
-        addressSummary: appointment.addressSummary,
+        toolName: "crm.getNextAppointment",
+        result: {
+          date: appointment.date,
+          timeWindow: appointment.timeWindow,
+          addressSummary: appointment.addressSummary,
+        },
       },
       `Your next appointment is ${appointment.date} ${appointment.timeWindow} at ${appointment.addressSummary}.`,
     );
@@ -389,10 +392,12 @@ export const handleAgentMessage = async (
       deps,
       input,
       customer,
-      "crm.getOpenInvoices",
       {
-        balanceCents,
-        invoiceCount: invoices.length,
+        toolName: "crm.getOpenInvoices",
+        result: {
+          balanceCents,
+          invoiceCount: invoices.length,
+        },
       },
       balanceCents === 0
         ? "You have no outstanding balance."
@@ -443,8 +448,10 @@ export const handleAgentMessage = async (
       deps,
       input,
       customer,
-      "agent.escalate",
-      { ticketId: ticket.id },
+      {
+        toolName: "agent.escalate",
+        result: { escalated: true },
+      },
       "I have created a ticket for a specialist to follow up shortly.",
     );
 

@@ -111,7 +111,7 @@ export const createWorkersAiAdapter = (
         `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
         `User: ${input.text}`,
         `Tool: ${input.toolName}`,
-        `Tool Result: ${JSON.stringify(input.toolResult)}`,
+        `Tool Result: ${JSON.stringify(input.result)}`,
       ].join("\n");
 
       const response = await ai.run(model as keyof AiModels, {

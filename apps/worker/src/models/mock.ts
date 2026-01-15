@@ -50,36 +50,22 @@ export const createMockModelAdapter = (): ModelAdapter => {
     async respond(input: AgentResponseInput) {
       switch (input.toolName) {
         case "crm.getNextAppointment": {
-          const appointment = input.toolResult as {
-            date?: string;
-            timeWindow?: string;
-            addressSummary?: string;
-          };
-          if (!appointment?.date || !appointment?.timeWindow) {
+          if (!input.result) {
             return "I couldn't find a scheduled appointment.";
           }
-          return `Your next appointment is ${appointment.date} ${appointment.timeWindow} at ${appointment.addressSummary ?? "your address"}.`;
+          return `Your next appointment is ${input.result.date} ${input.result.timeWindow} at ${input.result.addressSummary}.`;
         }
         case "crm.rescheduleAppointment": {
-          const slot = input.toolResult as {
-            date?: string;
-            timeWindow?: string;
-          };
-          if (!slot?.date || !slot?.timeWindow) {
-            return "I couldn't reschedule the appointment yet.";
-          }
-          return `I moved your appointment. Your new window is ${slot.date} ${slot.timeWindow}.`;
+          return `I moved your appointment. Your new window is ${input.result.date} ${input.result.timeWindow}.`;
         }
         case "crm.getOpenInvoices": {
-          const balanceCents = Number(input.toolResult["balanceCents"] ?? 0);
+          const balanceCents = input.result.balanceCents;
           return balanceCents === 0
             ? "You have no outstanding balance."
             : `Your current balance is $${(balanceCents / 100).toFixed(2)}.`;
         }
         case "agent.escalate":
           return "I have created a ticket for a specialist to follow up shortly.";
-        default:
-          return "Thanks for the details. How else can I help?";
       }
     },
   };

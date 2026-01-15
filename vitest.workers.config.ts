@@ -3,10 +3,7 @@ import { defineWorkersProject } from "@cloudflare/vitest-pool-workers/config";
 export default defineWorkersProject({
   test: {
     name: "workers",
-    include: [
-      "apps/worker/src/**/*.test.ts",
-      "!apps/worker/src/**/*.node.test.ts",
-    ],
+    include: ["apps/worker/src/**/*.worker.test.ts"],
     poolOptions: {
       workers: {
         wrangler: {

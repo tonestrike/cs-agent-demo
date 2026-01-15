@@ -25,6 +25,51 @@ export const agentModelOutputSchema = z.union([
 
 export type AgentModelOutput = z.infer<typeof agentModelOutputSchema>;
 
+// Tool result schemas
+export const appointmentResultSchema = z
+  .object({
+    date: z.string(),
+    timeWindow: z.string(),
+    addressSummary: z.string(),
+  })
+  .nullable();
+
+export const invoicesSummaryResultSchema = z.object({
+  balanceCents: z.number().int().nonnegative(),
+  invoiceCount: z.number().int().nonnegative().optional(),
+});
+
+export const rescheduleResultSchema = z.object({
+  date: z.string(),
+  timeWindow: z.string(),
+});
+
+export const escalateResultSchema = z.object({
+  escalated: z.literal(true),
+});
+
+// Discriminated union for tool results
+export const toolResultSchema = z.discriminatedUnion("toolName", [
+  z.object({
+    toolName: z.literal("crm.getNextAppointment"),
+    result: appointmentResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("crm.getOpenInvoices"),
+    result: invoicesSummaryResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("crm.rescheduleAppointment"),
+    result: rescheduleResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("agent.escalate"),
+    result: escalateResultSchema,
+  }),
+]);
+
+export type ToolResult = z.infer<typeof toolResultSchema>;
+
 export type AgentModelInput = {
   text: string;
   customer: {
@@ -43,9 +88,7 @@ export type AgentResponseInput = {
     phoneE164: string;
     addressSummary: string;
   };
-  toolName: string;
-  toolResult: Record<string, unknown>;
-};
+} & ToolResult;
 
 export type ModelAdapter = {
   generate: (input: AgentModelInput) => Promise<AgentModelOutput>;
