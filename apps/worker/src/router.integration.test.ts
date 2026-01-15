@@ -163,7 +163,7 @@ describe("crm RPC", () => {
         phoneE164: string;
       }[]
     >(platform, "crm/lookupCustomerByPhone", {
-      phoneE164: "+15551234567",
+      phoneE164: "+14155552671",
     });
 
     expect(customers).toHaveLength(1);
@@ -215,7 +215,7 @@ describe("agent RPC", () => {
       callSessionId: string;
       replyText: string;
     }>(platform, "agent/message", {
-      phoneNumber: "+15551234567",
+      phoneNumber: "+14155552671",
       text: "When is my next appointment?",
     });
 

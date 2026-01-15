@@ -9,13 +9,13 @@ export const customers: CustomerMatch[] = [
   {
     id: "cust_001",
     displayName: "Alex Rivera",
-    phoneE164: "+15551234567",
+    phoneE164: "+14155552671",
     addressSummary: "742 Evergreen Terrace",
   },
   {
     id: "cust_002",
     displayName: "Morgan Lee",
-    phoneE164: "+15559876543",
+    phoneE164: "+14155550987",
     addressSummary: "123 Harbor Drive",
   },
 ];
