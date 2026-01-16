@@ -55,6 +55,8 @@ export default function CallDetailPage({
                 {callQuery.data.session.status}
               </p>
             </>
+          ) : callQuery.data ? (
+            <p className="text-sm text-ink/60">Session not found.</p>
           ) : (
             <p className="text-sm text-ink/60">Loading session...</p>
           )}

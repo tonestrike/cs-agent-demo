@@ -26,7 +26,7 @@ export const callTurnSchema = z.object({
 });
 
 export const callDetailSchema = z.object({
-  session: callSessionSchema,
+  session: callSessionSchema.nullable(),
   turns: z.array(callTurnSchema),
 });
 

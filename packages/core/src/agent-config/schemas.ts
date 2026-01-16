@@ -82,19 +82,17 @@ export const agentPromptConfigSchema = z.object({
   greeting: z
     .string()
     .min(1)
-    .default("Hi! Thanks for calling PestCall. How can I help today?"),
+    .default("Hey there — thanks for calling PestCall. How can I help today?"),
   scopeMessage: z
     .string()
     .min(1)
-    .default(
-      "I can help with pest control appointments, billing, and service questions.",
-    ),
+    .default("I can help with appointments, billing, and service questions."),
   companyName: z.string().min(1).default("PestCall"),
   personaSummary: z
     .string()
     .min(1)
     .default(
-      "You are a friendly, capable pest control support agent who speaks clearly and stays concise.",
+      "You are a friendly, conversational pest control support agent. You keep responses concise, ask one clear question at a time, and sound human.",
     ),
   toolGuidance: agentToolGuidanceSchema.default(defaultToolGuidance),
   modelId: z.string().min(1).default("@cf/meta/llama-3.1-8b-instruct"),

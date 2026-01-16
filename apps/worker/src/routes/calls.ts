@@ -1,4 +1,3 @@
-import { ORPCError } from "@orpc/server";
 import {
   callDetailSchema,
   callIdInputSchema,
@@ -24,10 +23,6 @@ export const callProcedures = {
         context.deps.calls,
         input.callSessionId,
       );
-      if (!detail) {
-        throw new ORPCError("NOT_FOUND", { message: "Call session not found" });
-      }
-
-      return detail;
+      return detail ?? { session: null, turns: [] };
     }),
 };
