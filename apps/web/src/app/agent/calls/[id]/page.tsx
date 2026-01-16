@@ -16,11 +16,6 @@ const formatDateTime = (iso: string) =>
     minute: "2-digit",
   });
 
-const maskPhone = (phoneE164: string) => {
-  const last4 = phoneE164.slice(-4);
-  return `***-${last4}`;
-};
-
 export default function CallDetailPage({
   params,
 }: {
@@ -45,12 +40,16 @@ export default function CallDetailPage({
           {callQuery.data?.session ? (
             <>
               <h1 className="text-2xl font-semibold text-ink">
-                {maskPhone(callQuery.data.session.phoneE164)}{" "}
+                {callQuery.data.session.customer?.displayName ??
+                  callQuery.data.session.phoneE164}{" "}
                 <span className="text-sm font-semibold uppercase tracking-wide text-ink/50">
                   {callQuery.data.session.transport}
                 </span>
               </h1>
               <p className="text-sm text-ink/60">
+                {callQuery.data.session.customer?.phoneE164
+                  ? `${callQuery.data.session.customer.phoneE164} • `
+                  : ""}
                 {formatDateTime(callQuery.data.session.startedAt)} •{" "}
                 {callQuery.data.session.status}
               </p>

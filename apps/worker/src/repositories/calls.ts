@@ -18,24 +18,39 @@ export const createCallRepository = (db: D1Database) => {
       const conditions: string[] = [];
 
       if (params.phoneE164) {
-        conditions.push("phone_e164 = ?");
+        conditions.push("call_sessions.phone_e164 = ?");
         queryParams.push(params.phoneE164);
       }
 
       if (params.customerCacheId) {
-        conditions.push("customer_cache_id = ?");
+        conditions.push("call_sessions.customer_cache_id = ?");
         queryParams.push(params.customerCacheId);
       }
 
       if (params.cursor) {
-        conditions.push("started_at < ?");
+        conditions.push("call_sessions.started_at < ?");
         queryParams.push(params.cursor);
       }
 
       const whereClause = conditions.length
         ? `WHERE ${conditions.join(" AND ")}`
         : "";
-      const sql = `SELECT * FROM call_sessions ${whereClause} ORDER BY started_at DESC LIMIT ?`;
+      const sql = `
+        SELECT
+          call_sessions.*,
+          customers_cache.id AS customer_id,
+          customers_cache.phone_e164 AS customer_phone_e164,
+          customers_cache.crm_customer_id AS customer_crm_id,
+          customers_cache.display_name AS customer_display_name,
+          customers_cache.address_summary AS customer_address_summary,
+          customers_cache.updated_at AS customer_updated_at
+        FROM call_sessions
+        LEFT JOIN customers_cache
+          ON customers_cache.id = call_sessions.customer_cache_id
+        ${whereClause}
+        ORDER BY call_sessions.started_at DESC
+        LIMIT ?
+      `;
 
       const result = await db
         .prepare(sql)
@@ -54,7 +69,22 @@ export const createCallRepository = (db: D1Database) => {
     },
     async get(callSessionId: string) {
       const session = await db
-        .prepare("SELECT * FROM call_sessions WHERE id = ?")
+        .prepare(
+          `
+          SELECT
+            call_sessions.*,
+            customers_cache.id AS customer_id,
+            customers_cache.phone_e164 AS customer_phone_e164,
+            customers_cache.crm_customer_id AS customer_crm_id,
+            customers_cache.display_name AS customer_display_name,
+            customers_cache.address_summary AS customer_address_summary,
+            customers_cache.updated_at AS customer_updated_at
+          FROM call_sessions
+          LEFT JOIN customers_cache
+            ON customers_cache.id = call_sessions.customer_cache_id
+          WHERE call_sessions.id = ?
+          `,
+        )
         .bind(callSessionId)
         .first<CallSessionRow>();
 
@@ -119,7 +149,22 @@ export const createCallRepository = (db: D1Database) => {
     },
     async getSession(callSessionId: string) {
       const session = await db
-        .prepare("SELECT * FROM call_sessions WHERE id = ?")
+        .prepare(
+          `
+          SELECT
+            call_sessions.*,
+            customers_cache.id AS customer_id,
+            customers_cache.phone_e164 AS customer_phone_e164,
+            customers_cache.crm_customer_id AS customer_crm_id,
+            customers_cache.display_name AS customer_display_name,
+            customers_cache.address_summary AS customer_address_summary,
+            customers_cache.updated_at AS customer_updated_at
+          FROM call_sessions
+          LEFT JOIN customers_cache
+            ON customers_cache.id = call_sessions.customer_cache_id
+          WHERE call_sessions.id = ?
+          `,
+        )
         .bind(callSessionId)
         .first<CallSessionRow>();
 

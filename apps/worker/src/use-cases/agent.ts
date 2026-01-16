@@ -139,6 +139,7 @@ type CallSessionSummary = {
   lastToolName?: string | null;
   lastToolResult?: string | null;
   zipAttempts?: number | null;
+  callSummary?: string | null;
 };
 
 const parseSummary = (summary: string | null) => {
@@ -155,6 +156,7 @@ const parseSummary = (summary: string | null) => {
       lastToolName: parsed.lastToolName ?? null,
       lastToolResult: parsed.lastToolResult ?? null,
       zipAttempts: parsed.zipAttempts ?? 0,
+      callSummary: parsed.callSummary ?? null,
     };
   } catch {
     return { identityStatus: "unknown" } satisfies CallSessionSummary;
@@ -170,7 +172,13 @@ const buildSummary = (summary: CallSessionSummary) =>
     lastToolName: summary.lastToolName ?? null,
     lastToolResult: summary.lastToolResult ?? null,
     zipAttempts: summary.zipAttempts ?? 0,
+    callSummary: summary.callSummary ?? null,
   });
+
+const trimSummaryText = (text: string) => {
+  const trimmed = text.trim().replace(/\s+/g, " ");
+  return trimmed.length > 140 ? `${trimmed.slice(0, 137)}...` : trimmed;
+};
 
 const stringifyToolResult = (result: ToolResult) => {
   try {
@@ -1073,10 +1081,15 @@ export const handleAgentMessage = async (
       : parseToolCallFromText(modelOutput.text);
 
   if (!toolCall && modelOutput.type === "final") {
-    const replyText =
-      summary.identityStatus !== "verified" && !/zip/i.test(modelOutput.text)
-        ? "Please confirm your ZIP code to verify your account."
-        : modelOutput.text;
+    const replyText = modelOutput.text;
+    summary = {
+      ...summary,
+      callSummary: trimSummaryText(replyText),
+    };
+    await deps.calls.updateSessionSummary({
+      callSessionId,
+      summary: buildSummary(summary),
+    });
     await deps.calls.addTurn({
       id: crypto.randomUUID(),
       callSessionId,
@@ -1128,6 +1141,15 @@ export const handleAgentMessage = async (
     toolCall = parseToolCallFromText(replyText);
     iterations += 1;
   }
+
+  summary = {
+    ...summary,
+    callSummary: trimSummaryText(replyText),
+  };
+  await deps.calls.updateSessionSummary({
+    callSessionId,
+    summary: buildSummary(summary),
+  });
 
   await deps.calls.addTurn({
     id: crypto.randomUUID(),

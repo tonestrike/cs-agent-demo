@@ -62,6 +62,12 @@ export default function CustomerPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (shouldAutoScroll.current && listRef.current) {
+      listRef.current.scrollTop = listRef.current.scrollHeight;
+    }
+  });
+
   const ensureClient = (sessionId: string) => {
     if (clientRef.current && sessionRef.current === sessionId) {
       return clientRef.current;
@@ -276,7 +282,7 @@ export default function CustomerPage() {
             <div className="flex flex-col gap-3 sm:flex-row">
               <select
                 id="customer-phone"
-                className="flex-1 rounded-2xl border border-ink/15 bg-white/80 px-4 py-2 text-sm shadow-soft"
+                className="flex-1 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
                 value={phoneNumber}
                 onChange={(event) => resetSession(event.target.value)}
               >

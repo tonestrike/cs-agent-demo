@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { customerCacheSchema } from "../customers/schemas";
+
 export const ticketStatusSchema = z.enum(["open", "in_progress", "resolved"]);
 export const ticketPrioritySchema = z.enum(["low", "normal", "high", "urgent"]);
 export const ticketCategorySchema = z.enum([
@@ -33,6 +35,7 @@ export const ticketSchema = z.object({
   assignee: z.string().optional(),
   source: ticketSourceSchema,
   externalRef: z.string().optional(),
+  customer: customerCacheSchema.optional(),
 });
 
 export const ticketEventSchema = z.object({

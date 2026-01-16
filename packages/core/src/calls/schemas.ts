@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { customerCacheSchema } from "../customers/schemas";
+
 export const callListInputSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().optional(),
@@ -16,6 +18,8 @@ export const callSessionSchema = z.object({
   status: z.string(),
   transport: z.string(),
   summary: z.string().nullable(),
+  callSummary: z.string().nullable().optional(),
+  customer: customerCacheSchema.optional(),
 });
 
 export const callTurnSchema = z.object({

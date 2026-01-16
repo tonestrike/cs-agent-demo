@@ -74,6 +74,16 @@ export type CustomerCacheRow = {
   updated_at: string;
 };
 
+type JoinedCustomerRow = {
+  customer_id?: string | null;
+  customer_join_id?: string | null;
+  customer_phone_e164?: string | null;
+  customer_crm_id?: string | null;
+  customer_display_name?: string | null;
+  customer_address_summary?: string | null;
+  customer_updated_at?: string | null;
+};
+
 const safeJsonParse = (value: string): Record<string, unknown> => {
   try {
     const parsed = JSON.parse(value);
@@ -84,6 +94,37 @@ const safeJsonParse = (value: string): Record<string, unknown> => {
     // fall through
   }
   return {};
+};
+
+const mapJoinedCustomer = (
+  row: JoinedCustomerRow,
+): CustomerCache | undefined => {
+  const customerId = row.customer_join_id ?? row.customer_id ?? null;
+  if (
+    !customerId ||
+    !row.customer_phone_e164 ||
+    !row.customer_display_name ||
+    !row.customer_updated_at
+  ) {
+    return undefined;
+  }
+  return {
+    id: customerId,
+    crmCustomerId: row.customer_crm_id ?? customerId,
+    displayName: row.customer_display_name,
+    phoneE164: row.customer_phone_e164,
+    addressSummary: row.customer_address_summary ?? null,
+    updatedAt: row.customer_updated_at,
+  };
+};
+
+const extractCallSummary = (summary: string | null) => {
+  if (!summary) {
+    return null;
+  }
+  const parsed = safeJsonParse(summary);
+  const value = parsed.callSummary;
+  return typeof value === "string" ? value : null;
 };
 
 export const mapTicketRow = (row: TicketRow): Ticket => {
@@ -101,6 +142,7 @@ export const mapTicketRow = (row: TicketRow): Ticket => {
     assignee: row.assignee ?? undefined,
     source: row.source,
     externalRef: row.external_ref ?? undefined,
+    customer: mapJoinedCustomer(row),
   };
 };
 
@@ -124,6 +166,8 @@ export const mapCallSessionRow = (row: CallSessionRow) => {
     status: row.status,
     transport: row.transport,
     summary: row.summary ?? null,
+    callSummary: extractCallSummary(row.summary ?? null),
+    customer: mapJoinedCustomer(row),
   };
 };
 
@@ -151,6 +195,7 @@ export const mapAppointmentRow = (row: AppointmentRow): ServiceAppointment => {
     rescheduledToId: row.rescheduled_to_id ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    customer: mapJoinedCustomer(row),
   };
 };
 

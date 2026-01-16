@@ -31,34 +31,51 @@ export const createTicketRepository = (db: D1Database) => {
       const conditions: string[] = [];
 
       if (params.status) {
-        conditions.push("status = ?");
+        conditions.push("tickets.status = ?");
         queryParams.push(params.status);
       }
 
       if (params.q) {
-        conditions.push("(subject LIKE ? OR description LIKE ?)");
+        conditions.push(
+          "(tickets.subject LIKE ? OR tickets.description LIKE ?)",
+        );
         queryParams.push(`%${params.q}%`, `%${params.q}%`);
       }
 
       if (params.customerCacheId) {
-        conditions.push("customer_cache_id = ?");
+        conditions.push("tickets.customer_cache_id = ?");
         queryParams.push(params.customerCacheId);
       }
 
       if (params.phoneE164) {
-        conditions.push("phone_e164 = ?");
+        conditions.push("tickets.phone_e164 = ?");
         queryParams.push(params.phoneE164);
       }
 
       if (params.cursor) {
-        conditions.push("created_at < ?");
+        conditions.push("tickets.created_at < ?");
         queryParams.push(params.cursor);
       }
 
       const whereClause = conditions.length
         ? `WHERE ${conditions.join(" AND ")}`
         : "";
-      const sql = `SELECT * FROM tickets ${whereClause} ORDER BY created_at DESC LIMIT ?`;
+      const sql = `
+        SELECT
+          tickets.*,
+          customers_cache.id AS customer_id,
+          customers_cache.phone_e164 AS customer_phone_e164,
+          customers_cache.crm_customer_id AS customer_crm_id,
+          customers_cache.display_name AS customer_display_name,
+          customers_cache.address_summary AS customer_address_summary,
+          customers_cache.updated_at AS customer_updated_at
+        FROM tickets
+        LEFT JOIN customers_cache
+          ON customers_cache.id = tickets.customer_cache_id
+        ${whereClause}
+        ORDER BY tickets.created_at DESC
+        LIMIT ?
+      `;
 
       const result = await db
         .prepare(sql)
@@ -77,7 +94,22 @@ export const createTicketRepository = (db: D1Database) => {
     },
     async get(ticketId: string) {
       const row = await db
-        .prepare("SELECT * FROM tickets WHERE id = ?")
+        .prepare(
+          `
+          SELECT
+            tickets.*,
+            customers_cache.id AS customer_id,
+            customers_cache.phone_e164 AS customer_phone_e164,
+            customers_cache.crm_customer_id AS customer_crm_id,
+            customers_cache.display_name AS customer_display_name,
+            customers_cache.address_summary AS customer_address_summary,
+            customers_cache.updated_at AS customer_updated_at
+          FROM tickets
+          LEFT JOIN customers_cache
+            ON customers_cache.id = tickets.customer_cache_id
+          WHERE tickets.id = ?
+          `,
+        )
         .bind(ticketId)
         .first<TicketRowResult>();
 

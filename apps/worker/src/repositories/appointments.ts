@@ -19,24 +19,39 @@ export const createAppointmentRepository = (db: D1Database) => {
       const conditions: string[] = [];
 
       if (params.customerId) {
-        conditions.push("customer_id = ?");
+        conditions.push("appointments.customer_id = ?");
         queryParams.push(params.customerId);
       }
 
       if (params.phoneE164) {
-        conditions.push("phone_e164 = ?");
+        conditions.push("appointments.phone_e164 = ?");
         queryParams.push(params.phoneE164);
       }
 
       if (params.cursor) {
-        conditions.push("created_at < ?");
+        conditions.push("appointments.created_at < ?");
         queryParams.push(params.cursor);
       }
 
       const whereClause = conditions.length
         ? `WHERE ${conditions.join(" AND ")}`
         : "";
-      const sql = `SELECT * FROM appointments ${whereClause} ORDER BY created_at DESC LIMIT ?`;
+      const sql = `
+        SELECT
+          appointments.*,
+          customers_cache.id AS customer_join_id,
+          customers_cache.phone_e164 AS customer_phone_e164,
+          customers_cache.crm_customer_id AS customer_crm_id,
+          customers_cache.display_name AS customer_display_name,
+          customers_cache.address_summary AS customer_address_summary,
+          customers_cache.updated_at AS customer_updated_at
+        FROM appointments
+        LEFT JOIN customers_cache
+          ON customers_cache.id = appointments.customer_id
+        ${whereClause}
+        ORDER BY appointments.created_at DESC
+        LIMIT ?
+      `;
 
       const result = await db
         .prepare(sql)
@@ -55,7 +70,22 @@ export const createAppointmentRepository = (db: D1Database) => {
     },
     async get(appointmentId: string) {
       const row = await db
-        .prepare("SELECT * FROM appointments WHERE id = ?")
+        .prepare(
+          `
+          SELECT
+            appointments.*,
+            customers_cache.id AS customer_join_id,
+            customers_cache.phone_e164 AS customer_phone_e164,
+            customers_cache.crm_customer_id AS customer_crm_id,
+            customers_cache.display_name AS customer_display_name,
+            customers_cache.address_summary AS customer_address_summary,
+            customers_cache.updated_at AS customer_updated_at
+          FROM appointments
+          LEFT JOIN customers_cache
+            ON customers_cache.id = appointments.customer_id
+          WHERE appointments.id = ?
+          `,
+        )
         .bind(appointmentId)
         .first<AppointmentRowResult>();
 
@@ -64,7 +94,22 @@ export const createAppointmentRepository = (db: D1Database) => {
     async getLatestForCustomer(customerId: string) {
       const row = await db
         .prepare(
-          "SELECT * FROM appointments WHERE customer_id = ? AND status = 'scheduled' ORDER BY date DESC LIMIT 1",
+          `
+          SELECT
+            appointments.*,
+            customers_cache.id AS customer_join_id,
+            customers_cache.phone_e164 AS customer_phone_e164,
+            customers_cache.crm_customer_id AS customer_crm_id,
+            customers_cache.display_name AS customer_display_name,
+            customers_cache.address_summary AS customer_address_summary,
+            customers_cache.updated_at AS customer_updated_at
+          FROM appointments
+          LEFT JOIN customers_cache
+            ON customers_cache.id = appointments.customer_id
+          WHERE appointments.customer_id = ? AND appointments.status = 'scheduled'
+          ORDER BY appointments.date DESC
+          LIMIT 1
+          `,
         )
         .bind(customerId)
         .first<AppointmentRowResult>();

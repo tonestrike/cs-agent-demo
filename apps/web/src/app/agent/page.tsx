@@ -29,7 +29,7 @@ const formatDateTime = (iso: string) =>
 export default function AgentDashboardPage() {
   const [activeTab, setActiveTab] = useState<
     "calls" | "tickets" | "appointments" | "customers"
-  >("calls");
+  >("customers");
   const [customerSearch, setCustomerSearch] = useState("");
   const [customersItems, setCustomersItems] = useState<CustomerCache[]>([]);
   const [customersCursor, setCustomersCursor] = useState<string | null>(null);
@@ -182,6 +182,7 @@ export default function AgentDashboardPage() {
         key: string;
         phoneE164: string;
         customerCacheId: string | null;
+        customer: CallSession["customer"] | undefined;
         sessions: CallSession[];
       }
     >();
@@ -190,11 +191,15 @@ export default function AgentDashboardPage() {
       const existing = map.get(key);
       if (existing) {
         existing.sessions.push(session);
+        if (!existing.customer && session.customer) {
+          existing.customer = session.customer;
+        }
       } else {
         map.set(key, {
           key,
           phoneE164: session.phoneE164,
           customerCacheId: session.customerCacheId,
+          customer: session.customer,
           sessions: [session],
         });
       }
@@ -215,6 +220,22 @@ export default function AgentDashboardPage() {
     );
   }, [callsItems]);
 
+  const dedupedCustomers = useMemo(() => {
+    const map = new Map<string, CustomerCache>();
+    for (const customer of customersItems) {
+      const existing = map.get(customer.phoneE164);
+      if (
+        !existing ||
+        existing.updatedAt.localeCompare(customer.updatedAt) < 0
+      ) {
+        map.set(customer.phoneE164, customer);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      a.updatedAt < b.updatedAt ? 1 : -1,
+    );
+  }, [customersItems]);
+
   return (
     <main className="grid-dots min-h-screen px-6 py-10">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
@@ -229,12 +250,22 @@ export default function AgentDashboardPage() {
           </p>
         </header>
 
-        <Card className="flex flex-wrap items-center gap-3">
+        <Card className="flex items-center gap-3 overflow-x-auto">
+          <Button
+            className={
+              activeTab === "customers"
+                ? "bg-ink shrink-0"
+                : "bg-white/90 shrink-0 !text-ink hover:bg-ink hover:!text-sand border border-ink/20"
+            }
+            onClick={() => setActiveTab("customers")}
+          >
+            Customers
+          </Button>
           <Button
             className={
               activeTab === "calls"
-                ? "bg-ink"
-                : "bg-white/90 !text-ink hover:bg-ink hover:!text-sand border border-ink/20"
+                ? "bg-ink shrink-0"
+                : "bg-white/90 shrink-0 !text-ink hover:bg-ink hover:!text-sand border border-ink/20"
             }
             onClick={() => setActiveTab("calls")}
           >
@@ -243,8 +274,8 @@ export default function AgentDashboardPage() {
           <Button
             className={
               activeTab === "tickets"
-                ? "bg-ink"
-                : "bg-white/90 !text-ink hover:bg-ink hover:!text-sand border border-ink/20"
+                ? "bg-ink shrink-0"
+                : "bg-white/90 shrink-0 !text-ink hover:bg-ink hover:!text-sand border border-ink/20"
             }
             onClick={() => setActiveTab("tickets")}
           >
@@ -253,28 +284,18 @@ export default function AgentDashboardPage() {
           <Button
             className={
               activeTab === "appointments"
-                ? "bg-ink"
-                : "bg-white/90 !text-ink hover:bg-ink hover:!text-sand border border-ink/20"
+                ? "bg-ink shrink-0"
+                : "bg-white/90 shrink-0 !text-ink hover:bg-ink hover:!text-sand border border-ink/20"
             }
             onClick={() => setActiveTab("appointments")}
           >
             Appointments
           </Button>
-          <Button
-            className={
-              activeTab === "customers"
-                ? "bg-ink"
-                : "bg-white/90 !text-ink hover:bg-ink hover:!text-sand border border-ink/20"
-            }
-            onClick={() => setActiveTab("customers")}
-          >
-            Customers
-          </Button>
         </Card>
 
         {activeTab === "calls" ? (
           <Card className="flex flex-col gap-5 animate-rise">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="text-xl font-semibold">Calls by Customer</h2>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -308,10 +329,16 @@ export default function AgentDashboardPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-semibold text-ink">
-                        {maskPhone(group.phoneE164)}
+                        {group.customer?.displayName ??
+                          group.customerCacheId ??
+                          "Unknown customer"}
                       </p>
                       <p className="text-xs text-ink/60">
-                        {group.customerCacheId ?? "Unknown customer"} •{" "}
+                        {group.customer?.phoneE164 ?? group.phoneE164}
+                        {group.customer?.addressSummary
+                          ? ` • ${group.customer.addressSummary}`
+                          : ""}
+                        {" • "}
                         {group.count} sessions
                       </p>
                     </div>
@@ -330,6 +357,11 @@ export default function AgentDashboardPage() {
                           <p className="text-[11px] uppercase tracking-wide text-ink/50">
                             {session.transport}
                           </p>
+                          {session.callSummary ? (
+                            <p className="mt-1 text-xs text-ink/60">
+                              {session.callSummary}
+                            </p>
+                          ) : null}
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <Link
@@ -356,9 +388,9 @@ export default function AgentDashboardPage() {
 
         {activeTab === "tickets" ? (
           <Card className="flex flex-col gap-5 animate-rise">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="text-xl font-semibold">Open Tickets</h2>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input
                   className="rounded-full border border-ink/15 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/70"
                   placeholder="Search tickets"
@@ -366,7 +398,7 @@ export default function AgentDashboardPage() {
                   onChange={(event) => setTicketSearch(event.target.value)}
                 />
                 <select
-                  className="rounded-full border border-ink/15 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/70"
+                  className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/70"
                   value={ticketStatus}
                   onChange={(event) =>
                     setTicketStatus(
@@ -410,6 +442,17 @@ export default function AgentDashboardPage() {
                     <p className="mt-2 text-xs text-ink/60">
                       {ticket.category} • {ticket.priority}
                     </p>
+                    <p className="mt-2 text-xs text-ink/60">
+                      {ticket.customer?.displayName ??
+                        ticket.phoneE164 ??
+                        "Unknown customer"}
+                      {ticket.customer?.phoneE164
+                        ? ` • ${ticket.customer.phoneE164}`
+                        : ""}
+                      {ticket.customer?.addressSummary
+                        ? ` • ${ticket.customer.addressSummary}`
+                        : ""}
+                    </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Link
                         href={`/agent/tickets/${ticket.id}`}
@@ -446,7 +489,7 @@ export default function AgentDashboardPage() {
 
         {activeTab === "appointments" ? (
           <Card className="flex flex-col gap-5 animate-rise">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="text-xl font-semibold">Appointments</h2>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -482,7 +525,8 @@ export default function AgentDashboardPage() {
                 >
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-ink">
-                      {maskPhone(appointment.phoneE164)}
+                      {appointment.customer?.displayName ??
+                        maskPhone(appointment.phoneE164)}
                     </p>
                     <span className="text-xs uppercase text-ink/50">
                       {appointment.status}
@@ -490,6 +534,12 @@ export default function AgentDashboardPage() {
                   </div>
                   <p className="mt-2 text-xs text-ink/60">
                     {appointment.date} • {appointment.timeWindow}
+                  </p>
+                  <p className="mt-2 text-xs text-ink/60">
+                    {appointment.customer?.phoneE164 ?? appointment.phoneE164}
+                    {appointment.addressSummary
+                      ? ` • ${appointment.addressSummary}`
+                      : ""}
                   </p>
                   {appointment.rescheduledFromId ? (
                     <p className="mt-2 text-xs text-ink/50">
@@ -517,9 +567,9 @@ export default function AgentDashboardPage() {
 
         {activeTab === "customers" ? (
           <Card className="flex flex-col gap-5 animate-rise">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="text-xl font-semibold">Customers</h2>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input
                   className="rounded-full border border-ink/15 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/70"
                   placeholder="Search customers"
@@ -555,7 +605,7 @@ export default function AgentDashboardPage() {
               </div>
             </div>
             <div className="space-y-3">
-              {customersItems.map((customer) => (
+              {dedupedCustomers.map((customer) => (
                 <div
                   key={customer.id}
                   className="rounded-2xl border border-ink/10 bg-white/70 p-4"
@@ -592,7 +642,7 @@ export default function AgentDashboardPage() {
               )}
               {!customersQuery.isLoading &&
               !customersQuery.isError &&
-              customersItems.length === 0 ? (
+              dedupedCustomers.length === 0 ? (
                 <p className="text-sm text-ink/60">No customers yet.</p>
               ) : null}
             </div>

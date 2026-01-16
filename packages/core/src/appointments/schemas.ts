@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { customerCacheSchema } from "../customers/schemas";
+
 export const serviceAppointmentStatusSchema = z.enum([
   "scheduled",
   "rescheduled",
@@ -18,6 +20,7 @@ export const serviceAppointmentSchema = z.object({
   rescheduledToId: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  customer: customerCacheSchema.optional(),
 });
 
 export type ServiceAppointment = z.infer<typeof serviceAppointmentSchema>;
