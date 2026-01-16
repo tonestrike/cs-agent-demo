@@ -25,6 +25,8 @@ export default function PromptStudioPage() {
     useState<AgentPromptConfigRecord | null>(null);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [jsonDraft, setJsonDraft] = useState("");
+  const [jsonError, setJsonError] = useState("");
   const queryClient = useQueryClient();
   const modelOptions = [
     "@cf/meta/llama-3.1-8b-instruct",
@@ -80,6 +82,29 @@ export default function PromptStudioPage() {
           }
         : prev,
     );
+  };
+
+  const applyJsonConfig = () => {
+    if (!jsonDraft.trim()) {
+      setJsonError("Paste JSON to apply.");
+      return;
+    }
+    try {
+      const parsed = JSON.parse(jsonDraft) as unknown;
+      const candidate =
+        parsed && typeof parsed === "object" && "config" in parsed
+          ? (parsed as { config?: unknown }).config
+          : parsed;
+      const validation = agentPromptConfigRecordSchema.safeParse(candidate);
+      if (!validation.success) {
+        setJsonError("Invalid config JSON. Check required fields.");
+        return;
+      }
+      setJsonError("");
+      setConfigDraft(validation.data);
+    } catch {
+      setJsonError("Invalid JSON. Fix formatting and try again.");
+    }
   };
 
   const schemaToSummary = (
@@ -213,6 +238,31 @@ export default function PromptStudioPage() {
               >
                 {updateConfig.isPending ? "Saving..." : "Save"}
               </Button>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+              Update by JSON
+              <textarea
+                className="min-h-[140px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                placeholder='Paste JSON config or {"config": {...}}'
+                value={jsonDraft}
+                onChange={(event) => setJsonDraft(event.target.value)}
+              />
+            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                className="bg-slate hover:bg-ink"
+                type="button"
+                onClick={applyJsonConfig}
+              >
+                Apply JSON
+              </Button>
+              {jsonError ? (
+                <p className="text-xs font-semibold uppercase tracking-wide text-clay">
+                  {jsonError}
+                </p>
+              ) : null}
             </div>
           </div>
           {saved ? (
