@@ -4,6 +4,7 @@ AI-powered customer service agent for pest control with ticketing, call traces, 
 
 ## Intention
 Make the agent conversational and model-led. Use the model for orchestration (tool choice, follow-ups, ticket creation) while keeping only minimal safety guardrails and identity gating in code.
+Broaden model selection to the full Cloudflare Workers AI catalog so prompt tuning and behavior testing are not bottlenecked by a short list.
 
 ## Current State
 - Bun + TypeScript + Biome + Vitest scaffold.
@@ -20,6 +21,7 @@ Make the agent conversational and model-led. Use the model for orchestration (to
 - Add identity confirmation state to context and gate sensitive tools on it.
 - Provide richer context to the model (compact summary, last turns, last tool result, identity status).
 - Improve session management so old conversations are easy to resume.
+- Expand the model dropdown to include all Cloudflare Workers AI models supported for agents.
 
 ## Demo Flow
 1) Caller identified by phone and confirmed identity in context.
@@ -33,6 +35,7 @@ Make the agent conversational and model-led. Use the model for orchestration (to
 3) Add identity confirmation state to call session context and enforce it before sensitive tools.
 4) Replace full-turn context with a structured summary + last turns + last tool result.
 5) Improve session lookup/resume flow on the client and worker.
+6) Populate the model dropdown from the full Workers AI model list and store the selected model ID.
 
 ## Local Commands
 - `bun install`

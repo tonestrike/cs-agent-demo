@@ -19,6 +19,7 @@ import { z } from "zod";
 
 import { Badge, Button, Card } from "../../../components/ui";
 import { rpcClient } from "../../../lib/orpc";
+import { WORKERS_AI_MODELS } from "../../../lib/workers-ai-models";
 
 const schemaToSummary = (
   schema: z.ZodTypeAny,
@@ -101,11 +102,9 @@ export default function PromptStudioPage() {
   const [jsonDraft, setJsonDraft] = useState("");
   const [jsonError, setJsonError] = useState("");
   const queryClient = useQueryClient();
-  const modelOptions = [
-    "@cf/meta/llama-3.1-8b-instruct",
-    "@cf/meta/llama-3.1-70b-instruct",
-    "@cf/mistral/mistral-7b-instruct-v0.2",
-  ];
+  const modelOptions = configDraft?.modelId
+    ? Array.from(new Set([configDraft.modelId, ...WORKERS_AI_MODELS]))
+    : [...WORKERS_AI_MODELS];
 
   const agentConfigQuery = useQuery({
     queryKey: ["agent-config"],
