@@ -75,7 +75,27 @@ export default function CustomerPage() {
 
   const ensureSocket = (sessionId: string) => {
     if (socketRef.current && sessionRef.current === sessionId) {
-      return socketRef.current;
+      if (socketRef.current.readyState === WebSocket.OPEN) {
+        return Promise.resolve(socketRef.current);
+      }
+      return new Promise<WebSocket>((resolve, reject) => {
+        const socket = socketRef.current;
+        if (!socket) {
+          reject(new Error("Socket unavailable"));
+          return;
+        }
+        const timeoutId = window.setTimeout(() => {
+          reject(new Error("Socket timeout"));
+        }, 3000);
+        socket.addEventListener("open", () => {
+          window.clearTimeout(timeoutId);
+          resolve(socket);
+        });
+        socket.addEventListener("error", () => {
+          window.clearTimeout(timeoutId);
+          reject(new Error("Socket error"));
+        });
+      });
     }
     socketRef.current?.close();
     const socket = new WebSocket(buildWsUrl(sessionId));
@@ -84,7 +104,7 @@ export default function CustomerPage() {
         const payload = JSON.parse(String(event.data)) as {
           type?: string;
           text?: string;
-          data?: { callSessionId?: string };
+          data?: { callSessionId?: string; replyText?: string };
         };
         if (payload.type === "status") {
           const text = payload.text ?? "";
@@ -110,6 +130,17 @@ export default function CustomerPage() {
         }
         if (payload.type === "final") {
           const data = payload.data;
+          const replyText = data?.replyText ?? "";
+          const responseId = responseIdRef.current;
+          if (responseId && replyText) {
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === responseId && !message.text
+                  ? { ...message, text: replyText }
+                  : message,
+              ),
+            );
+          }
           if (data?.callSessionId) {
             setCallSessionId(data.callSessionId);
             setConfirmedSessionId(data.callSessionId);
@@ -135,7 +166,19 @@ export default function CustomerPage() {
     };
     socketRef.current = socket;
     sessionRef.current = sessionId;
-    return socket;
+    return new Promise<WebSocket>((resolve, reject) => {
+      const timeoutId = window.setTimeout(() => {
+        reject(new Error("Socket timeout"));
+      }, 3000);
+      socket.addEventListener("open", () => {
+        window.clearTimeout(timeoutId);
+        resolve(socket);
+      });
+      socket.addEventListener("error", () => {
+        window.clearTimeout(timeoutId);
+        reject(new Error("Socket error"));
+      });
+    });
   };
 
   const resetSession = (nextPhone?: string) => {
@@ -156,7 +199,7 @@ export default function CustomerPage() {
     sessionRef.current = null;
   };
 
-  const sendMessage = (message: string) => {
+  const sendMessage = async (message: string) => {
     const trimmed = message.trim();
     if (!trimmed) {
       return;
@@ -179,31 +222,54 @@ export default function CustomerPage() {
       { id: responseId, role: "agent", text: "" },
     ]);
 
-    ensureSocket(sessionId);
+    try {
+      await ensureSocket(sessionId);
+    } catch {
+      setStatus("Connection issue. Try again.");
+    }
     const base = apiBaseUrl || window.location.origin;
-    fetch(new URL("/rpc/agent/message", base), {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(demoAuthToken ? { "x-demo-auth": demoAuthToken } : {}),
-      },
-      body: JSON.stringify({
-        json: {
-          phoneNumber,
-          text: trimmed,
-          callSessionId: sessionId,
+    try {
+      const response = await fetch(new URL("/rpc/agent/message", base), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(demoAuthToken ? { "x-demo-auth": demoAuthToken } : {}),
         },
-        meta: [],
-      }),
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error("Request failed");
-        }
-      })
-      .catch(() => {
-        setStatus("Connection issue. Try again.");
+        body: JSON.stringify({
+          json: {
+            phoneNumber,
+            text: trimmed,
+            callSessionId: sessionId,
+          },
+          meta: [],
+        }),
       });
+      if (!response.ok) {
+        throw new Error("Request failed");
+      }
+      const data = (await response.json()) as {
+        json?: { callSessionId?: string; replyText?: string };
+      };
+      const replyText = data.json?.replyText ?? "";
+      if (replyText) {
+        const responseId = responseIdRef.current;
+        if (responseId) {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === responseId && !message.text
+                ? { ...message, text: replyText }
+                : message,
+            ),
+          );
+        }
+      }
+      if (data.json?.callSessionId) {
+        setCallSessionId(data.json.callSessionId);
+        setConfirmedSessionId(data.json.callSessionId);
+      }
+    } catch {
+      setStatus("Connection issue. Try again.");
+    }
   };
 
   const handleSend = () => {
