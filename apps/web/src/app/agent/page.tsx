@@ -231,7 +231,7 @@ export default function AgentDashboardPage() {
             className={
               activeTab === "calls"
                 ? "bg-ink"
-                : "bg-white/80 text-ink hover:bg-ink hover:text-sand"
+                : "bg-white/90 !text-ink hover:bg-ink hover:!text-sand"
             }
             onClick={() => setActiveTab("calls")}
           >
@@ -241,7 +241,7 @@ export default function AgentDashboardPage() {
             className={
               activeTab === "tickets"
                 ? "bg-ink"
-                : "bg-white/80 text-ink hover:bg-ink hover:text-sand"
+                : "bg-white/90 !text-ink hover:bg-ink hover:!text-sand"
             }
             onClick={() => setActiveTab("tickets")}
           >
@@ -251,7 +251,7 @@ export default function AgentDashboardPage() {
             className={
               activeTab === "appointments"
                 ? "bg-ink"
-                : "bg-white/80 text-ink hover:bg-ink hover:text-sand"
+                : "bg-white/90 !text-ink hover:bg-ink hover:!text-sand"
             }
             onClick={() => setActiveTab("appointments")}
           >
@@ -261,7 +261,7 @@ export default function AgentDashboardPage() {
             className={
               activeTab === "customers"
                 ? "bg-ink"
-                : "bg-white/80 text-ink hover:bg-ink hover:text-sand"
+                : "bg-white/90 !text-ink hover:bg-ink hover:!text-sand"
             }
             onClick={() => setActiveTab("customers")}
           >
