@@ -184,19 +184,31 @@ export default function AgentDashboardPage() {
 
         <Card className="flex flex-wrap items-center gap-3">
           <Button
-            className={activeTab === "calls" ? "bg-ink" : "bg-white/80"}
+            className={
+              activeTab === "calls"
+                ? "bg-ink"
+                : "bg-white/80 text-ink hover:bg-ink hover:text-sand"
+            }
             onClick={() => setActiveTab("calls")}
           >
             Calls
           </Button>
           <Button
-            className={activeTab === "tickets" ? "bg-ink" : "bg-white/80"}
+            className={
+              activeTab === "tickets"
+                ? "bg-ink"
+                : "bg-white/80 text-ink hover:bg-ink hover:text-sand"
+            }
             onClick={() => setActiveTab("tickets")}
           >
             Tickets
           </Button>
           <Button
-            className={activeTab === "appointments" ? "bg-ink" : "bg-white/80"}
+            className={
+              activeTab === "appointments"
+                ? "bg-ink"
+                : "bg-white/80 text-ink hover:bg-ink hover:text-sand"
+            }
             onClick={() => setActiveTab("appointments")}
           >
             Appointments
@@ -220,7 +232,7 @@ export default function AgentDashboardPage() {
                 </Button>
                 {callsQuery.data?.nextCursor ? (
                   <Button
-                    className="bg-white/80 hover:bg-ink"
+                    className="bg-white/80 text-ink hover:bg-ink hover:text-sand"
                     onClick={() =>
                       setCallsCursor(callsQuery.data?.nextCursor ?? null)
                     }
@@ -362,7 +374,7 @@ export default function AgentDashboardPage() {
                 </Button>
                 {appointmentsQuery.data?.nextCursor ? (
                   <Button
-                    className="bg-white/80 hover:bg-ink"
+                    className="bg-white/80 text-ink hover:bg-ink hover:text-sand"
                     onClick={() =>
                       setAppointmentsCursor(
                         appointmentsQuery.data?.nextCursor ?? null,

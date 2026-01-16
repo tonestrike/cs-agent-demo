@@ -305,14 +305,22 @@ export default function PromptStudioPage() {
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <Button
-              className={editMode === "form" ? "bg-ink" : "bg-white/80"}
+              className={
+                editMode === "form"
+                  ? "bg-ink"
+                  : "bg-white/80 text-ink hover:bg-ink hover:text-sand"
+              }
               type="button"
               onClick={() => setEditMode("form")}
             >
               Form Editor
             </Button>
             <Button
-              className={editMode === "json" ? "bg-ink" : "bg-white/80"}
+              className={
+                editMode === "json"
+                  ? "bg-ink"
+                  : "bg-white/80 text-ink hover:bg-ink hover:text-sand"
+              }
               type="button"
               onClick={() => setEditMode("json")}
             >

@@ -103,6 +103,7 @@ type CallSessionSummary = {
   pendingCustomerId?: string | null;
   lastToolName?: string | null;
   lastToolResult?: string | null;
+  zipAttempts?: number | null;
 };
 
 const parseSummary = (summary: string | null) => {
@@ -117,6 +118,7 @@ const parseSummary = (summary: string | null) => {
       pendingCustomerId: parsed.pendingCustomerId ?? null,
       lastToolName: parsed.lastToolName ?? null,
       lastToolResult: parsed.lastToolResult ?? null,
+      zipAttempts: parsed.zipAttempts ?? 0,
     };
   } catch {
     return { identityStatus: "unknown" } satisfies CallSessionSummary;
@@ -130,6 +132,7 @@ const buildSummary = (summary: CallSessionSummary) =>
     pendingCustomerId: summary.pendingCustomerId ?? null,
     lastToolName: summary.lastToolName ?? null,
     lastToolResult: summary.lastToolResult ?? null,
+    zipAttempts: summary.zipAttempts ?? 0,
   });
 
 const stringifyToolResult = (result: ToolResult) => {
@@ -468,21 +471,44 @@ export const handleAgentMessage = async (
         );
         tools.push(call.record);
         const ok = Boolean(call.result);
+        const nextZipAttempts = ok ? 0 : (summary.zipAttempts ?? 0) + 1;
         summary = {
           identityStatus: ok ? "verified" : "pending",
           verifiedCustomerId: ok ? customerId : null,
           pendingCustomerId: ok
             ? null
             : (summary.pendingCustomerId ?? customerId),
+          zipAttempts: nextZipAttempts,
         };
         await deps.calls.updateSessionSummary({
           callSessionId,
           summary: buildSummary(summary),
         });
-        toolResult = {
-          toolName: "crm.verifyAccount",
-          result: { ok },
-        };
+        if (!ok) {
+          toolResult =
+            nextZipAttempts >= 2
+              ? {
+                  toolName: "agent.message",
+                  result: {
+                    kind: "escalate",
+                    details:
+                      "The ZIP code does not match our records. Escalate for manual verification.",
+                  },
+                }
+              : {
+                  toolName: "agent.message",
+                  result: {
+                    kind: "request_zip",
+                    details:
+                      "That ZIP does not match our records. Do you have another ZIP code on file?",
+                  },
+                };
+        } else {
+          toolResult = {
+            toolName: "crm.verifyAccount",
+            result: { ok },
+          };
+        }
         break;
       }
       case "crm.getNextAppointment": {
