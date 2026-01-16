@@ -11,7 +11,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { Badge, Button, Card } from "../../components/ui";
-import { rpcClient } from "../../lib/orpc";
+import { orpc } from "../../lib/orpc";
 
 const maskPhone = (phoneE164: string) => {
   const last4 = phoneE164.slice(-4);
@@ -46,48 +46,54 @@ export default function AgentDashboardPage() {
     null,
   );
   const [appointmentsRefreshKey, setAppointmentsRefreshKey] = useState(1);
-  const callsQuery = useQuery({
-    queryKey: ["calls", callsCursor],
-    queryFn: () =>
-      rpcClient.calls.list({ limit: 100, cursor: callsCursor ?? undefined }),
-    refetchInterval: 4000,
-  });
+  const callsQuery = useQuery(
+    orpc.calls.list.queryOptions({
+      input: { limit: 100, cursor: callsCursor ?? undefined },
+      refetchInterval: 4000,
+    }),
+  );
 
-  const ticketsQuery = useQuery({
-    queryKey: ["tickets", ticketSearch, ticketStatus],
-    queryFn: () =>
-      rpcClient.tickets.list({
+  const ticketsQuery = useQuery(
+    orpc.tickets.list.queryOptions({
+      input: {
         limit: 50,
         q: ticketSearch || undefined,
         status: ticketStatus === "all" ? undefined : ticketStatus,
-      }),
-  });
+      },
+    }),
+  );
 
-  const appointmentsQuery = useQuery({
-    queryKey: ["appointments", appointmentsCursor, appointmentsRefreshKey],
-    queryFn: () =>
-      rpcClient.appointments.list({
-        limit: 50,
-        cursor: appointmentsCursor ?? undefined,
-        refresh:
-          appointmentsRefreshKey > 0 && !appointmentsCursor ? true : undefined,
-      }),
-  });
+  const appointmentsInput = {
+    limit: 50,
+    cursor: appointmentsCursor ?? undefined,
+    refresh:
+      appointmentsRefreshKey > 0 && !appointmentsCursor ? true : undefined,
+  };
+  const appointmentsQuery = useQuery(
+    orpc.appointments.list.queryOptions({
+      input: appointmentsInput,
+      queryKey: [
+        ...orpc.appointments.list.key({ input: appointmentsInput }),
+        appointmentsRefreshKey,
+      ],
+    }),
+  );
 
-  const customersQuery = useQuery({
-    queryKey: ["customers", customerSearch, customersCursor],
-    queryFn: () =>
-      rpcClient.customers.list({
+  const customersQuery = useQuery(
+    orpc.customers.list.queryOptions({
+      input: {
         limit: 50,
         q: customerSearch || undefined,
         cursor: customersCursor ?? undefined,
-      }),
-  });
+      },
+    }),
+  );
 
   const ticketCallLookups = useQueries({
     queries: (ticketsQuery.data?.items ?? []).map((ticket: Ticket) => ({
-      queryKey: ["call-by-ticket", ticket.id],
-      queryFn: () => rpcClient.calls.findByTicketId({ ticketId: ticket.id }),
+      ...orpc.calls.findByTicketId.queryOptions({
+        input: { ticketId: ticket.id },
+      }),
       enabled: Boolean(ticket.id),
     })),
   });

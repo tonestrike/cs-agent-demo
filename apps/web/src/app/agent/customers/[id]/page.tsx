@@ -7,7 +7,7 @@ import { useState } from "react";
 import type { CallSession, ServiceAppointment, Ticket } from "@pestcall/core";
 
 import { Badge, Button, Card } from "../../../../components/ui";
-import { rpcClient } from "../../../../lib/orpc";
+import { orpc } from "../../../../lib/orpc";
 
 const formatDateTime = (iso: string) =>
   new Date(iso).toLocaleString("en-US", {
@@ -25,43 +25,31 @@ export default function CustomerDetailPage({
   const [activeTab, setActiveTab] = useState<
     "calls" | "tickets" | "appointments"
   >("calls");
-  const customerQuery = useQuery({
-    queryKey: ["customer", params.id],
-    queryFn: () =>
-      rpcClient.customers.get({
-        customerId: params.id,
-      }),
-  });
+  const customerQuery = useQuery(
+    orpc.customers.get.queryOptions({
+      input: { customerId: params.id },
+    }),
+  );
 
-  const callsQuery = useQuery({
-    queryKey: ["customer-calls", params.id, customerQuery.data?.phoneE164],
-    queryFn: () =>
-      rpcClient.calls.list({
-        limit: 50,
-        customerCacheId: params.id,
-      }),
-    enabled: Boolean(params.id),
-  });
+  const callsQuery = useQuery(
+    orpc.calls.list.queryOptions({
+      input: { limit: 50, customerCacheId: params.id },
+      enabled: Boolean(params.id),
+    }),
+  );
 
-  const ticketsQuery = useQuery({
-    queryKey: ["customer-tickets", params.id, customerQuery.data?.phoneE164],
-    queryFn: () =>
-      rpcClient.tickets.list({
-        limit: 50,
-        customerCacheId: params.id,
-      }),
-    enabled: Boolean(params.id),
-  });
+  const ticketsQuery = useQuery(
+    orpc.tickets.list.queryOptions({
+      input: { limit: 50, customerCacheId: params.id },
+      enabled: Boolean(params.id),
+    }),
+  );
 
-  const appointmentsQuery = useQuery({
-    queryKey: ["customer-appointments", params.id],
-    queryFn: () =>
-      rpcClient.appointments.list({
-        limit: 50,
-        customerId: params.id,
-        refresh: true,
-      }),
-  });
+  const appointmentsQuery = useQuery(
+    orpc.appointments.list.queryOptions({
+      input: { limit: 50, customerId: params.id, refresh: true },
+    }),
+  );
 
   return (
     <main className="grid-dots min-h-screen px-6 py-10">

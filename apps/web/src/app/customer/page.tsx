@@ -1,13 +1,12 @@
 "use client";
 
-import type { CustomerCacheListOutput } from "@pestcall/core";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Button, Card } from "../../components/ui";
 import { createAgentClient } from "../../lib/agent-client";
-import { rpcClient } from "../../lib/orpc";
+import { orpc } from "../../lib/orpc";
 
 type ChatMessage = {
   id: string;
@@ -42,10 +41,11 @@ export default function CustomerPage() {
     };
   }, []);
 
-  const customersQuery = useQuery<CustomerCacheListOutput>({
-    queryKey: ["customer-portal", "customers"],
-    queryFn: () => rpcClient.customers.list({ limit: 50 }),
-  });
+  const customersQuery = useQuery(
+    orpc.customers.list.queryOptions({
+      input: { limit: 50 },
+    }),
+  );
 
   useEffect(() => {
     const items = customersQuery.data?.items ?? [];

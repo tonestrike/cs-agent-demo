@@ -6,7 +6,7 @@ import Link from "next/link";
 import type { CallTurn } from "@pestcall/core";
 
 import { Badge, Card } from "../../../../components/ui";
-import { rpcClient } from "../../../../lib/orpc";
+import { orpc } from "../../../../lib/orpc";
 
 const formatDateTime = (iso: string) =>
   new Date(iso).toLocaleString("en-US", {
@@ -21,13 +21,11 @@ export default function CallDetailPage({
 }: {
   params: { id: string };
 }) {
-  const callQuery = useQuery({
-    queryKey: ["call-detail", params.id],
-    queryFn: () =>
-      rpcClient.calls.get({
-        callSessionId: params.id,
-      }),
-  });
+  const callQuery = useQuery(
+    orpc.calls.get.queryOptions({
+      input: { callSessionId: params.id },
+    }),
+  );
 
   return (
     <main className="grid-dots min-h-screen px-6 py-10">

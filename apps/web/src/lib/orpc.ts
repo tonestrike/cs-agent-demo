@@ -1,6 +1,7 @@
 import type { Client } from "@orpc/client";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
+import { createORPCReactQueryUtils } from "@orpc/react-query";
 import type {
   AgentPromptConfigRecord,
   AgentPromptConfigUpdate,
@@ -89,3 +90,4 @@ const rpcLink = new RPCLink<RpcContext>({
 });
 
 export const rpcClient = createORPCClient<RpcClient>(rpcLink);
+export const orpc = createORPCReactQueryUtils(rpcClient);

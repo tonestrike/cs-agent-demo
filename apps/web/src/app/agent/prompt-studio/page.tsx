@@ -29,7 +29,7 @@ import { useEffect, useState } from "react";
 import { z } from "zod";
 
 import { Badge, Button, Card } from "../../../components/ui";
-import { rpcClient } from "../../../lib/orpc";
+import { orpc } from "../../../lib/orpc";
 import { WORKERS_AI_MODELS } from "../../../lib/workers-ai-models";
 
 const schemaToSummary = (
@@ -161,10 +161,7 @@ export default function PromptStudioPage() {
     ? Array.from(new Set([configDraft.modelId, ...WORKERS_AI_MODELS]))
     : [...WORKERS_AI_MODELS];
 
-  const agentConfigQuery = useQuery({
-    queryKey: ["agent-config"],
-    queryFn: () => rpcClient.agentConfig.get(),
-  });
+  const agentConfigQuery = useQuery(orpc.agentConfig.get.queryOptions());
 
   useEffect(() => {
     if (!configDraft && agentConfigQuery.data) {
@@ -181,18 +178,16 @@ export default function PromptStudioPage() {
     }
   }, [agentConfigQuery.data, configDraft]);
 
-  const updateConfig = useMutation({
-    mutationFn: (input: AgentPromptConfigRecord) => {
-      const { updatedAt, ...payload } = input;
-      return rpcClient.agentConfig.update(payload);
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(["agent-config"], data);
-      setConfigDraft(data);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 1500);
-    },
-  });
+  const updateConfig = useMutation(
+    orpc.agentConfig.update.mutationOptions({
+      onSuccess: (data) => {
+        queryClient.setQueryData(orpc.agentConfig.get.key(), data);
+        setConfigDraft(data);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 1500);
+      },
+    }),
+  );
 
   const handleConfigChange = (
     field: keyof AgentPromptConfigRecord,
@@ -218,6 +213,11 @@ export default function PromptStudioPage() {
           }
         : prev,
     );
+  };
+
+  const buildUpdatePayload = (input: AgentPromptConfigRecord) => {
+    const { updatedAt, ...payload } = input;
+    return payload;
   };
 
   const applyJsonConfig = () => {
@@ -295,7 +295,7 @@ export default function PromptStudioPage() {
                 disabled={!configDraft || updateConfig.isPending}
                 onClick={() => {
                   if (configDraft) {
-                    updateConfig.mutate(configDraft);
+                    updateConfig.mutate(buildUpdatePayload(configDraft));
                   }
                 }}
               >

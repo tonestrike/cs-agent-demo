@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
 import { Badge, Card } from "../../../../components/ui";
-import { rpcClient } from "../../../../lib/orpc";
+import { orpc } from "../../../../lib/orpc";
 
 const formatDateTime = (iso: string) =>
   new Date(iso).toLocaleString("en-US", {
@@ -27,13 +27,11 @@ export default function TicketDetailPage({
 }: {
   params: { id: string };
 }) {
-  const ticketQuery = useQuery({
-    queryKey: ["ticket", params.id],
-    queryFn: () =>
-      rpcClient.tickets.get({
-        ticketId: params.id,
-      }),
-  });
+  const ticketQuery = useQuery(
+    orpc.tickets.get.queryOptions({
+      input: { ticketId: params.id },
+    }),
+  );
 
   return (
     <main className="grid-dots min-h-screen px-6 py-10">
