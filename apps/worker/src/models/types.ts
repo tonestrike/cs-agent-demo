@@ -53,6 +53,11 @@ export const escalateResultSchema = z.object({
   escalated: z.literal(true),
 });
 
+export const agentMessageResultSchema = z.object({
+  kind: z.string().min(1),
+  details: z.string().optional(),
+});
+
 // Discriminated union for tool results
 export const toolResultSchema = z.discriminatedUnion("toolName", [
   z.object({
@@ -74,6 +79,10 @@ export const toolResultSchema = z.discriminatedUnion("toolName", [
   z.object({
     toolName: z.literal("agent.escalate"),
     result: escalateResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("agent.message"),
+    result: agentMessageResultSchema,
   }),
 ]);
 

@@ -9,7 +9,13 @@ import { router } from "./router";
 export { PestCallAgent } from "./agents/pestcall";
 
 const handler = new RPCHandler(router, {
-  plugins: [new CORSPlugin()],
+  plugins: [
+    new CORSPlugin({
+      origin: "*",
+      allowMethods: ["POST", "OPTIONS"],
+      allowHeaders: ["content-type", "x-demo-auth"],
+    }),
+  ],
   interceptors: [
     onError((error) => {
       console.error(error);

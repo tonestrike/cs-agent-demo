@@ -57,8 +57,7 @@ type RpcClient = {
 };
 
 const rpcLink = new RPCLink<RpcContext>({
-  url: (_options, path, _input) =>
-    new URL(`/rpc/${path.join("/")}`, apiBaseUrl).toString(),
+  url: () => new URL("/rpc", apiBaseUrl).toString(),
   headers: () => {
     const headers: Record<string, string> = {};
     if (demoAuthToken) {

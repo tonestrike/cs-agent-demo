@@ -60,6 +60,19 @@ const hasPaymentRequest = (text: string) => {
   return lowered.includes("pay") || lowered.includes("payment");
 };
 
+const agentMessageKinds = {
+  requestCustomerInfo: "request_customer_info",
+  requestZip: "request_zip",
+  noAppointment: "no_appointment",
+  noSlots: "no_slots",
+  rescheduleConfirmed: "reschedule_confirmed",
+  ticketCreated: "ticket_created",
+} as const;
+
+const agentIntents = {
+  rescheduleOffer: "reschedule_offer",
+} as const;
+
 const isAffirmative = (text: string) => {
   const trimmed = text.trim().toLowerCase();
   if (!trimmed) {
@@ -235,10 +248,7 @@ export const handleAgentMessage = async (
       transport: "web",
     });
   } else {
-    const recentTurns = await deps.calls.getRecentTurns({
-      callSessionId,
-      limit: 6,
-    });
+    const recentTurns = await deps.calls.getTurns(callSessionId);
     recentContext = recentTurns
       .map((turn) => `${turn.speaker}: ${turn.text}`)
       .join("\n");
@@ -281,8 +291,26 @@ export const handleAgentMessage = async (
 
     actions.push("created_ticket");
 
-    const replyText =
-      "I could not find your account. Can you share your name and address?";
+    const replyText = await generateReply(
+      model,
+      input,
+      {
+        id: "unknown",
+        displayName: "Unknown caller",
+        phoneE164,
+        addressSummary: "Unknown",
+      },
+      {
+        toolName: "agent.message",
+        result: {
+          kind: agentMessageKinds.requestCustomerInfo,
+          details: `No CRM match for ${phoneE164}. Ticket ${ticket.id} created.`,
+        },
+      },
+      agentConfig.scopeMessage,
+      recentContext,
+      modelCalls,
+    );
 
     await deps.calls.addTurn({
       id: crypto.randomUUID(),
@@ -391,7 +419,7 @@ export const handleAgentMessage = async (
 
   const shouldConfirmReschedule =
     isAffirmative(input.text) &&
-    (lastAgentIntent === "reschedule_offer" ||
+    (lastAgentIntent === agentIntents.rescheduleOffer ||
       (lastAgentIntent === "crm.getNextAppointment" &&
         Boolean(
           lastAgentText?.toLowerCase().match(/resched|update|move|change/),
@@ -406,8 +434,21 @@ export const handleAgentMessage = async (
 
     const appointment = appointmentCall.result as ServiceAppointment | null;
     if (!appointment) {
-      const replyText =
-        "I couldn't find a scheduled appointment. I've opened a ticket for our team.";
+      const replyText = await generateReply(
+        model,
+        input,
+        customer,
+        {
+          toolName: "agent.message",
+          result: {
+            kind: agentMessageKinds.noAppointment,
+            details: "No scheduled appointment was found for this customer.",
+          },
+        },
+        agentConfig.scopeMessage,
+        recentContext,
+        modelCalls,
+      );
 
       await deps.calls.addTurn({
         id: crypto.randomUUID(),
@@ -443,8 +484,21 @@ export const handleAgentMessage = async (
     const slots = Array.isArray(slotsCall.result) ? slotsCall.result : [];
     const slot = slots[0];
     if (!slot) {
-      const replyText =
-        "I couldn't find any alternate times right now. Want me to open a ticket for a specialist?";
+      const replyText = await generateReply(
+        model,
+        input,
+        customer,
+        {
+          toolName: "agent.message",
+          result: {
+            kind: agentMessageKinds.noSlots,
+            details: "No alternate time slots are available for rescheduling.",
+          },
+        },
+        agentConfig.scopeMessage,
+        recentContext,
+        modelCalls,
+      );
 
       await deps.calls.addTurn({
         id: crypto.randomUUID(),
@@ -480,7 +534,21 @@ export const handleAgentMessage = async (
     );
     tools.push(rescheduled.record);
 
-    const replyText = `All set. Your appointment is now ${slot.date} ${slot.timeWindow}.`;
+    const replyText = await generateReply(
+      model,
+      input,
+      customer,
+      {
+        toolName: "crm.rescheduleAppointment",
+        result: {
+          date: (rescheduled.result as { date: string }).date,
+          timeWindow: (rescheduled.result as { timeWindow: string }).timeWindow,
+        },
+      },
+      agentConfig.scopeMessage,
+      recentContext,
+      modelCalls,
+    );
 
     await deps.calls.addTurn({
       id: crypto.randomUUID(),
@@ -573,10 +641,13 @@ export const handleAgentMessage = async (
         input,
         customer,
         {
-          toolName: "crm.getNextAppointment",
-          result: null,
+          toolName: "agent.message",
+          result: {
+            kind: agentMessageKinds.noAppointment,
+            details: `No appointment found for ${customer.displayName}. Ticket ${ticket.id} created.`,
+          },
         },
-        "I couldn't find a scheduled appointment. I've opened a ticket for our team.",
+        agentConfig.scopeMessage,
         recentContext,
         modelCalls,
       );
@@ -624,7 +695,7 @@ export const handleAgentMessage = async (
             toolName: "crm.getAvailableSlots",
             result: slot,
           },
-          `I can move your appointment to ${slot.date} ${slot.timeWindow}. Should I update it?`,
+          agentConfig.scopeMessage,
           recentContext,
           modelCalls,
         );
@@ -636,7 +707,7 @@ export const handleAgentMessage = async (
           speaker: "agent",
           text: replyText,
           meta: {
-            intent: "reschedule_offer",
+            intent: agentIntents.rescheduleOffer,
             tools,
             modelCalls,
             customerId: customer.id,
@@ -666,7 +737,7 @@ export const handleAgentMessage = async (
           addressSummary: appointment.addressSummary,
         },
       },
-      `Your next appointment is ${appointment.date} ${appointment.timeWindow} at ${appointment.addressSummary}.`,
+      agentConfig.scopeMessage,
       recentContext,
       modelCalls,
     );
@@ -697,8 +768,21 @@ export const handleAgentMessage = async (
   if (modelOutput.toolName === "crm.getOpenInvoices") {
     const hasZip = zipRegex.test(input.text);
     if (!hasZip) {
-      const replyText =
-        "Before I can share billing details, please confirm your ZIP code.";
+      const replyText = await generateReply(
+        model,
+        input,
+        customer,
+        {
+          toolName: "agent.message",
+          result: {
+            kind: agentMessageKinds.requestZip,
+            details: "Billing details require ZIP verification.",
+          },
+        },
+        agentConfig.scopeMessage,
+        recentContext,
+        modelCalls,
+      );
 
       await deps.calls.addTurn({
         id: crypto.randomUUID(),
@@ -747,9 +831,7 @@ export const handleAgentMessage = async (
           invoiceCount: invoices.length,
         },
       },
-      balanceCents === 0
-        ? "You have no outstanding balance."
-        : `Your current balance is $${(balanceCents / 100).toFixed(2)}.`,
+      agentConfig.scopeMessage,
       recentContext,
       modelCalls,
     );
@@ -810,7 +892,7 @@ export const handleAgentMessage = async (
         toolName: "agent.escalate",
         result: { escalated: true },
       },
-      "I have created a ticket for a specialist to follow up shortly.",
+      agentConfig.scopeMessage,
       recentContext,
       modelCalls,
     );
@@ -849,7 +931,21 @@ export const handleAgentMessage = async (
   });
   actions.push("created_ticket");
 
-  const replyText = "I’ve opened a ticket for our team to follow up with you.";
+  const replyText = await generateReply(
+    model,
+    input,
+    customer,
+    {
+      toolName: "agent.message",
+      result: {
+        kind: agentMessageKinds.ticketCreated,
+        details: `Ticket ${ticket.id} created for follow-up.`,
+      },
+    },
+    agentConfig.scopeMessage,
+    recentContext,
+    modelCalls,
+  );
 
   await deps.calls.addTurn({
     id: crypto.randomUUID(),

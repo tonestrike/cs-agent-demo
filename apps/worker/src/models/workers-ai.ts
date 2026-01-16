@@ -45,6 +45,7 @@ const buildToolGuidanceLines = (config: AgentPromptConfig) => {
     `- crm.getOpenInvoices: ${config.toolGuidance.getOpenInvoices}`,
     `- crm.rescheduleAppointment: ${config.toolGuidance.rescheduleAppointment}`,
     `- agent.escalate: ${config.toolGuidance.escalate}`,
+    "- agent.message: Use result.kind and result.details to craft a helpful response.",
   ];
 };
 
@@ -57,6 +58,7 @@ const buildPrompt = (input: AgentModelInput, config: AgentPromptConfig) => {
     "Return JSON only, no prose.",
     "Choose one tool call or a final response.",
     ...buildToolGuidanceLines(config),
+    "agent.message kinds: request_customer_info, request_zip, no_appointment, no_slots, reschedule_confirmed, ticket_created.",
     `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
     "If the request is vague, ask how you can help without calling tools.",
     "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
@@ -141,6 +143,7 @@ export const createWorkersAiAdapter = (
         "Use the tool result to answer the customer.",
         "Do not mention internal tool names.",
         ...buildToolGuidanceLines(config),
+        "agent.message kinds: request_customer_info, request_zip, no_appointment, no_slots, reschedule_confirmed, ticket_created.",
         `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
         "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
       ];

@@ -74,6 +74,27 @@ export const createMockModelAdapter = (
         }
         case "agent.escalate":
           return "I have created a ticket for a specialist to follow up shortly.";
+        case "agent.message": {
+          if (input.result.kind === "request_customer_info") {
+            return "Can you share your name and address so I can locate your account?";
+          }
+          if (input.result.kind === "request_zip") {
+            return "Please confirm your ZIP code before I share billing details.";
+          }
+          if (input.result.kind === "no_appointment") {
+            return "I couldn't find a scheduled appointment.";
+          }
+          if (input.result.kind === "no_slots") {
+            return "I couldn't find any alternate times right now.";
+          }
+          if (input.result.kind === "reschedule_confirmed") {
+            return "You're all set. Your appointment has been updated.";
+          }
+          return (
+            config?.scopeMessage ??
+            "I can help with pest control appointments, billing, or service questions."
+          );
+        }
         default:
           return (
             config?.scopeMessage ??
