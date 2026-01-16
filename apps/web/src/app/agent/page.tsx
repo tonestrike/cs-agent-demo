@@ -3,7 +3,7 @@
 import type { ServiceAppointment, Ticket } from "@pestcall/core";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { CallSession } from "@pestcall/core";
 
@@ -27,9 +27,18 @@ export default function AgentDashboardPage() {
   const [activeTab, setActiveTab] = useState<
     "calls" | "tickets" | "appointments"
   >("calls");
+  const [callsItems, setCallsItems] = useState<CallSession[]>([]);
+  const [callsCursor, setCallsCursor] = useState<string | null>(null);
+  const [appointmentsItems, setAppointmentsItems] = useState<
+    ServiceAppointment[]
+  >([]);
+  const [appointmentsCursor, setAppointmentsCursor] = useState<string | null>(
+    null,
+  );
   const callsQuery = useQuery({
-    queryKey: ["calls"],
-    queryFn: () => rpcClient.calls.list({ limit: 200 }),
+    queryKey: ["calls", callsCursor],
+    queryFn: () =>
+      rpcClient.calls.list({ limit: 100, cursor: callsCursor ?? undefined }),
     refetchInterval: 4000,
   });
 
@@ -39,8 +48,12 @@ export default function AgentDashboardPage() {
   });
 
   const appointmentsQuery = useQuery({
-    queryKey: ["appointments"],
-    queryFn: () => rpcClient.appointments.list({ limit: 10 }),
+    queryKey: ["appointments", appointmentsCursor],
+    queryFn: () =>
+      rpcClient.appointments.list({
+        limit: 50,
+        cursor: appointmentsCursor ?? undefined,
+      }),
   });
 
   const ticketCallLookups = useQueries({
@@ -50,6 +63,62 @@ export default function AgentDashboardPage() {
       enabled: Boolean(ticket.id),
     })),
   });
+
+  useEffect(() => {
+    const stored =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem("agent-dashboard-tab")
+        : null;
+    if (
+      stored === "calls" ||
+      stored === "tickets" ||
+      stored === "appointments"
+    ) {
+      setActiveTab(stored);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("agent-dashboard-tab", activeTab);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    const items = callsQuery.data?.items ?? [];
+    if (items.length === 0) {
+      return;
+    }
+    setCallsItems((prev) => {
+      const seen = new Set(prev.map((item) => item.id));
+      const merged = [...prev];
+      for (const item of items) {
+        if (!seen.has(item.id)) {
+          merged.push(item);
+        }
+      }
+      return merged;
+    });
+    setCallsCursor(callsQuery.data?.nextCursor ?? null);
+  }, [callsQuery.data]);
+
+  useEffect(() => {
+    const items = appointmentsQuery.data?.items ?? [];
+    if (items.length === 0) {
+      return;
+    }
+    setAppointmentsItems((prev) => {
+      const seen = new Set(prev.map((item) => item.id));
+      const merged = [...prev];
+      for (const item of items) {
+        if (!seen.has(item.id)) {
+          merged.push(item);
+        }
+      }
+      return merged;
+    });
+    setAppointmentsCursor(appointmentsQuery.data?.nextCursor ?? null);
+  }, [appointmentsQuery.data]);
 
   const ticketCallMap = useMemo(() => {
     const entries = (ticketsQuery.data?.items ?? []).map((ticket, index) => {
@@ -69,7 +138,7 @@ export default function AgentDashboardPage() {
         sessions: CallSession[];
       }
     >();
-    for (const session of callsQuery.data?.items ?? []) {
+    for (const session of callsItems) {
       const key = session.customerCacheId ?? session.phoneE164;
       const existing = map.get(key);
       if (existing) {
@@ -97,7 +166,7 @@ export default function AgentDashboardPage() {
     return grouped.sort((a, b) =>
       (a.latestStartedAt ?? "") < (b.latestStartedAt ?? "") ? 1 : -1,
     );
-  }, [callsQuery.data?.items]);
+  }, [callsItems]);
 
   return (
     <main className="grid-dots min-h-screen px-6 py-10">
@@ -138,12 +207,28 @@ export default function AgentDashboardPage() {
           <Card className="flex flex-col gap-5 animate-rise">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold">Calls by Customer</h2>
-              <Button
-                className="bg-moss hover:bg-ink"
-                onClick={() => callsQuery.refetch()}
-              >
-                Refresh
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  className="bg-moss hover:bg-ink"
+                  onClick={() => {
+                    setCallsItems([]);
+                    setCallsCursor(null);
+                    callsQuery.refetch();
+                  }}
+                >
+                  Refresh
+                </Button>
+                {callsQuery.data?.nextCursor ? (
+                  <Button
+                    className="bg-white/80 hover:bg-ink"
+                    onClick={() =>
+                      setCallsCursor(callsQuery.data?.nextCursor ?? null)
+                    }
+                  >
+                    Load more
+                  </Button>
+                ) : null}
+              </div>
             </div>
             <div className="scroll-area max-h-[520px] space-y-3 overflow-y-auto pr-1">
               {groupedCalls.map((group) => (
@@ -264,39 +349,55 @@ export default function AgentDashboardPage() {
           <Card className="flex flex-col gap-5 animate-rise">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold">Appointments</h2>
-              <Button
-                className="bg-moss hover:bg-ink"
-                onClick={() => appointmentsQuery.refetch()}
-              >
-                Refresh
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  className="bg-moss hover:bg-ink"
+                  onClick={() => {
+                    setAppointmentsItems([]);
+                    setAppointmentsCursor(null);
+                    appointmentsQuery.refetch();
+                  }}
+                >
+                  Refresh
+                </Button>
+                {appointmentsQuery.data?.nextCursor ? (
+                  <Button
+                    className="bg-white/80 hover:bg-ink"
+                    onClick={() =>
+                      setAppointmentsCursor(
+                        appointmentsQuery.data?.nextCursor ?? null,
+                      )
+                    }
+                  >
+                    Load more
+                  </Button>
+                ) : null}
+              </div>
             </div>
             <div className="space-y-3">
-              {(appointmentsQuery.data?.items ?? []).map(
-                (appointment: ServiceAppointment) => (
-                  <div
-                    key={appointment.id}
-                    className="rounded-2xl border border-ink/10 bg-white/70 p-4"
-                  >
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-ink">
-                        {maskPhone(appointment.phoneE164)}
-                      </p>
-                      <span className="text-xs uppercase text-ink/50">
-                        {appointment.status}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-xs text-ink/60">
-                      {appointment.date} • {appointment.timeWindow}
+              {appointmentsItems.map((appointment: ServiceAppointment) => (
+                <div
+                  key={appointment.id}
+                  className="rounded-2xl border border-ink/10 bg-white/70 p-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-ink">
+                      {maskPhone(appointment.phoneE164)}
                     </p>
-                    {appointment.rescheduledFromId ? (
-                      <p className="mt-2 text-xs text-ink/50">
-                        Rescheduled from {appointment.rescheduledFromId}
-                      </p>
-                    ) : null}
+                    <span className="text-xs uppercase text-ink/50">
+                      {appointment.status}
+                    </span>
                   </div>
-                ),
-              )}
+                  <p className="mt-2 text-xs text-ink/60">
+                    {appointment.date} • {appointment.timeWindow}
+                  </p>
+                  {appointment.rescheduledFromId ? (
+                    <p className="mt-2 text-xs text-ink/50">
+                      Rescheduled from {appointment.rescheduledFromId}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
               {appointmentsQuery.isLoading && (
                 <p className="text-sm text-ink/60">Loading appointments...</p>
               )}
@@ -307,7 +408,7 @@ export default function AgentDashboardPage() {
               )}
               {!appointmentsQuery.isLoading &&
               !appointmentsQuery.isError &&
-              (appointmentsQuery.data?.items ?? []).length === 0 ? (
+              appointmentsItems.length === 0 ? (
                 <p className="text-sm text-ink/60">No appointments yet.</p>
               ) : null}
             </div>
