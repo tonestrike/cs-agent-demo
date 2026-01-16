@@ -44,6 +44,7 @@ export const createAppointmentRepository = (db: D1Database) => {
           customers_cache.crm_customer_id AS customer_crm_id,
           customers_cache.display_name AS customer_display_name,
           customers_cache.address_summary AS customer_address_summary,
+          customers_cache.zip_code AS customer_zip_code,
           customers_cache.updated_at AS customer_updated_at
         FROM appointments
         LEFT JOIN customers_cache
@@ -79,6 +80,7 @@ export const createAppointmentRepository = (db: D1Database) => {
             customers_cache.crm_customer_id AS customer_crm_id,
             customers_cache.display_name AS customer_display_name,
             customers_cache.address_summary AS customer_address_summary,
+            customers_cache.zip_code AS customer_zip_code,
             customers_cache.updated_at AS customer_updated_at
           FROM appointments
           LEFT JOIN customers_cache
@@ -102,6 +104,7 @@ export const createAppointmentRepository = (db: D1Database) => {
             customers_cache.crm_customer_id AS customer_crm_id,
             customers_cache.display_name AS customer_display_name,
             customers_cache.address_summary AS customer_address_summary,
+            customers_cache.zip_code AS customer_zip_code,
             customers_cache.updated_at AS customer_updated_at
           FROM appointments
           LEFT JOIN customers_cache
@@ -163,7 +166,7 @@ export const createAppointmentRepository = (db: D1Database) => {
     }) {
       await db
         .prepare(
-          "UPDATE appointments SET status = 'rescheduled', rescheduled_to_id = ?, updated_at = ? WHERE id = ?",
+          "UPDATE appointments SET status = 'cancelled', rescheduled_to_id = ?, updated_at = ? WHERE id = ?",
         )
         .bind(input.rescheduledToId, input.updatedAt, input.appointmentId)
         .run();

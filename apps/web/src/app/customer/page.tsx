@@ -90,8 +90,8 @@ export default function CustomerPage() {
     sessionRef.current = null;
   };
 
-  const handleSend = () => {
-    const trimmed = input.trim();
+  const sendMessage = (message: string) => {
+    const trimmed = message.trim();
     if (!trimmed) {
       return;
     }
@@ -181,6 +181,10 @@ export default function CustomerPage() {
       .catch(() => {
         setStatus("Connection issue. Try again.");
       });
+  };
+
+  const handleSend = () => {
+    sendMessage(input);
   };
 
   const statusLabel = useMemo(() => {
@@ -337,6 +341,23 @@ export default function CustomerPage() {
                 <p className="mt-1 text-sm text-ink">
                   {selectedCustomer.phoneE164}
                 </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-ink/50">
+                  ZIP code
+                </p>
+                <p className="mt-1 text-sm text-ink">
+                  {selectedCustomer.zipCode ?? "Unknown"}
+                </p>
+                {selectedCustomer.zipCode ? (
+                  <Button
+                    className="mt-2"
+                    type="button"
+                    onClick={() => sendMessage(selectedCustomer.zipCode ?? "")}
+                  >
+                    Send ZIP
+                  </Button>
+                ) : null}
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-ink/50">

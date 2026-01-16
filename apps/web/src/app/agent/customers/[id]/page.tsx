@@ -66,6 +66,9 @@ export default function CustomerDetailPage({
               </h1>
               <p className="text-sm text-ink/60">
                 {customerQuery.data.phoneE164}
+                {customerQuery.data.zipCode
+                  ? ` • ${customerQuery.data.zipCode}`
+                  : ""}
                 {customerQuery.data.addressSummary
                   ? ` • ${customerQuery.data.addressSummary}`
                   : ""}

@@ -8,6 +8,10 @@ export const customerCacheSchema = z.object({
   displayName: z.string(),
   phoneE164: phoneE164Schema,
   addressSummary: z.string().nullable(),
+  zipCode: z
+    .string()
+    .regex(/^\d{5}$/)
+    .nullable(),
   updatedAt: z.string(),
 });
 

@@ -43,6 +43,7 @@ export const createCallRepository = (db: D1Database) => {
           customers_cache.crm_customer_id AS customer_crm_id,
           customers_cache.display_name AS customer_display_name,
           customers_cache.address_summary AS customer_address_summary,
+          customers_cache.zip_code AS customer_zip_code,
           customers_cache.updated_at AS customer_updated_at
         FROM call_sessions
         LEFT JOIN customers_cache
@@ -78,6 +79,7 @@ export const createCallRepository = (db: D1Database) => {
             customers_cache.crm_customer_id AS customer_crm_id,
             customers_cache.display_name AS customer_display_name,
             customers_cache.address_summary AS customer_address_summary,
+            customers_cache.zip_code AS customer_zip_code,
             customers_cache.updated_at AS customer_updated_at
           FROM call_sessions
           LEFT JOIN customers_cache

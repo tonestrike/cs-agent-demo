@@ -14,6 +14,7 @@ import {
   toolResultSchema,
 } from "../models/types";
 import type { AgentMessageInput, AgentMessageOutput } from "../schemas/agent";
+import { rescheduleAppointment as rescheduleAppointmentUseCase } from "./appointments";
 import { createTicketUseCase } from "./tickets";
 
 type ToolCall = {
@@ -159,6 +160,7 @@ type CallSessionSummary = {
     displayName: string;
     phoneE164: string;
     addressSummary: string;
+    zipCode?: string | null;
   } | null;
   lastToolName?: string | null;
   lastToolResult?: string | null;
@@ -511,6 +513,7 @@ export const handleAgentMessage = async (
         displayName: matches[0].displayName,
         phoneE164: matches[0].phoneE164,
         addressSummary: matches[0].addressSummary,
+        zipCode: matches[0].zipCode ?? null,
       },
     };
     await deps.calls.updateSessionSummary({
@@ -624,10 +627,13 @@ export const handleAgentMessage = async (
 
   const attemptFollowUpToolCall = async (
     draftResponse: string,
+    mode: "commitment" | "force_tool",
   ): Promise<typeof modelOutput | null> => {
     const followUpContext = [
       context,
-      "Follow-up instruction: If your last response commits to checking, looking up, scheduling, rescheduling, or fetching details, return a tool_call now.",
+      mode === "commitment"
+        ? "Follow-up instruction: If your last response commits to checking, looking up, scheduling, rescheduling, or fetching details, return a tool_call now."
+        : "Follow-up instruction: The user asked for appointments, billing, or service details. Return a tool_call that fulfills the request. Do not return a final response.",
     ]
       .filter(Boolean)
       .join("\n");
@@ -727,6 +733,7 @@ export const handleAgentMessage = async (
                         displayName: result[0].displayName,
                         phoneE164: result[0].phoneE164,
                         addressSummary: result[0].addressSummary,
+                        zipCode: result[0].zipCode ?? null,
                       }
                     : null,
               };
@@ -788,6 +795,7 @@ export const handleAgentMessage = async (
                         displayName: result[0].displayName,
                         phoneE164: result[0].phoneE164,
                         addressSummary: result[0].addressSummary,
+                        zipCode: result[0].zipCode ?? null,
                       }
                     : null,
               };
@@ -844,6 +852,7 @@ export const handleAgentMessage = async (
                         displayName: result[0].displayName,
                         phoneE164: result[0].phoneE164,
                         addressSummary: result[0].addressSummary,
+                        zipCode: result[0].zipCode ?? null,
                       }
                     : null,
               };
@@ -928,6 +937,7 @@ export const handleAgentMessage = async (
                   displayName: profile.displayName,
                   phoneE164: profile.phoneE164 ?? phoneE164,
                   addressSummary: profile.addressSummary ?? null,
+                  zipCode: profile.zipCode ?? null,
                   updatedAt: new Date().toISOString(),
                 });
               }
@@ -1246,20 +1256,35 @@ export const handleAgentMessage = async (
                 }
               ).appointment;
               if (updated) {
-                await upsertAppointmentSnapshot(
-                  deps,
-                  phoneE164,
-                  (call.result as { appointment?: unknown })?.appointment
-                    ? ((call.result as { appointment: unknown })
-                        .appointment as {
-                        id: string;
-                        customerId: string;
-                        addressSummary: string;
-                        date: string;
-                        timeWindow: string;
-                      })
-                    : null,
-                );
+                const appointmentSnapshot = (
+                  call.result as {
+                    appointment?: unknown;
+                  }
+                )?.appointment
+                  ? ((call.result as { appointment: unknown }).appointment as {
+                      id: string;
+                      customerId: string;
+                      addressSummary: string;
+                      date: string;
+                      timeWindow: string;
+                    })
+                  : null;
+                const existing = await deps.appointments.get(appointmentId);
+                if (existing) {
+                  await rescheduleAppointmentUseCase(deps.appointments, {
+                    appointment: existing,
+                    slot: {
+                      date: updated.date,
+                      timeWindow: updated.timeWindow,
+                    },
+                  });
+                } else {
+                  await upsertAppointmentSnapshot(
+                    deps,
+                    phoneE164,
+                    appointmentSnapshot,
+                  );
+                }
                 toolResult = {
                   toolName: "crm.rescheduleAppointment",
                   result: {
@@ -1550,7 +1575,10 @@ export const handleAgentMessage = async (
     (hasActionCommitment(modelOutput.text) ||
       shouldForceToolDecision(input.text))
   ) {
-    const followUp = await attemptFollowUpToolCall(modelOutput.text);
+    const followUp = await attemptFollowUpToolCall(
+      modelOutput.text,
+      shouldForceToolDecision(input.text) ? "force_tool" : "commitment",
+    );
     if (followUp?.type === "tool_call") {
       toolCall = followUp;
       followUpDecisionSnapshot = summarizeModelOutput(followUp);
