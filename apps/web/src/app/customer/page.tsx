@@ -185,7 +185,7 @@ export default function CustomerPage() {
 
   const selectedCustomer = useMemo(() => {
     return phoneOptions.find((option) => option.value === phoneNumber) ?? null;
-  }, [phoneNumber, phoneOptions]);
+  }, [phoneNumber]);
 
   const copyConversation = async () => {
     const payload = {
