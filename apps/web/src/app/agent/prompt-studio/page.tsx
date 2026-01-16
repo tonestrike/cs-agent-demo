@@ -20,6 +20,79 @@ import { z } from "zod";
 import { Badge, Button, Card } from "../../../components/ui";
 import { rpcClient } from "../../../lib/orpc";
 
+const schemaToSummary = (
+  schema: z.ZodTypeAny,
+): string | Record<string, unknown> => {
+  if (schema instanceof z.ZodOptional) {
+    return { optional: true, schema: schemaToSummary(schema._def.innerType) };
+  }
+  if (schema instanceof z.ZodNullable) {
+    return { nullable: true, schema: schemaToSummary(schema._def.innerType) };
+  }
+  if (schema instanceof z.ZodArray) {
+    return { type: "array", items: schemaToSummary(schema._def.type) };
+  }
+  if (schema instanceof z.ZodObject) {
+    const shape = schema._def.shape() as z.ZodRawShape;
+    return Object.fromEntries(
+      Object.entries(shape).map(([key, value]) => [
+        key,
+        schemaToSummary(value),
+      ]),
+    );
+  }
+  if (schema instanceof z.ZodEnum) {
+    return { type: "enum", values: schema._def.values };
+  }
+  if (schema instanceof z.ZodUnion) {
+    return {
+      type: "union",
+      options: schema._def.options.map(schemaToSummary),
+    };
+  }
+  if (schema instanceof z.ZodString) {
+    return "string";
+  }
+  if (schema instanceof z.ZodNumber) {
+    return "number";
+  }
+  if (schema instanceof z.ZodBoolean) {
+    return "boolean";
+  }
+  return "unknown";
+};
+
+const TOOL_SCHEMA_CONTEXT = [
+  {
+    tool: "crm.lookupCustomerByPhone",
+    input: lookupCustomerInputSchema,
+    output: z.array(customerMatchSchema),
+  },
+  {
+    tool: "crm.getNextAppointment",
+    input: appointmentInputSchema,
+    output: appointmentSchema.nullable(),
+  },
+  {
+    tool: "crm.getOpenInvoices",
+    input: invoicesInputSchema,
+    output: z.array(invoiceSchema),
+  },
+  {
+    tool: "crm.getAvailableSlots",
+    input: availableSlotsInputSchema,
+    output: z.array(availableSlotSchema),
+  },
+  {
+    tool: "crm.rescheduleAppointment",
+    input: rescheduleInputSchema,
+    output: z.object({
+      ok: z.boolean(),
+      appointment: appointmentSchema.optional(),
+    }),
+  },
+];
+
 export default function PromptStudioPage() {
   const [configDraft, setConfigDraft] =
     useState<AgentPromptConfigRecord | null>(null);
@@ -42,6 +115,15 @@ export default function PromptStudioPage() {
   useEffect(() => {
     if (!configDraft && agentConfigQuery.data) {
       setConfigDraft(agentConfigQuery.data);
+      const payload = {
+        config: agentPromptConfigRecordSchema.parse(agentConfigQuery.data),
+        tools: TOOL_SCHEMA_CONTEXT.map((tool) => ({
+          tool: tool.tool,
+          input: schemaToSummary(tool.input),
+          output: schemaToSummary(tool.output),
+        })),
+      };
+      setJsonDraft(JSON.stringify(payload, null, 2));
     }
   }, [agentConfigQuery.data, configDraft]);
 
@@ -107,86 +189,13 @@ export default function PromptStudioPage() {
     }
   };
 
-  const schemaToSummary = (
-    schema: z.ZodTypeAny,
-  ): string | Record<string, unknown> => {
-    if (schema instanceof z.ZodOptional) {
-      return { optional: true, schema: schemaToSummary(schema._def.innerType) };
-    }
-    if (schema instanceof z.ZodNullable) {
-      return { nullable: true, schema: schemaToSummary(schema._def.innerType) };
-    }
-    if (schema instanceof z.ZodArray) {
-      return { type: "array", items: schemaToSummary(schema._def.type) };
-    }
-    if (schema instanceof z.ZodObject) {
-      const shape = schema._def.shape() as z.ZodRawShape;
-      return Object.fromEntries(
-        Object.entries(shape).map(([key, value]) => [
-          key,
-          schemaToSummary(value),
-        ]),
-      );
-    }
-    if (schema instanceof z.ZodEnum) {
-      return { type: "enum", values: schema._def.values };
-    }
-    if (schema instanceof z.ZodUnion) {
-      return {
-        type: "union",
-        options: schema._def.options.map(schemaToSummary),
-      };
-    }
-    if (schema instanceof z.ZodString) {
-      return "string";
-    }
-    if (schema instanceof z.ZodNumber) {
-      return "number";
-    }
-    if (schema instanceof z.ZodBoolean) {
-      return "boolean";
-    }
-    return "unknown";
-  };
-
-  const toolSchemaContext = [
-    {
-      tool: "crm.lookupCustomerByPhone",
-      input: lookupCustomerInputSchema,
-      output: z.array(customerMatchSchema),
-    },
-    {
-      tool: "crm.getNextAppointment",
-      input: appointmentInputSchema,
-      output: appointmentSchema.nullable(),
-    },
-    {
-      tool: "crm.getOpenInvoices",
-      input: invoicesInputSchema,
-      output: z.array(invoiceSchema),
-    },
-    {
-      tool: "crm.getAvailableSlots",
-      input: availableSlotsInputSchema,
-      output: z.array(availableSlotSchema),
-    },
-    {
-      tool: "crm.rescheduleAppointment",
-      input: rescheduleInputSchema,
-      output: z.object({
-        ok: z.boolean(),
-        appointment: appointmentSchema.optional(),
-      }),
-    },
-  ];
-
   const copyPromptConfig = async () => {
     if (!configDraft) {
       return;
     }
     const payload = {
       config: agentPromptConfigRecordSchema.parse(configDraft),
-      tools: toolSchemaContext.map((tool) => ({
+      tools: TOOL_SCHEMA_CONTEXT.map((tool) => ({
         tool: tool.tool,
         input: schemaToSummary(tool.input),
         output: schemaToSummary(tool.output),
