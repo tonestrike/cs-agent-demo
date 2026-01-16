@@ -13,6 +13,11 @@ type AgentState = {
   lastPhoneNumber?: string;
 };
 
+type AgentEvent =
+  | { type: "status"; text: string }
+  | { type: "delta"; text: string }
+  | { type: "final"; data: unknown };
+
 const coerceMessageText = (message: unknown) => {
   if (typeof message === "string") {
     return message;
@@ -24,6 +29,74 @@ const coerceMessageText = (message: unknown) => {
     return String((message as { text?: unknown }).text ?? "");
   }
   return "";
+};
+
+const emitReply = async (
+  emit: (event: AgentEvent) => void,
+  deps: ReturnType<typeof createDependencies>,
+  input: AgentMessageInput,
+  onState: (response: { callSessionId: string }) => void,
+  end?: (event: AgentEvent) => void,
+  publish?: (sessionId: string, event: AgentEvent) => void,
+) => {
+  let lastStatus = "";
+  let publishSessionId = input.callSessionId ?? "";
+  const publishQueue: AgentEvent[] = [];
+  const maybePublish = (event: AgentEvent) => {
+    if (!publish) {
+      return;
+    }
+    if (publishSessionId) {
+      publish(publishSessionId, event);
+      return;
+    }
+    publishQueue.push(event);
+  };
+
+  const response = await handleAgentMessage(deps, input, undefined, {
+    onStatus: (status) => {
+      const text = status.text.trim();
+      if (!text || text === lastStatus) {
+        return;
+      }
+      lastStatus = text;
+      const event: AgentEvent = { type: "status", text };
+      emit(event);
+      maybePublish(event);
+    },
+  });
+  onState(response);
+  if (!publishSessionId) {
+    publishSessionId = response.callSessionId;
+  }
+  if (publishQueue.length && publishSessionId && publish) {
+    for (const event of publishQueue) {
+      publish(publishSessionId, event);
+    }
+    publishQueue.length = 0;
+  }
+
+  const chunks = response.replyText.split(/(\s+)/).filter(Boolean);
+  for (const chunk of chunks) {
+    const event: AgentEvent = { type: "delta", text: chunk };
+    emit(event);
+    maybePublish(event);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  deps.logger.info(
+    {
+      callSessionId: response.callSessionId,
+      replyTextLength: response.replyText.length,
+    },
+    "agent.stream.final",
+  );
+  const finalEvent: AgentEvent = { type: "final", data: response };
+  maybePublish(finalEvent);
+  if (end) {
+    end(finalEvent);
+  } else {
+    emit(finalEvent);
+  }
 };
 
 export class PestCallAgent extends Agent<Env, AgentState> {
@@ -57,37 +130,36 @@ export class PestCallAgent extends Agent<Env, AgentState> {
       },
       "agent.stream.start",
     );
-    const response = await handleAgentMessage(deps, input, undefined, {
-      onStatus: (status) => {
-        deps.logger.debug(
-          {
-            callSessionId: input.callSessionId ?? response.callSessionId,
-            statusText: status.text,
-          },
-          "agent.stream.status",
-        );
-        stream.send({ type: "status", text: status.text });
-      },
-    });
-    this.setState({
-      lastCallSessionId: response.callSessionId,
-      lastPhoneNumber: input.phoneNumber,
-    });
+    const publish = (sessionId: string, event: AgentEvent) => {
+      if (!this.env.CONVERSATION_HUB) {
+        return;
+      }
+      const id = this.env.CONVERSATION_HUB.idFromName(sessionId);
+      const stub = this.env.CONVERSATION_HUB.get(id);
+      void stub.fetch("https://conversation-hub/publish", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(event),
+      });
+    };
 
-    const chunks = response.replyText.split(/(\s+)/).filter(Boolean);
-    for (const chunk of chunks) {
-      stream.send({ type: "delta", text: chunk });
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    deps.logger.info(
-      {
-        callSessionId: response.callSessionId,
-        replyTextLength: response.replyText.length,
-        build: this.env.BUILD_ID ?? null,
+    await emitReply(
+      (event) => {
+        stream.send(event);
       },
-      "agent.stream.final",
+      deps,
+      input,
+      (response) => {
+        this.setState({
+          lastCallSessionId: response.callSessionId,
+          lastPhoneNumber: input.phoneNumber,
+        });
+      },
+      (event) => {
+        stream.end(event);
+      },
+      publish,
     );
-    stream.end({ type: "final", data: response });
   }
 
   override async onConnect(connection: { send: (data: string) => void }) {
@@ -137,11 +209,32 @@ export class PestCallAgent extends Agent<Env, AgentState> {
     }
 
     const deps = createDependencies(this.env);
-    const response = await handleAgentMessage(deps, validation.data);
-    this.setState({
-      lastCallSessionId: response.callSessionId,
-      lastPhoneNumber: validation.data.phoneNumber,
-    });
-    connection.send(JSON.stringify({ type: "reply", data: response }));
+    const publish = (sessionId: string, event: AgentEvent) => {
+      if (!this.env.CONVERSATION_HUB) {
+        return;
+      }
+      const id = this.env.CONVERSATION_HUB.idFromName(sessionId);
+      const stub = this.env.CONVERSATION_HUB.get(id);
+      void stub.fetch("https://conversation-hub/publish", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(event),
+      });
+    };
+    await emitReply(
+      (event) => {
+        connection.send(JSON.stringify(event));
+      },
+      deps,
+      validation.data,
+      (response) => {
+        this.setState({
+          lastCallSessionId: response.callSessionId,
+          lastPhoneNumber: validation.data.phoneNumber,
+        });
+      },
+      undefined,
+      publish,
+    );
   }
 }

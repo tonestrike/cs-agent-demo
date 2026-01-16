@@ -244,7 +244,6 @@ const buildStatusInstructions = (contextHint?: string) => {
 
 const responseSchema = z.object({
   answer: z.string().min(1),
-  citations: z.array(z.string().url()).optional(),
 });
 
 const selectionSchema = z.object({
@@ -255,58 +254,6 @@ const selectionSchema = z.object({
 const statusSchema = z.object({
   message: z.string().min(1),
 });
-
-const responseJsonSchema = {
-  type: "object",
-  properties: {
-    answer: { type: "string" },
-    citations: { type: "array", items: { type: "string" } },
-  },
-  required: ["answer"],
-  additionalProperties: false,
-};
-
-const selectionJsonSchema = {
-  type: "object",
-  properties: {
-    index: {
-      anyOf: [{ type: "integer" }, { type: "null" }],
-    },
-    reason: { type: "string" },
-  },
-  required: ["index"],
-  additionalProperties: false,
-};
-
-const statusJsonSchema = {
-  type: "object",
-  properties: {
-    message: { type: "string" },
-  },
-  required: ["message"],
-  additionalProperties: false,
-};
-
-const routeJsonSchema = {
-  type: "object",
-  properties: {
-    intent: {
-      type: "string",
-      enum: [
-        "appointments",
-        "reschedule",
-        "cancel",
-        "billing",
-        "payment",
-        "policy",
-        "general",
-      ],
-    },
-    topic: { type: "string" },
-  },
-  required: ["intent"],
-  additionalProperties: false,
-};
 
 const buildMessages = (
   instructions: string,
@@ -366,16 +313,22 @@ const buildGatewayBaseUrl = (env: Env) => {
   return `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/openrouter`;
 };
 
-const jsonResponseFormat = (schema: Record<string, unknown>) => ({
-  type: "json_schema",
-  json_schema: {
-    name: "response",
-    schema,
-  },
+const resolveBaseUrl = (env: Env) =>
+  env.OPENROUTER_BASE_URL?.trim() || buildGatewayBaseUrl(env);
+
+const jsonResponseFormat = () => ({
+  type: "json_object",
 });
 
 const truncate = (value: string, limit = 800) =>
   value.length > limit ? `${value.slice(0, limit)}…` : value;
+
+const hashToken = async (value: string) => {
+  const data = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  const bytes = Array.from(new Uint8Array(digest));
+  return bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
+};
 
 const requestOpenRouter = async (
   env: Env,
@@ -383,19 +336,48 @@ const requestOpenRouter = async (
   logger: Logger,
   tag: string,
 ) => {
-  const baseUrl = buildGatewayBaseUrl(env);
+  const baseUrl = resolveBaseUrl(env);
   const token = env.OPENROUTER_TOKEN;
   if (!baseUrl || !token) {
     throw new AppError("OpenRouter is not configured.", {
       code: "OPENROUTER_NOT_CONFIGURED",
     });
   }
-  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
+  const tokenHash = await hashToken(token);
+  logger.info(
+    {
+      tag,
+      baseUrl,
+      hasToken: Boolean(token),
+      tokenPrefix: token.slice(0, 6),
+      tokenHash: tokenHash.slice(0, 12),
+      tokenLength: token.length,
+      hasGatewayToken: Boolean(env.AI_GATEWAY_TOKEN),
+      hasReferer: Boolean(env.OPENROUTER_REFERER),
+      hasTitle: Boolean(env.OPENROUTER_TITLE),
     },
+    "openrouter.request.config",
+  );
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+  if (baseUrl.includes("gateway.ai.cloudflare.com")) {
+    const gatewayToken = env.AI_GATEWAY_TOKEN ?? token;
+    headers["cf-aig-authorization"] = `Bearer ${gatewayToken}`;
+  }
+  if (env.OPENROUTER_REFERER) {
+    headers["HTTP-Referer"] = env.OPENROUTER_REFERER;
+  }
+  if (env.OPENROUTER_TITLE) {
+    headers["X-Title"] = env.OPENROUTER_TITLE;
+  }
+  const endpoint = baseUrl.endsWith("/v1")
+    ? `${baseUrl}/chat/completions`
+    : `${baseUrl}/v1/chat/completions`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers,
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
@@ -444,7 +426,12 @@ export const createOpenRouterAdapter = (
         },
         "openrouter.tool_call.payload",
       );
-      const response = await requestOpenRouter(env, payload, logger, "generate");
+      const response = await requestOpenRouter(
+        env,
+        payload,
+        logger,
+        "generate",
+      );
       const toolCalls = (
         response as {
           choices?: Array<{
@@ -501,7 +488,7 @@ export const createOpenRouterAdapter = (
         {
           model,
           messages: buildMessages(instructions, input.context, input.messages),
-          response_format: jsonResponseFormat(responseJsonSchema),
+          response_format: jsonResponseFormat(),
           max_tokens: MAX_NEW_TOKENS,
         },
         logger,
@@ -529,8 +516,10 @@ export const createOpenRouterAdapter = (
         env,
         {
           model,
-          messages: [{ role: "system", content: buildRouteInstructions(input) }],
-          response_format: jsonResponseFormat(routeJsonSchema),
+          messages: [
+            { role: "system", content: buildRouteInstructions(input) },
+          ],
+          response_format: jsonResponseFormat(),
           max_tokens: MAX_NEW_TOKENS,
         },
         logger,
@@ -570,7 +559,7 @@ export const createOpenRouterAdapter = (
               content: text,
             },
           ],
-          response_format: jsonResponseFormat(selectionJsonSchema),
+          response_format: jsonResponseFormat(),
           max_tokens: MAX_NEW_TOKENS,
         },
         logger,
@@ -616,7 +605,7 @@ export const createOpenRouterAdapter = (
               content: text,
             },
           ],
-          response_format: jsonResponseFormat(statusJsonSchema),
+          response_format: jsonResponseFormat(),
           max_tokens: MAX_NEW_TOKENS,
         },
         logger,

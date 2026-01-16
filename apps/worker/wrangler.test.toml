@@ -1,6 +1,6 @@
 name = "pestcall-worker-test"
 main = "src/index.ts"
-compatibility_date = "2024-10-01"
+compatibility_date = "2024-10-22"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
@@ -12,3 +12,22 @@ binding = "DB"
 database_name = "pestcall_local"
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "CONVERSATION_HUB"
+class_name = "ConversationHub"
+
+[[workflows]]
+name = "pestcall-reschedule"
+binding = "RESCHEDULE_WORKFLOW"
+class_name = "RescheduleWorkflow"
+
+[[workflows]]
+name = "pestcall-verify"
+binding = "VERIFY_WORKFLOW"
+class_name = "VerificationWorkflow"
+
+[[workflows]]
+name = "pestcall-cancel"
+binding = "CANCEL_WORKFLOW"
+class_name = "CancelWorkflow"

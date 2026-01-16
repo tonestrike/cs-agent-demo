@@ -25,6 +25,14 @@ import {
   rescheduleAppointment as rescheduleAppointmentUseCase,
 } from "./appointments";
 import { createTicketUseCase } from "./tickets";
+import {
+  CANCEL_WORKFLOW_EVENT_CONFIRM,
+  CANCEL_WORKFLOW_EVENT_SELECT_APPOINTMENT,
+  RESCHEDULE_WORKFLOW_EVENT_CONFIRM,
+  RESCHEDULE_WORKFLOW_EVENT_SELECT_APPOINTMENT,
+  RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
+  VERIFY_WORKFLOW_EVENT_ZIP,
+} from "../workflows/constants";
 
 type ToolCall = {
   toolName: string;
@@ -209,10 +217,13 @@ type CallSessionSummary = {
     addressSummary: string;
     zipCode?: string | null;
   } | null;
-  workflow?: {
-    kind: "reschedule" | "cancel";
-    step: "select_appointment" | "select_slot";
+  workflowState?: {
+    kind: "verify" | "reschedule" | "cancel";
+    step: string;
+    instanceId: string;
     appointmentId?: string | null;
+    slotId?: string | null;
+    lastError?: string | null;
   } | null;
   lastToolName?: string | null;
   lastToolResult?: string | null;
@@ -238,17 +249,23 @@ const parseSummary = (summary: string | null) => {
   }
   try {
     const parsed = JSON.parse(summary) as Partial<CallSessionSummary>;
-    const workflow =
-      parsed.workflow &&
-      (parsed.workflow.kind === "reschedule" ||
-        parsed.workflow.kind === "cancel")
+    const workflowState =
+      parsed.workflowState &&
+      typeof parsed.workflowState.instanceId === "string"
         ? {
-            kind: parsed.workflow.kind,
+            kind:
+              parsed.workflowState.kind === "verify" ||
+              parsed.workflowState.kind === "cancel"
+                ? parsed.workflowState.kind
+                : ("reschedule" as const),
             step:
-              parsed.workflow.step === "select_slot"
-                ? ("select_slot" as const)
-                : ("select_appointment" as const),
-            appointmentId: parsed.workflow.appointmentId ?? null,
+              typeof parsed.workflowState.step === "string"
+                ? parsed.workflowState.step
+                : "start",
+            instanceId: parsed.workflowState.instanceId,
+            appointmentId: parsed.workflowState.appointmentId ?? null,
+            slotId: parsed.workflowState.slotId ?? null,
+            lastError: parsed.workflowState.lastError ?? null,
           }
         : null;
     return {
@@ -256,7 +273,7 @@ const parseSummary = (summary: string | null) => {
       verifiedCustomerId: parsed.verifiedCustomerId ?? null,
       pendingCustomerId: parsed.pendingCustomerId ?? null,
       pendingCustomerProfile: parsed.pendingCustomerProfile ?? null,
-      workflow,
+      workflowState,
       lastToolName: parsed.lastToolName ?? null,
       lastToolResult: parsed.lastToolResult ?? null,
       lastAppointmentId: parsed.lastAppointmentId ?? null,
@@ -289,7 +306,7 @@ const buildSummary = (summary: CallSessionSummary) =>
     verifiedCustomerId: summary.verifiedCustomerId ?? null,
     pendingCustomerId: summary.pendingCustomerId ?? null,
     pendingCustomerProfile: summary.pendingCustomerProfile ?? null,
-    workflow: summary.workflow ?? null,
+    workflowState: summary.workflowState ?? null,
     lastToolName: summary.lastToolName ?? null,
     lastToolResult: summary.lastToolResult ?? null,
     lastAppointmentId: summary.lastAppointmentId ?? null,
@@ -321,6 +338,30 @@ const getStringArg = (args: Record<string, unknown>, key: string) => {
 const getNumberArg = (args: Record<string, unknown>, key: string) => {
   const value = args[key];
   return typeof value === "number" ? value : undefined;
+};
+
+const parseConfirmation = (input: string) => {
+  const normalized = input.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (
+    ["yes", "y", "confirm", "confirmed", "ok", "okay", "sure"].includes(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+  if (["no", "n", "cancel", "stop", "never", "nope"].includes(normalized)) {
+    return false;
+  }
+  if (normalized.includes("yes") || normalized.includes("confirm")) {
+    return true;
+  }
+  if (normalized.includes("no") || normalized.includes("cancel")) {
+    return false;
+  }
+  return null;
 };
 
 const redactToolResultForPrompt = (toolResult: ToolResult): ToolResult => {
@@ -378,6 +419,66 @@ const redactToolResultForPrompt = (toolResult: ToolResult): ToolResult => {
       return toolResult;
   }
 };
+
+const formatWorkflowOptions = (
+  options?: Array<{ id: string; label: string }>,
+) =>
+  options?.length
+    ? options.map((option, index) => `${index + 1}) ${option.label}`).join(" ")
+    : "";
+
+const workflowPromptToText = (prompt: {
+  kind: "select_appointment" | "select_slot" | "confirm" | "status";
+  details?: string;
+  options?: Array<{ id: string; label: string }>;
+}) => {
+  switch (prompt.kind) {
+    case "select_appointment": {
+      const options = formatWorkflowOptions(prompt.options);
+      return options
+        ? `Which appointment should I reschedule? ${options}`
+        : "Which appointment should I reschedule?";
+    }
+    case "select_slot": {
+      const options = formatWorkflowOptions(prompt.options);
+      return options
+        ? `Which time works best? ${options}`
+        : "Which time works best for you?";
+    }
+    case "confirm":
+      return prompt.details ?? "Confirm the new appointment time? (yes or no)";
+    default:
+      return prompt.details ?? "Working on that now.";
+  }
+};
+
+const buildVerificationPrompt = (
+  config: { greeting: string; scopeMessage: string },
+  input: {
+    includeGreeting: boolean;
+    zipAttempts: number;
+    invalidZip: boolean;
+  },
+) => {
+  const baseRequest = input.invalidZip
+    ? "Please share the 5-digit ZIP code on your account."
+    : input.zipAttempts > 0
+      ? "That ZIP doesn't match our records. Please share the 5-digit ZIP code on your account."
+      : "To get started, please share the 5-digit ZIP code on your account.";
+  if (!input.includeGreeting) {
+    return baseRequest;
+  }
+  const scopeMessage = config.scopeMessage.trim();
+  const intro = scopeMessage
+    ? `${config.greeting} ${scopeMessage}`
+    : config.greeting;
+  return `${intro} ${baseRequest}`;
+};
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 const formatSlotChoices = (
   slots: Array<{ date: string; timeWindow: string }>,
@@ -652,9 +753,9 @@ export const handleAgentMessage = async (
     summary.pendingCustomerId
       ? `Pending customer: ${summary.pendingCustomerId}`
       : "Pending customer: none",
-    summary.workflow
-      ? `Workflow: ${summary.workflow.kind}:${summary.workflow.step}`
-      : "Workflow: none",
+    summary.workflowState
+      ? `Workflow state: ${summary.workflowState.kind}:${summary.workflowState.step}`
+      : "Workflow state: none",
     `Phone lookup matches: ${matches.length}`,
     summary.lastAppointmentId
       ? `Last appointment id: ${summary.lastAppointmentId}`
@@ -674,7 +775,6 @@ export const handleAgentMessage = async (
       identityStatus: summary.identityStatus,
       pendingCustomerId: summary.pendingCustomerId,
       verifiedCustomerId: summary.verifiedCustomerId,
-      workflow: summary.workflow ?? null,
       inputText: input.text,
     },
     "agent.message.start",
@@ -709,14 +809,16 @@ export const handleAgentMessage = async (
   let toolCall: AgentModelOutput | null = null;
   let decisionSnapshot: ReturnType<typeof summarizeModelOutput> | null = null;
   let modelOutput: AgentModelOutput | null = null;
-  let workflow = summary.workflow ?? null;
+  let workflowState = summary.workflowState ?? null;
   let workflowPrompt: {
-    kind: "select_appointment" | "select_slot";
-    options: Array<{ id: string; label: string }>;
+    kind: "select_appointment" | "select_slot" | "confirm" | "status";
+    details?: string;
+    options?: Array<{ id: string; label: string }>;
   } | null = null;
   let statusOpen = true;
   const trimmedInput = input.text.trim();
   const isZipInput = zipCodeSchema.safeParse(trimmedInput).success;
+  const hasNumericInput = trimmedInput.length > 0 && /\d/.test(trimmedInput);
 
   const activeCustomerId =
     verifiedCustomerId ??
@@ -724,6 +826,448 @@ export const handleAgentMessage = async (
     resolvedCustomer?.id ??
     session?.customerCacheId ??
     null;
+
+  if (!toolCall && summary.identityStatus !== "verified") {
+    const existingVerifyState =
+      workflowState?.kind === "verify" ? workflowState : null;
+    if (existingVerifyState?.step === "escalate") {
+      const replyText =
+        "I'm going to connect you with a specialist to verify your account.";
+      summary = { ...summary, callSummary: trimSummaryText(replyText) };
+      await deps.calls.updateSessionSummary({
+        callSessionId,
+        summary: buildSummary(summary),
+      });
+      await deps.calls.addTurn({
+        id: crypto.randomUUID(),
+        callSessionId,
+        ts: new Date().toISOString(),
+        speaker: "agent",
+        text: replyText,
+        meta: {
+          intent: "final",
+          tools,
+          modelCalls,
+          customerId: resolvedCustomer?.id ?? customer.id,
+          contextUsed: Boolean(context),
+          contextTurns,
+          decisionSnapshot,
+          toolCallSource,
+          replyTextLength: replyText.length,
+          replyTextWasEmpty: !replyText.trim(),
+        },
+      });
+      logger.info(
+        {
+          callSessionId,
+          intent: "final",
+          toolCallSource,
+          toolCount: tools.length,
+          modelCallCount: modelCalls.length,
+          replyTextLength: replyText.length,
+          replyPreview: replyText.slice(0, 160),
+        },
+        "agent.message.complete",
+      );
+      return { callSessionId, replyText, actions };
+    }
+
+    const pendingVerificationId =
+      summary.pendingCustomerId ??
+      summary.pendingCustomerProfile?.id ??
+      resolvedCustomer?.id ??
+      null;
+
+    if (!deps.workflows.verify) {
+      if (isZipInput && pendingVerificationId) {
+        toolCall = {
+          type: "tool_call",
+          toolName: "crm.verifyAccount",
+          arguments: {
+            customerId: pendingVerificationId,
+            zipCode: trimmedInput,
+          },
+        };
+        toolCallSource = "input_processing";
+        decisionSnapshot = summarizeModelOutput(toolCall);
+      } else if (!pendingVerificationId) {
+        const ticket = await createTicketUseCase(deps.tickets, {
+          subject: "Verification needed",
+          description:
+            "Caller could not be verified with phone lookup. Manual verification required.",
+          category: TicketCategory.General,
+          source: TicketSource.Agent,
+          phoneE164,
+        });
+        actions.push("created_ticket");
+        const replyText =
+          "I'm having trouble verifying the account. I'll connect you with a specialist.";
+        summary = { ...summary, callSummary: trimSummaryText(replyText) };
+        await deps.calls.updateSessionSummary({
+          callSessionId,
+          summary: buildSummary(summary),
+        });
+        await deps.calls.addTurn({
+          id: crypto.randomUUID(),
+          callSessionId,
+          ts: new Date().toISOString(),
+          speaker: "agent",
+          text: replyText,
+          meta: {
+            intent: "final",
+            tools,
+            modelCalls,
+            customerId: resolvedCustomer?.id ?? customer.id,
+            contextUsed: Boolean(context),
+            contextTurns,
+            decisionSnapshot,
+            toolCallSource,
+            replyTextLength: replyText.length,
+            replyTextWasEmpty: !replyText.trim(),
+            ticketId: ticket.id,
+          },
+        });
+        logger.info(
+          {
+            callSessionId,
+            intent: "final",
+            toolCallSource,
+            toolCount: tools.length,
+            modelCallCount: modelCalls.length,
+            replyTextLength: replyText.length,
+            replyPreview: replyText.slice(0, 160),
+          },
+          "agent.message.complete",
+        );
+        return { callSessionId, replyText, actions, ticketId: ticket.id };
+      } else {
+        const replyText = buildVerificationPrompt(
+          {
+            greeting: agentConfig.greeting,
+            scopeMessage: agentConfig.scopeMessage,
+          },
+          {
+            includeGreeting: contextTurns === 0,
+            zipAttempts: summary.zipAttempts ?? 0,
+            invalidZip: hasNumericInput && !isZipInput,
+          },
+        );
+        summary = { ...summary, callSummary: trimSummaryText(replyText) };
+        await deps.calls.updateSessionSummary({
+          callSessionId,
+          summary: buildSummary(summary),
+        });
+        await deps.calls.addTurn({
+          id: crypto.randomUUID(),
+          callSessionId,
+          ts: new Date().toISOString(),
+          speaker: "agent",
+          text: replyText,
+          meta: {
+            intent: "final",
+            tools,
+            modelCalls,
+            customerId: resolvedCustomer?.id ?? customer.id,
+            contextUsed: Boolean(context),
+            contextTurns,
+            decisionSnapshot,
+            toolCallSource,
+            replyTextLength: replyText.length,
+            replyTextWasEmpty: !replyText.trim(),
+          },
+        });
+        logger.info(
+          {
+            callSessionId,
+            intent: "final",
+            toolCallSource,
+            toolCount: tools.length,
+            modelCallCount: modelCalls.length,
+            replyTextLength: replyText.length,
+            replyPreview: replyText.slice(0, 160),
+          },
+          "agent.message.complete",
+        );
+        return { callSessionId, replyText, actions };
+      }
+    }
+
+    if (!existingVerifyState?.instanceId) {
+      const instance = await deps.workflows.verify.create({
+        params: {
+          callSessionId,
+          phoneE164,
+          intent: "verify",
+        },
+      });
+      workflowState = {
+        kind: "verify",
+        step: "start",
+        instanceId: instance.id,
+      };
+      summary = { ...summary, workflowState };
+      await deps.calls.updateSessionSummary({
+        callSessionId,
+        summary: buildSummary(summary),
+      });
+    }
+
+    if (isZipInput) {
+      if (workflowState?.kind === "verify" && workflowState.instanceId) {
+        const instance = await deps.workflows.verify.get(
+          workflowState.instanceId,
+        );
+        await instance.sendEvent({
+          type: VERIFY_WORKFLOW_EVENT_ZIP,
+          payload: { zipCode: trimmedInput },
+        });
+      }
+      const waitForVerification = async () => {
+        for (let i = 0; i < 6; i += 1) {
+          const latest = await deps.calls.getSession(callSessionId);
+          const latestSummary = parseSummary(latest?.summary ?? null);
+          if (
+            latestSummary.identityStatus === "verified" ||
+            latestSummary.workflowState?.step === "escalate"
+          ) {
+            return latestSummary;
+          }
+          await sleep(250);
+        }
+        return null;
+      };
+
+      const latestSummary = await waitForVerification();
+      if (latestSummary?.identityStatus === "verified") {
+        const verifiedId =
+          latestSummary.verifiedCustomerId ??
+          summary.verifiedCustomerId ??
+          resolvedCustomer?.id ??
+          null;
+        const verifiedProfile = verifiedId
+          ? await deps.customers.get(verifiedId)
+          : null;
+        const verifiedCustomerForReply =
+          verifiedProfile ??
+          (resolvedCustomer?.id === verifiedId ? resolvedCustomer : null);
+        const verifiedCustomerContext = verifiedCustomerForReply
+          ? {
+              id: verifiedCustomerForReply.id,
+              displayName: verifiedCustomerForReply.displayName,
+              phoneE164: verifiedCustomerForReply.phoneE164 ?? phoneE164,
+              addressSummary:
+                verifiedCustomerForReply.addressSummary ?? "Unknown",
+            }
+          : customer;
+        const replyText = await generateReply(
+          model,
+          input,
+          verifiedCustomerContext,
+          {
+            toolName: "crm.verifyAccount",
+            result: { ok: true },
+          },
+          agentConfig.scopeMessage,
+          context,
+          modelCalls,
+          messageHistory,
+          logger,
+          callSessionId,
+        );
+        summary = { ...latestSummary, callSummary: trimSummaryText(replyText) };
+        await deps.calls.updateSessionSummary({
+          callSessionId,
+          summary: buildSummary(summary),
+        });
+        await deps.calls.addTurn({
+          id: crypto.randomUUID(),
+          callSessionId,
+          ts: new Date().toISOString(),
+          speaker: "agent",
+          text: replyText,
+          meta: {
+            intent: "final",
+            tools,
+            modelCalls,
+            customerId: verifiedId ?? customer.id,
+            contextUsed: Boolean(context),
+            contextTurns,
+            decisionSnapshot,
+            toolCallSource,
+            replyTextLength: replyText.length,
+            replyTextWasEmpty: !replyText.trim(),
+          },
+        });
+        logger.info(
+          {
+            callSessionId,
+            intent: "final",
+            toolCallSource,
+            toolCount: tools.length,
+            modelCallCount: modelCalls.length,
+            replyTextLength: replyText.length,
+            replyPreview: replyText.slice(0, 160),
+          },
+          "agent.message.complete",
+        );
+        return { callSessionId, replyText, actions };
+      }
+
+      if (latestSummary?.workflowState?.step === "escalate") {
+        const replyText = await generateReply(
+          model,
+          input,
+          customer,
+          {
+            toolName: "agent.escalate",
+            result: { escalated: true },
+          },
+          agentConfig.scopeMessage,
+          context,
+          modelCalls,
+          messageHistory,
+          logger,
+          callSessionId,
+        );
+        summary = { ...latestSummary, callSummary: trimSummaryText(replyText) };
+        await deps.calls.updateSessionSummary({
+          callSessionId,
+          summary: buildSummary(summary),
+        });
+        await deps.calls.addTurn({
+          id: crypto.randomUUID(),
+          callSessionId,
+          ts: new Date().toISOString(),
+          speaker: "agent",
+          text: replyText,
+          meta: {
+            intent: "final",
+            tools,
+            modelCalls,
+            customerId: resolvedCustomer?.id ?? customer.id,
+            contextUsed: Boolean(context),
+            contextTurns,
+            decisionSnapshot,
+            toolCallSource,
+            replyTextLength: replyText.length,
+            replyTextWasEmpty: !replyText.trim(),
+          },
+        });
+        logger.info(
+          {
+            callSessionId,
+            intent: "final",
+            toolCallSource,
+            toolCount: tools.length,
+            modelCallCount: modelCalls.length,
+            replyTextLength: replyText.length,
+            replyPreview: replyText.slice(0, 160),
+          },
+          "agent.message.complete",
+        );
+        return { callSessionId, replyText, actions };
+      }
+
+      const statusCall = await recordModelCall(model, "status", () =>
+        model.status({
+          text: input.text,
+          contextHint: "verification",
+        }),
+      );
+      modelCalls.push(statusCall.record);
+      logModelCall(logger, statusCall.record);
+      const replyText =
+        statusCall.record.success && typeof statusCall.result === "string"
+          ? statusCall.result.trim()
+          : "I'm checking that now.";
+      summary = { ...summary, callSummary: trimSummaryText(replyText) };
+      await deps.calls.updateSessionSummary({
+        callSessionId,
+        summary: buildSummary(summary),
+      });
+      await deps.calls.addTurn({
+        id: crypto.randomUUID(),
+        callSessionId,
+        ts: new Date().toISOString(),
+        speaker: "agent",
+        text: replyText,
+        meta: {
+          intent: "final",
+          tools,
+          modelCalls,
+          customerId: resolvedCustomer?.id ?? customer.id,
+          contextUsed: Boolean(context),
+          contextTurns,
+          decisionSnapshot,
+          toolCallSource,
+          replyTextLength: replyText.length,
+          replyTextWasEmpty: !replyText.trim(),
+        },
+      });
+      logger.info(
+        {
+          callSessionId,
+          intent: "final",
+          toolCallSource,
+          toolCount: tools.length,
+          modelCallCount: modelCalls.length,
+          replyTextLength: replyText.length,
+          replyPreview: replyText.slice(0, 160),
+        },
+        "agent.message.complete",
+      );
+      return { callSessionId, replyText, actions };
+    }
+
+    const replyText = buildVerificationPrompt(
+      {
+        greeting: agentConfig.greeting,
+        scopeMessage: agentConfig.scopeMessage,
+      },
+      {
+        includeGreeting: contextTurns === 0,
+        zipAttempts: summary.zipAttempts ?? 0,
+        invalidZip: hasNumericInput && !isZipInput,
+      },
+    );
+    summary = { ...summary, callSummary: trimSummaryText(replyText) };
+    await deps.calls.updateSessionSummary({
+      callSessionId,
+      summary: buildSummary(summary),
+    });
+    await deps.calls.addTurn({
+      id: crypto.randomUUID(),
+      callSessionId,
+      ts: new Date().toISOString(),
+      speaker: "agent",
+      text: replyText,
+      meta: {
+        intent: "final",
+        tools,
+        modelCalls,
+        customerId: resolvedCustomer?.id ?? customer.id,
+        contextUsed: Boolean(context),
+        contextTurns,
+        decisionSnapshot,
+        toolCallSource,
+        replyTextLength: replyText.length,
+        replyTextWasEmpty: !replyText.trim(),
+      },
+    });
+    logger.info(
+      {
+        callSessionId,
+        intent: "final",
+        toolCallSource,
+        toolCount: tools.length,
+        modelCallCount: modelCalls.length,
+        replyTextLength: replyText.length,
+        replyPreview: replyText.slice(0, 160),
+      },
+      "agent.message.complete",
+    );
+    return { callSessionId, replyText, actions };
+  }
 
   const trySelectOption = async (
     options: Array<{ id: string; label: string }>,
@@ -777,65 +1321,57 @@ export const handleAgentMessage = async (
     return selectionCall.result;
   };
 
+  const activeWorkflowSteps = new Set([
+    "start",
+    "select_appointment",
+    "select_slot",
+    "confirm",
+  ]);
+  const rescheduleWorkflow =
+    summary.identityStatus === "verified" &&
+    workflowState?.kind === "reschedule" &&
+    workflowState.instanceId &&
+    activeWorkflowSteps.has(workflowState.step)
+      ? workflowState
+      : null;
+  const sendRescheduleEvent = async (
+    type: string,
+    payload: Record<string, unknown>,
+  ) => {
+    if (!deps.workflows.reschedule || !rescheduleWorkflow) {
+      return false;
+    }
+    const instance = await deps.workflows.reschedule.get(
+      rescheduleWorkflow.instanceId,
+    );
+    await instance.sendEvent({ type, payload });
+    return true;
+  };
+
   if (
     !toolCall &&
     summary.identityStatus === "verified" &&
-    workflow?.kind === "reschedule"
+    rescheduleWorkflow
   ) {
-    if (workflow.step === "select_appointment") {
+    toolCallSource = "workflow";
+    if (!deps.workflows.reschedule) {
+      workflowPrompt = {
+        kind: "status",
+        details:
+          "Rescheduling is temporarily unavailable. Please try again shortly.",
+      };
+    } else if (rescheduleWorkflow.step === "start") {
+      workflowPrompt = {
+        kind: "status",
+        details: "I'm pulling your upcoming appointments now.",
+      };
+    } else if (rescheduleWorkflow.step === "select_appointment") {
       const appointmentOptions = summary.lastAppointmentOptions ?? [];
       if (!appointmentOptions.length) {
-        if (activeCustomerId) {
-          toolCall = {
-            type: "tool_call",
-            toolName: "crm.listUpcomingAppointments",
-            arguments: { customerId: activeCustomerId, limit: 3 },
-          };
-          toolCallSource = "workflow";
-          decisionSnapshot = summarizeModelOutput(toolCall);
-        }
-      } else if (appointmentOptions.length === 1) {
-        const appointment = appointmentOptions[0];
-        if (!appointment) {
-          workflowPrompt = {
-            kind: "select_appointment",
-            options: appointmentOptions.map((option) => ({
-              id: option.id,
-              label: `${formatDateForSpeech(option.date)} from ${formatTimeWindowForSpeech(
-                option.timeWindow,
-              )} at ${option.addressSummary}`,
-            })),
-          };
-        } else {
-          workflow = {
-            kind: "reschedule",
-            step: "select_slot",
-            appointmentId: appointment.id,
-          };
-          summary = {
-            ...summary,
-            workflow,
-            lastAppointmentId: appointment.id,
-          };
-          await deps.calls.updateSessionSummary({
-            callSessionId,
-            summary: buildSummary(summary),
-          });
-          if (activeCustomerId) {
-            toolCall = {
-              type: "tool_call",
-              toolName: "crm.getAvailableSlots",
-              arguments: {
-                customerId: activeCustomerId,
-                appointmentId: appointment.id,
-                daysAhead: 14,
-                preference: "any",
-              },
-            };
-            toolCallSource = "workflow";
-            decisionSnapshot = summarizeModelOutput(toolCall);
-          }
-        }
+        workflowPrompt = {
+          kind: "status",
+          details: "I'm pulling your upcoming appointments now.",
+        };
       } else {
         const options = appointmentOptions.map((appointment) => ({
           id: appointment.id,
@@ -845,33 +1381,21 @@ export const handleAgentMessage = async (
         }));
         const selection = await trySelectOption(options, "appointment");
         if (selection.selectedId) {
-          workflow = {
-            kind: "reschedule",
-            step: "select_slot",
-            appointmentId: selection.selectedId,
-          };
-          summary = {
-            ...summary,
-            workflow,
-            lastAppointmentId: selection.selectedId,
-          };
-          await deps.calls.updateSessionSummary({
-            callSessionId,
-            summary: buildSummary(summary),
-          });
-          if (activeCustomerId) {
-            toolCall = {
-              type: "tool_call",
-              toolName: "crm.getAvailableSlots",
-              arguments: {
-                customerId: activeCustomerId,
-                appointmentId: selection.selectedId,
-                daysAhead: 14,
-                preference: "any",
-              },
+          const sent = await sendRescheduleEvent(
+            RESCHEDULE_WORKFLOW_EVENT_SELECT_APPOINTMENT,
+            { appointmentId: selection.selectedId },
+          );
+          if (!sent) {
+            workflowPrompt = {
+              kind: "status",
+              details:
+                "I couldn't send the selection to the reschedule workflow.",
             };
-            toolCallSource = "workflow";
-            decisionSnapshot = summarizeModelOutput(toolCall);
+          } else {
+            workflowPrompt = {
+              kind: "status",
+              details: "Got it. I'll check available time slots next.",
+            };
           }
         } else {
           workflowPrompt = {
@@ -880,62 +1404,38 @@ export const handleAgentMessage = async (
           };
         }
       }
-    } else if (workflow.step === "select_slot") {
-      const slots = summary.lastAvailableSlots ?? [];
-      const appointmentId = workflow.appointmentId ?? summary.lastAppointmentId;
-      if (!slots.length) {
-        if (activeCustomerId && appointmentId) {
-          toolCall = {
-            type: "tool_call",
-            toolName: "crm.getAvailableSlots",
-            arguments: {
-              customerId: activeCustomerId,
-              appointmentId,
-              daysAhead: 14,
-              preference: "any",
-            },
-          };
-          toolCallSource = "workflow";
-          decisionSnapshot = summarizeModelOutput(toolCall);
-        } else {
-          workflow = {
-            kind: "reschedule",
-            step: "select_appointment",
-          };
-          summary = { ...summary, workflow };
-          await deps.calls.updateSessionSummary({
-            callSessionId,
-            summary: buildSummary(summary),
-          });
-          workflowPrompt = {
-            kind: "select_appointment",
-            options: (summary.lastAppointmentOptions ?? []).map((option) => ({
-              id: option.id,
-              label: `${formatDateForSpeech(option.date)} from ${formatTimeWindowForSpeech(
-                option.timeWindow,
-              )} at ${option.addressSummary}`,
-            })),
-          };
-        }
+    } else if (rescheduleWorkflow.step === "select_slot") {
+      const slotOptions = summary.lastAvailableSlots ?? [];
+      if (!slotOptions.length) {
+        workflowPrompt = {
+          kind: "status",
+          details: "I'm pulling available time slots now.",
+        };
       } else {
-        const options = slots.map((slot) => ({
+        const options = slotOptions.map((slot) => ({
           id: slot.id,
           label: `${formatDateForSpeech(
             slot.date,
           )} from ${formatTimeWindowForSpeech(slot.timeWindow)}`,
         }));
         const selection = await trySelectOption(options, "slot");
-        if (selection.selectedId && appointmentId) {
-          toolCall = {
-            type: "tool_call",
-            toolName: "crm.rescheduleAppointment",
-            arguments: {
-              appointmentId,
-              slotId: selection.selectedId,
-            },
-          };
-          toolCallSource = "workflow";
-          decisionSnapshot = summarizeModelOutput(toolCall);
+        if (selection.selectedId) {
+          const sent = await sendRescheduleEvent(
+            RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
+            { slotId: selection.selectedId },
+          );
+          if (!sent) {
+            workflowPrompt = {
+              kind: "status",
+              details:
+                "I couldn't send the slot choice to the reschedule workflow.",
+            };
+          } else {
+            workflowPrompt = {
+              kind: "confirm",
+              details: "Confirm the new appointment time? (yes or no)",
+            };
+          }
         } else {
           workflowPrompt = {
             kind: "select_slot",
@@ -943,142 +1443,211 @@ export const handleAgentMessage = async (
           };
         }
       }
+    } else if (rescheduleWorkflow.step === "confirm") {
+      const confirmed = parseConfirmation(input.text);
+      if (confirmed === null) {
+        workflowPrompt = {
+          kind: "confirm",
+          details: "Confirm the new appointment time? (yes or no)",
+        };
+      } else {
+        const sent = await sendRescheduleEvent(
+          RESCHEDULE_WORKFLOW_EVENT_CONFIRM,
+          { confirmed },
+        );
+        if (!sent) {
+          workflowPrompt = {
+            kind: "status",
+            details:
+              "I couldn't confirm the reschedule with the workflow. Please try again.",
+          };
+        } else {
+          workflowPrompt = {
+            kind: "status",
+            details: confirmed
+              ? "Thanks. I'll finalize the reschedule now."
+              : "Okay, I won't change the appointment.",
+          };
+        }
+      }
     }
   }
 
-  if (
-    !toolCall &&
+  const cancelWorkflowSteps = new Set([
+    "start",
+    "select_appointment",
+    "confirm",
+  ]);
+  const cancelWorkflow =
     summary.identityStatus === "verified" &&
-    workflow?.kind === "cancel"
-  ) {
-    const appointmentOptions = summary.lastAppointmentOptions ?? [];
-    if (!appointmentOptions.length) {
-      if (activeCustomerId) {
-        toolCall = {
-          type: "tool_call",
-          toolName: "crm.listUpcomingAppointments",
-          arguments: { customerId: activeCustomerId, limit: 3 },
-        };
-        toolCallSource = "workflow";
-        decisionSnapshot = summarizeModelOutput(toolCall);
-      }
-    } else if (appointmentOptions.length === 1) {
-      const appointment = appointmentOptions[0];
-      if (appointment) {
-        workflow = null;
-        toolCall = {
-          type: "tool_call",
-          toolName: "crm.cancelAppointment",
-          arguments: { appointmentId: appointment.id },
-        };
-        toolCallSource = "workflow";
-        decisionSnapshot = summarizeModelOutput(toolCall);
-      } else {
+    workflowState?.kind === "cancel" &&
+    workflowState.instanceId &&
+    cancelWorkflowSteps.has(workflowState.step)
+      ? workflowState
+      : null;
+  const sendCancelEvent = async (
+    type: string,
+    payload: Record<string, unknown>,
+  ) => {
+    if (!deps.workflows.cancel || !cancelWorkflow) {
+      return false;
+    }
+    const instance = await deps.workflows.cancel.get(cancelWorkflow.instanceId);
+    await instance.sendEvent({ type, payload });
+    return true;
+  };
+
+  if (!toolCall && summary.identityStatus === "verified" && cancelWorkflow) {
+    toolCallSource = "workflow";
+    if (!deps.workflows.cancel) {
+      workflowPrompt = {
+        kind: "status",
+        details:
+          "Cancellation is temporarily unavailable. Please try again shortly.",
+      };
+    } else if (cancelWorkflow.step === "start") {
+      workflowPrompt = {
+        kind: "status",
+        details: "I'm pulling your upcoming appointments now.",
+      };
+    } else if (cancelWorkflow.step === "select_appointment") {
+      const appointmentOptions = summary.lastAppointmentOptions ?? [];
+      if (!appointmentOptions.length) {
         workflowPrompt = {
-          kind: "select_appointment",
-          options: appointmentOptions.map((option) => ({
-            id: option.id,
-            label: `${formatDateForSpeech(option.date)} from ${formatTimeWindowForSpeech(
-              option.timeWindow,
-            )} at ${option.addressSummary}`,
-          })),
+          kind: "status",
+          details: "I'm pulling your upcoming appointments now.",
         };
-      }
-    } else {
-      const options = appointmentOptions.map((appointment) => ({
-        id: appointment.id,
-        label: `${formatDateForSpeech(appointment.date)} from ${formatTimeWindowForSpeech(
-          appointment.timeWindow,
-        )} at ${appointment.addressSummary}`,
-      }));
-      const selection = await trySelectOption(options, "appointment");
-      if (selection.selectedId) {
-        workflow = null;
-        toolCall = {
-          type: "tool_call",
-          toolName: "crm.cancelAppointment",
-          arguments: { appointmentId: selection.selectedId },
-        };
-        toolCallSource = "workflow";
-        decisionSnapshot = summarizeModelOutput(toolCall);
       } else {
+        const options = appointmentOptions.map((appointment) => ({
+          id: appointment.id,
+          label: `${formatDateForSpeech(appointment.date)} from ${formatTimeWindowForSpeech(
+            appointment.timeWindow,
+          )} at ${appointment.addressSummary}`,
+        }));
+        const selection = await trySelectOption(options, "appointment");
+        if (selection.selectedId) {
+          const sent = await sendCancelEvent(
+            CANCEL_WORKFLOW_EVENT_SELECT_APPOINTMENT,
+            { appointmentId: selection.selectedId },
+          );
+          if (!sent) {
+            workflowPrompt = {
+              kind: "status",
+              details: "I couldn't send the selection to the cancel workflow.",
+            };
+          } else {
+            workflowPrompt = {
+              kind: "confirm",
+              details: "Confirm cancelling this appointment? (yes or no)",
+            };
+          }
+        } else {
+          workflowPrompt = {
+            kind: "select_appointment",
+            options,
+          };
+        }
+      }
+    } else if (cancelWorkflow.step === "confirm") {
+      const confirmed = parseConfirmation(input.text);
+      if (confirmed === null) {
         workflowPrompt = {
-          kind: "select_appointment",
-          options,
+          kind: "confirm",
+          details: "Confirm cancelling this appointment? (yes or no)",
         };
+      } else {
+        const sent = await sendCancelEvent(CANCEL_WORKFLOW_EVENT_CONFIRM, {
+          confirmed,
+        });
+        if (!sent) {
+          workflowPrompt = {
+            kind: "status",
+            details:
+              "I couldn't confirm the cancellation with the workflow. Please try again.",
+          };
+        } else {
+          workflowPrompt = {
+            kind: "status",
+            details: confirmed
+              ? "Thanks. I'll cancel that appointment now."
+              : "Okay, I won't cancel that appointment.",
+          };
+        }
       }
     }
   }
 
-  if (
-    !toolCall &&
-    summary.identityStatus !== "verified" &&
-    summary.pendingCustomerId &&
-    !isZipInput
-  ) {
-    const replyText = await generateReply(
-      model,
-      input,
-      customer,
-      {
-        toolName: "agent.message",
-        result: {
-          kind: "request_zip",
-        },
+  const startRescheduleWorkflow = async (customerId: string) => {
+    if (!deps.workflows.reschedule) {
+      workflowPrompt = {
+        kind: "status",
+        details:
+          "Rescheduling is temporarily unavailable. Please try again shortly.",
+      };
+      return null;
+    }
+    const instance = await deps.workflows.reschedule.create({
+      params: {
+        callSessionId,
+        customerId,
+        intent: "reschedule",
+        message: input.text,
+        contextSummary: summary.callSummary ?? undefined,
       },
-      agentConfig.scopeMessage,
-      context,
-      modelCalls,
-      messageHistory,
-      logger,
-      callSessionId,
-    );
-    statusOpen = false;
-    summary = {
-      ...summary,
-      callSummary: trimSummaryText(replyText),
+    });
+    workflowState = {
+      kind: "reschedule",
+      step: "start",
+      instanceId: instance.id,
+      appointmentId: null,
+      slotId: null,
     };
+    summary = { ...summary, workflowState };
     await deps.calls.updateSessionSummary({
       callSessionId,
       summary: buildSummary(summary),
     });
-    await deps.calls.addTurn({
-      id: crypto.randomUUID(),
-      callSessionId,
-      ts: new Date().toISOString(),
-      speaker: "agent",
-      text: replyText,
-      meta: {
-        intent: "final",
-        tools,
-        modelCalls,
-        customerId: resolvedCustomer?.id ?? customer.id,
-        contextUsed: Boolean(context),
-        contextTurns,
-        decisionSnapshot,
-        toolCallSource,
-        replyTextLength: replyText.length,
-        replyTextWasEmpty: !replyText.trim(),
+    workflowPrompt = {
+      kind: "status",
+      details: "I'm pulling your upcoming appointments now.",
+    };
+    return workflowState;
+  };
+
+  const startCancelWorkflow = async (customerId: string) => {
+    if (!deps.workflows.cancel) {
+      workflowPrompt = {
+        kind: "status",
+        details:
+          "Cancellation is temporarily unavailable. Please try again shortly.",
+      };
+      return null;
+    }
+    const instance = await deps.workflows.cancel.create({
+      params: {
+        callSessionId,
+        customerId,
+        intent: "cancel",
+        message: input.text,
       },
     });
-    logger.info(
-      {
-        callSessionId,
-        intent: "final",
-        toolCallSource,
-        toolCount: tools.length,
-        modelCallCount: modelCalls.length,
-        replyTextLength: replyText.length,
-        replyPreview: replyText.slice(0, 160),
-      },
-      "agent.message.complete",
-    );
-    return {
-      callSessionId,
-      replyText,
-      actions,
+    workflowState = {
+      kind: "cancel",
+      step: "start",
+      instanceId: instance.id,
+      appointmentId: null,
     };
-  }
+    summary = { ...summary, workflowState };
+    await deps.calls.updateSessionSummary({
+      callSessionId,
+      summary: buildSummary(summary),
+    });
+    workflowPrompt = {
+      kind: "status",
+      details: "I'm pulling your upcoming appointments now.",
+    };
+    return workflowState;
+  };
 
   if (!toolCall) {
     const modelDecision = await recordModelCall(model, "decide", () =>
@@ -1145,38 +1714,10 @@ export const handleAgentMessage = async (
             toolCallSource = "routing";
             break;
           case "reschedule":
-            workflow = {
-              kind: "reschedule",
-              step: "select_appointment",
-            };
-            summary = { ...summary, workflow };
-            await deps.calls.updateSessionSummary({
-              callSessionId,
-              summary: buildSummary(summary),
-            });
-            toolCall = {
-              type: "tool_call",
-              toolName: "crm.listUpcomingAppointments",
-              arguments: { customerId, limit: 3 },
-            };
-            toolCallSource = "routing";
+            await startRescheduleWorkflow(customerId);
             break;
           case "cancel":
-            workflow = {
-              kind: "cancel",
-              step: "select_appointment",
-            };
-            summary = { ...summary, workflow };
-            await deps.calls.updateSessionSummary({
-              callSessionId,
-              summary: buildSummary(summary),
-            });
-            toolCall = {
-              type: "tool_call",
-              toolName: "crm.listUpcomingAppointments",
-              arguments: { customerId, limit: 3 },
-            };
-            toolCallSource = "routing";
+            await startCancelWorkflow(customerId);
             break;
           case "billing":
             toolCall = {
@@ -1220,6 +1761,27 @@ export const handleAgentMessage = async (
         },
         "agent.routing.failed",
       );
+    }
+  }
+
+  if (toolCall && summary.identityStatus === "verified") {
+    if (
+      toolCall.type === "tool_call" &&
+      toolCall.toolName === "crm.rescheduleAppointment" &&
+      activeCustomerId
+    ) {
+      toolCall = null;
+      toolCallSource = "workflow";
+      await startRescheduleWorkflow(activeCustomerId);
+    }
+    if (
+      toolCall?.type === "tool_call" &&
+      toolCall.toolName === "crm.cancelAppointment" &&
+      activeCustomerId
+    ) {
+      toolCall = null;
+      toolCallSource = "workflow";
+      await startCancelWorkflow(activeCustomerId);
     }
   }
 
@@ -1743,9 +2305,6 @@ export const handleAgentMessage = async (
             const appointmentId = getStringArg(toolArgs, "appointmentId");
             if (appointmentId) {
               selectedAppointmentId = appointmentId;
-              if (workflow?.kind === "reschedule") {
-                workflow = { ...workflow, appointmentId };
-              }
             }
             const customerId =
               getStringArg(toolArgs, "customerId") ?? resolvedCustomer?.id;
@@ -1888,7 +2447,6 @@ export const handleAgentMessage = async (
                     timeWindow: updated.timeWindow,
                   },
                 };
-                workflow = null;
                 break;
               }
             }
@@ -1961,7 +2519,6 @@ export const handleAgentMessage = async (
                 toolName: "crm.cancelAppointment",
                 result: { ok: true },
               };
-              workflow = null;
               break;
             }
             toolResult = {
@@ -2225,7 +2782,7 @@ export const handleAgentMessage = async (
       verifiedCustomerId: summary.verifiedCustomerId ?? null,
       pendingCustomerId: summary.pendingCustomerId ?? null,
       pendingCustomerProfile: summary.pendingCustomerProfile ?? null,
-      workflow,
+      workflowState: summary.workflowState ?? null,
       zipAttempts: summary.zipAttempts ?? 0,
       lastToolName: toolResult.toolName,
       lastToolResult: stringifyToolResult(redactedToolResult),
@@ -2242,24 +2799,14 @@ export const handleAgentMessage = async (
   };
 
   if (!toolCall && workflowPrompt) {
-    const replyText = await generateReply(
-      model,
-      input,
-      customer,
-      {
-        toolName: "agent.message",
-        result: {
-          kind: workflowPrompt.kind,
-          options: workflowPrompt.options,
-        },
-      },
-      agentConfig.scopeMessage,
-      context,
-      modelCalls,
-      messageHistory,
-      logger,
-      callSessionId,
-    );
+    const replyText = workflowPromptToText(workflowPrompt);
+    if (options?.onStatus) {
+      options.onStatus({
+        text: workflowPrompt.details ?? replyText,
+        toolName: "agent.fallback",
+        source: "workflow",
+      });
+    }
     statusOpen = false;
     summary = {
       ...summary,

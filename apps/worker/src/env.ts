@@ -26,8 +26,16 @@ export const envSchema = z.object({
   AI: z.custom<Ai>().optional(),
   AI_GATEWAY_ACCOUNT_ID: z.string().optional(),
   AI_GATEWAY_ID: z.string().optional(),
+  AI_GATEWAY_TOKEN: z.string().optional(),
   OPENROUTER_TOKEN: z.string().optional(),
+  OPENROUTER_REFERER: z.string().optional(),
+  OPENROUTER_TITLE: z.string().optional(),
+  OPENROUTER_BASE_URL: z.string().optional(),
   PestCallAgent: z.custom<DurableObjectNamespace>().optional(),
+  CONVERSATION_HUB: z.custom<DurableObjectNamespace>().optional(),
+  RESCHEDULE_WORKFLOW: z.custom<Workflow>().optional(),
+  VERIFY_WORKFLOW: z.custom<Workflow>().optional(),
+  CANCEL_WORKFLOW: z.custom<Workflow>().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

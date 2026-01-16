@@ -24,6 +24,11 @@ export type Dependencies = {
   agentConfigDefaults: ReturnType<typeof getAgentConfig>;
   agentConfig: ReturnType<typeof createAgentConfigRepository>;
   appointments: ReturnType<typeof createAppointmentRepository>;
+  workflows: {
+    reschedule?: Workflow;
+    verify?: Workflow;
+    cancel?: Workflow;
+  };
   logger: Logger;
 };
 
@@ -41,6 +46,11 @@ export const createDependencies = (env: Env): Dependencies => {
     calls: createCallRepository(env.DB),
     customers: createCustomerRepository(env.DB),
     appointments: createAppointmentRepository(env.DB),
+    workflows: {
+      reschedule: env.RESCHEDULE_WORKFLOW,
+      verify: env.VERIFY_WORKFLOW,
+      cancel: env.CANCEL_WORKFLOW,
+    },
     modelFactory: (config) => getModelAdapter(env, config, logger),
     agentConfigDefaults: getAgentConfig(env),
     agentConfig: createAgentConfigRepository(env.DB),

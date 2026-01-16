@@ -5,6 +5,7 @@ import { callProcedures } from "./routes/calls";
 import { crmProcedures } from "./routes/crm";
 import { customerProcedures } from "./routes/customers";
 import { ticketProcedures } from "./routes/tickets";
+import { workflowProcedures } from "./routes/workflows";
 
 export const router = {
   agentConfig: agentConfigProcedures,
@@ -14,4 +15,5 @@ export const router = {
   crm: crmProcedures,
   customers: customerProcedures,
   agent: agentProcedures,
+  workflows: workflowProcedures,
 };

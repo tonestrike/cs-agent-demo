@@ -77,6 +77,34 @@ Seed demo data with:
 bun deploy:worker --seed
 ```
 
+## Model providers (AI Gateway + OpenRouter)
+
+This project supports Workers AI and OpenRouter (via Cloudflare AI Gateway).
+
+To use OpenRouter:
+
+1. Enable the OpenRouter integration in the AI Gateway UI:
+   - https://dash.cloudflare.com/197ac8ab6d5079d3faab60cea42eaa7e/ai/ai-gateway/gateways/cs-bot/integrations
+2. Set these values in `apps/worker/wrangler.toml`:
+   - `AI_GATEWAY_ACCOUNT_ID`
+   - `AI_GATEWAY_ID`
+   - `AI_GATEWAY_TOKEN` (AI Gateway auth token, set as secret if required)
+   - `OPENROUTER_REFERER` (allowed referrer, if restricted)
+   - `OPENROUTER_TITLE` (optional display name)
+3. Set the OpenRouter key as a secret:
+
+```sh
+bunx wrangler secret put OPENROUTER_TOKEN --config apps/worker/wrangler.toml
+```
+
+If your AI Gateway requires a gateway auth token, set it as a secret too:
+
+```sh
+bunx wrangler secret put AI_GATEWAY_TOKEN --config apps/worker/wrangler.toml
+```
+
+Then set `AGENT_MODEL=openrouter` (or choose an OpenRouter model ID in Prompt Studio, e.g. `openai/gpt-5-mini`).
+
 ## Database layout
 
 - Migrations live in `apps/worker/migrations`.

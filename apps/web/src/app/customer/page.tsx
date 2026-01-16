@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Button, Card } from "../../components/ui";
-import { createAgentClient } from "../../lib/agent-client";
+import { apiBaseUrl, demoAuthToken } from "../../lib/env";
 import { orpc } from "../../lib/orpc";
 
 type ChatMessage = {
@@ -32,13 +32,13 @@ export default function CustomerPage() {
   const [copied, setCopied] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScroll = useRef(true);
-  const statusShownRef = useRef<Set<string>>(new Set());
-  const clientRef = useRef<ReturnType<typeof createAgentClient> | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+  const responseIdRef = useRef<string | null>(null);
   const sessionRef = useRef<string | null>(null);
 
   useEffect(() => {
     return () => {
-      clientRef.current?.close();
+      socketRef.current?.close();
     };
   }, []);
 
@@ -62,15 +62,80 @@ export default function CustomerPage() {
     }
   });
 
-  const ensureClient = (sessionId: string) => {
-    if (clientRef.current && sessionRef.current === sessionId) {
-      return clientRef.current;
+  const buildWsUrl = (sessionId: string) => {
+    const base = apiBaseUrl || window.location.origin;
+    const url = new URL(base);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.pathname = `/ws/conversations/${sessionId}`;
+    if (demoAuthToken) {
+      url.searchParams.set("token", demoAuthToken);
     }
-    clientRef.current?.close();
-    const client = createAgentClient(sessionId);
-    clientRef.current = client;
+    return url.toString();
+  };
+
+  const ensureSocket = (sessionId: string) => {
+    if (socketRef.current && sessionRef.current === sessionId) {
+      return socketRef.current;
+    }
+    socketRef.current?.close();
+    const socket = new WebSocket(buildWsUrl(sessionId));
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(String(event.data)) as {
+          type?: string;
+          text?: string;
+          data?: { callSessionId?: string };
+        };
+        if (payload.type === "status") {
+          const text = payload.text ?? "";
+          if (text.trim()) {
+            setStatus(text);
+          }
+          return;
+        }
+        if (payload.type === "delta") {
+          const text = payload.text ?? "";
+          const responseId = responseIdRef.current;
+          if (!responseId || !text) {
+            return;
+          }
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === responseId
+                ? { ...message, text: `${message.text}${text}` }
+                : message,
+            ),
+          );
+          return;
+        }
+        if (payload.type === "final") {
+          const data = payload.data;
+          if (data?.callSessionId) {
+            setCallSessionId(data.callSessionId);
+            setConfirmedSessionId(data.callSessionId);
+          }
+          setStatus(`Session ${sessionId.slice(0, 8)}…`);
+        }
+      } catch {
+        // ignore malformed events
+      }
+      requestAnimationFrame(() => {
+        if (shouldAutoScroll.current && listRef.current) {
+          listRef.current.scrollTop = listRef.current.scrollHeight;
+        }
+      });
+    };
+    socket.onerror = () => {
+      setStatus("Connection issue. Try again.");
+    };
+    socket.onclose = () => {
+      if (sessionRef.current === sessionId) {
+        socketRef.current = null;
+      }
+    };
+    socketRef.current = socket;
     sessionRef.current = sessionId;
-    return client;
+    return socket;
   };
 
   const resetSession = (nextPhone?: string) => {
@@ -86,8 +151,8 @@ export default function CustomerPage() {
       },
     ]);
     setStatus("New session");
-    clientRef.current?.close();
-    clientRef.current = null;
+    socketRef.current?.close();
+    socketRef.current = null;
     sessionRef.current = null;
   };
 
@@ -108,101 +173,34 @@ export default function CustomerPage() {
     setStatus("Streaming reply...");
 
     const responseId = crypto.randomUUID();
+    responseIdRef.current = responseId;
     setMessages((prev) => [
       ...prev,
       { id: responseId, role: "agent", text: "" },
     ]);
 
-    const client = ensureClient(sessionId);
-    client
-      .call(
-        "messageStream",
-        [
-          {
-            phoneNumber,
-            text: trimmed,
-            callSessionId: sessionId,
-          },
-        ],
-        {
-          onChunk: (chunk) => {
-            if (
-              chunk &&
-              typeof chunk === "object" &&
-              "type" in chunk &&
-              (chunk as { type?: unknown }).type === "delta"
-            ) {
-              const text = String((chunk as { text?: unknown }).text ?? "");
-              setMessages((prev) =>
-                prev.map((message) =>
-                  message.id === responseId
-                    ? { ...message, text: `${message.text}${text}` }
-                    : message,
-                ),
-              );
-            }
-            if (
-              chunk &&
-              typeof chunk === "object" &&
-              "type" in chunk &&
-              (chunk as { type?: unknown }).type === "status"
-            ) {
-              const text = String((chunk as { text?: unknown }).text ?? "");
-              if (text.trim()) {
-                setStatus(text);
-                const statusId = `${responseId}-status`;
-                statusShownRef.current.add(statusId);
-                setMessages((prev) => {
-                  const existing = prev.find(
-                    (message) => message.id === statusId,
-                  );
-                  if (existing) {
-                    return prev.map((message) =>
-                      message.id === statusId ? { ...message, text } : message,
-                    );
-                  }
-                  return [...prev, { id: statusId, role: "agent", text }];
-                });
-              }
-            }
-            requestAnimationFrame(() => {
-              if (shouldAutoScroll.current && listRef.current) {
-                listRef.current.scrollTop = listRef.current.scrollHeight;
-              }
-            });
-          },
-          onDone: (finalChunk) => {
-            setStatus(`Session ${sessionId.slice(0, 8)}…`);
-            if (
-              finalChunk &&
-              typeof finalChunk === "object" &&
-              "type" in finalChunk &&
-              (finalChunk as { type?: unknown }).type === "final"
-            ) {
-              const data = (
-                finalChunk as {
-                  data?: { callSessionId?: string };
-                }
-              ).data;
-              if (data?.callSessionId) {
-                setCallSessionId(data.callSessionId);
-                setConfirmedSessionId(data.callSessionId);
-              }
-            }
-            requestAnimationFrame(() => {
-              if (shouldAutoScroll.current && listRef.current) {
-                listRef.current.scrollTo({
-                  top: listRef.current.scrollHeight,
-                  behavior: "smooth",
-                });
-              }
-            });
-          },
-          onError: () => {
-            setStatus("Connection issue. Try again.");
-          },
+    ensureSocket(sessionId);
+    const base = apiBaseUrl || window.location.origin;
+    fetch(new URL("/rpc/agent/message", base), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(demoAuthToken ? { "x-demo-auth": demoAuthToken } : {}),
+      },
+      body: JSON.stringify({
+        json: {
+          phoneNumber,
+          text: trimmed,
+          callSessionId: sessionId,
         },
-      )
+        meta: [],
+      }),
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("Request failed");
+        }
+      })
       .catch(() => {
         setStatus("Connection issue. Try again.");
       });

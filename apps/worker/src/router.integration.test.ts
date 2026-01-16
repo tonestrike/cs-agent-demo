@@ -151,6 +151,121 @@ describe("tickets RPC", () => {
   });
 });
 
+describe("workflow RPC", () => {
+  it("starts a verification workflow and accepts zip events", async () => {
+    const platform = await createTestEnv();
+    if (!platform.env.VERIFY_WORKFLOW) {
+      return;
+    }
+
+    const start = await callRpc<{ instanceId: string }>(
+      platform,
+      "workflows/verify/start",
+      {
+        callSessionId: "call_test_verify",
+        phoneE164: "+14155552671",
+        intent: "verify",
+      },
+    );
+
+    expect(start.instanceId).toBeTypeOf("string");
+
+    await callRpc<{ ok: boolean; instanceId: string }>(
+      platform,
+      "workflows/verify/sendZip",
+      {
+        instanceId: start.instanceId,
+        payload: { zipCode: "94105" },
+      },
+    );
+  });
+
+  it("starts a reschedule workflow and accepts events", async () => {
+    const platform = await createTestEnv();
+    if (!platform.env.RESCHEDULE_WORKFLOW) {
+      return;
+    }
+
+    const start = await callRpc<{ instanceId: string }>(
+      platform,
+      "workflows/reschedule/start",
+      {
+        callSessionId: "call_test_reschedule",
+        customerId: "cust_001",
+        intent: "reschedule",
+        message: "Please move my appointment.",
+      },
+    );
+
+    expect(start.instanceId).toBeTypeOf("string");
+
+    await callRpc<{ ok: boolean; instanceId: string }>(
+      platform,
+      "workflows/reschedule/selectAppointment",
+      {
+        instanceId: start.instanceId,
+        payload: { appointmentId: "appt_001" },
+      },
+    );
+
+    await callRpc<{ ok: boolean; instanceId: string }>(
+      platform,
+      "workflows/reschedule/selectSlot",
+      {
+        instanceId: start.instanceId,
+        payload: { slotId: "slot_001" },
+      },
+    );
+
+    await callRpc<{ ok: boolean; instanceId: string }>(
+      platform,
+      "workflows/reschedule/confirm",
+      {
+        instanceId: start.instanceId,
+        payload: { confirmed: true },
+      },
+    );
+  });
+
+  it("starts a cancel workflow and accepts events", async () => {
+    const platform = await createTestEnv();
+    if (!platform.env.CANCEL_WORKFLOW) {
+      return;
+    }
+
+    const start = await callRpc<{ instanceId: string }>(
+      platform,
+      "workflows/cancel/start",
+      {
+        callSessionId: "call_test_cancel",
+        customerId: "cust_001",
+        intent: "cancel",
+        message: "Cancel my appointment.",
+      },
+    );
+
+    expect(start.instanceId).toBeTypeOf("string");
+
+    await callRpc<{ ok: boolean; instanceId: string }>(
+      platform,
+      "workflows/cancel/selectAppointment",
+      {
+        instanceId: start.instanceId,
+        payload: { appointmentId: "appt_001" },
+      },
+    );
+
+    await callRpc<{ ok: boolean; instanceId: string }>(
+      platform,
+      "workflows/cancel/confirm",
+      {
+        instanceId: start.instanceId,
+        payload: { confirmed: true },
+      },
+    );
+  });
+});
+
 describe("crm RPC", () => {
   it("returns mock customer data and appointment details", async () => {
     const platform = await createTestEnv();

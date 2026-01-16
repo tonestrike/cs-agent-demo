@@ -7,13 +7,17 @@ import { createContext } from "./context";
 import type { Env } from "./env";
 import { router } from "./router";
 export { PestCallAgent } from "./agents/pestcall";
+export { CancelWorkflow } from "./workflows/cancel";
+export { ConversationHub } from "./durable-objects/conversation-hub";
+export { RescheduleWorkflow } from "./workflows/reschedule";
+export { VerificationWorkflow } from "./workflows/verification";
 
 const handler = new RPCHandler(router, {
   plugins: [
     new CORSPlugin({
       origin: "*",
-      allowMethods: ["POST", "OPTIONS"],
-      allowHeaders: ["content-type", "x-demo-auth"],
+      allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowHeaders: ["content-type", "x-demo-auth", "authorization"],
     }),
   ],
   interceptors: [
@@ -25,7 +29,85 @@ const handler = new RPCHandler(router, {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const agentResponse = await routeAgentRequest(request, env);
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/ws/conversations/")) {
+      if (!env.CONVERSATION_HUB) {
+        return new Response("Conversation hub not configured", {
+          status: 500,
+        });
+      }
+      const token = url.searchParams.get("token") ?? "";
+      if (env.DEMO_AUTH_TOKEN && token !== env.DEMO_AUTH_TOKEN) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      const conversationId = url.pathname.replace("/ws/conversations/", "");
+      if (!conversationId) {
+        return new Response("Conversation id required", { status: 400 });
+      }
+      const id = env.CONVERSATION_HUB.idFromName(conversationId);
+      const stub = env.CONVERSATION_HUB.get(id);
+      return stub.fetch(request);
+    }
+    if (url.pathname === "/health/openrouter") {
+      const baseUrl = env.OPENROUTER_BASE_URL?.trim() ?? "";
+      const token = env.OPENROUTER_TOKEN ?? "";
+      if (!baseUrl || !token) {
+        return Response.json(
+          {
+            ok: false,
+            error: "OPENROUTER_NOT_CONFIGURED",
+            hasBaseUrl: Boolean(baseUrl),
+            hasToken: Boolean(token),
+          },
+          { status: 500 },
+        );
+      }
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      };
+      if (env.OPENROUTER_REFERER) {
+        headers["HTTP-Referer"] = env.OPENROUTER_REFERER;
+      }
+      if (env.OPENROUTER_TITLE) {
+        headers["X-Title"] = env.OPENROUTER_TITLE;
+      }
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: "openai/gpt-5-mini",
+          messages: [{ role: "user", content: "ping" }],
+        }),
+      });
+      const bodyText = await response.text();
+      return Response.json({
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        bodyPreview: bodyText.slice(0, 400),
+        baseUrl,
+      });
+    }
+    if (request.method === "OPTIONS") {
+      if (url.pathname.startsWith("/rpc")) {
+        const origin = request.headers.get("Origin") ?? "*";
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Methods":
+              "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers":
+              "content-type, x-demo-auth, authorization",
+            "Access-Control-Max-Age": "86400",
+          },
+        });
+      }
+    }
+    const agentResponse = await routeAgentRequest(request, env, {
+      cors: true,
+    });
     if (agentResponse) {
       return agentResponse;
     }

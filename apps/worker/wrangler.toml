@@ -1,6 +1,6 @@
 name = "pestcall-worker"
 main = "src/index.ts"
-compatibility_date = "2024-10-01"
+compatibility_date = "2024-10-22"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
@@ -8,6 +8,9 @@ CRM_PROVIDER = "mock"
 AGENT_MODEL = "workers-ai"
 AI_GATEWAY_ACCOUNT_ID = "197ac8ab6d5079d3faab60cea42eaa7e"
 AI_GATEWAY_ID = "cs-bot"
+OPENROUTER_REFERER = "https://pestcall-worker.tonyvantur.workers.dev"
+OPENROUTER_TITLE = "PestCall CS Agent"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 [ai]
 binding = "AI"
@@ -22,9 +25,32 @@ migrations_dir = "migrations"
 name = "PestCallAgent"
 class_name = "PestCallAgent"
 
+[[durable_objects.bindings]]
+name = "CONVERSATION_HUB"
+class_name = "ConversationHub"
+
+[[workflows]]
+name = "pestcall-reschedule"
+binding = "RESCHEDULE_WORKFLOW"
+class_name = "RescheduleWorkflow"
+
+[[workflows]]
+name = "pestcall-verify"
+binding = "VERIFY_WORKFLOW"
+class_name = "VerificationWorkflow"
+
+[[workflows]]
+name = "pestcall-cancel"
+binding = "CANCEL_WORKFLOW"
+class_name = "CancelWorkflow"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["PestCallAgent"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["ConversationHub"]
 
 [observability]
 
