@@ -98,7 +98,6 @@ const formatMatches = (
     id: string;
     displayName: string;
     addressSummary: string;
-    zipCode?: string;
     email?: string;
   }>,
 ) => {
@@ -107,12 +106,37 @@ const formatMatches = (
   }
   return matches
     .map((match) => {
-      const zip = match.zipCode ? ` ZIP ${match.zipCode}` : "";
       const email = match.email ? ` ${match.email}` : "";
-      return `${match.id} ${match.displayName}${zip} ${match.addressSummary}${email}`.trim();
+      return `${match.id} ${match.displayName} ${match.addressSummary}${email}`.trim();
     })
     .join(" | ");
 };
+
+type CallSessionSummary = {
+  identityStatus?: "unknown" | "pending" | "verified";
+  verifiedCustomerId?: string | null;
+};
+
+const parseSummary = (summary: string | null) => {
+  if (!summary) {
+    return { identityStatus: "unknown" } satisfies CallSessionSummary;
+  }
+  try {
+    const parsed = JSON.parse(summary) as CallSessionSummary;
+    return {
+      identityStatus: parsed.identityStatus ?? "unknown",
+      verifiedCustomerId: parsed.verifiedCustomerId ?? null,
+    };
+  } catch {
+    return { identityStatus: "unknown" } satisfies CallSessionSummary;
+  }
+};
+
+const buildSummary = (summary: CallSessionSummary) =>
+  JSON.stringify({
+    identityStatus: summary.identityStatus ?? "unknown",
+    verifiedCustomerId: summary.verifiedCustomerId ?? null,
+  });
 
 const getStringArg = (args: Record<string, unknown>, key: string) => {
   const value = args[key];
@@ -174,6 +198,7 @@ export const handleAgentMessage = async (
   let callSessionId = input.callSessionId;
   let recentContext = "";
   let contextTurns = 0;
+  let summary: CallSessionSummary = { identityStatus: "unknown" };
   if (!callSessionId) {
     callSessionId = crypto.randomUUID();
     await deps.calls.createSession({
@@ -182,8 +207,11 @@ export const handleAgentMessage = async (
       phoneE164,
       status: "active",
       transport: "web",
+      summary: buildSummary(summary),
     });
   } else {
+    const session = await deps.calls.getSession(callSessionId);
+    summary = parseSummary(session?.summary ?? null);
     const recentTurns = await deps.calls.getRecentTurns({ callSessionId });
     recentContext = recentTurns
       .map((turn) => `${turn.speaker}: ${turn.text}`)
@@ -218,6 +246,10 @@ export const handleAgentMessage = async (
   const systemContext = [
     "System context:",
     `Phone lookup matches: ${formatMatches(matches)}`,
+    `Identity status: ${summary.identityStatus ?? "unknown"}`,
+    summary.verifiedCustomerId
+      ? `Verified customer: ${summary.verifiedCustomerId}`
+      : "Verified customer: none",
   ];
   const context = [systemContext.join("\n"), recentContext]
     .filter(Boolean)
@@ -360,9 +392,18 @@ export const handleAgentMessage = async (
         deps.crm.verifyAccount(customerId, zipCode),
       );
       tools.push(call.record);
+      const ok = Boolean(call.result);
+      summary = {
+        identityStatus: ok ? "verified" : "pending",
+        verifiedCustomerId: ok ? customerId : null,
+      };
+      await deps.calls.updateSessionSummary({
+        callSessionId,
+        summary: buildSummary(summary),
+      });
       toolResult = {
         toolName: "crm.verifyAccount",
-        result: { ok: Boolean(call.result) },
+        result: { ok },
       };
       break;
     }

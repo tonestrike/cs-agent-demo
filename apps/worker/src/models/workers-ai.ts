@@ -70,6 +70,9 @@ const buildPrompt = (input: AgentModelInput, config: AgentPromptConfig) => {
     ...buildToolGuidanceLines(config),
     `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
     "Ask follow-up questions when details are missing.",
+    "Never reveal or guess the customer's ZIP code. Only ask the caller to confirm it.",
+    "If identity status is verified, do not ask for ZIP again.",
+    "Stay on the user's topic; do not fetch appointments unless they ask about scheduling.",
     "Prefer tool calls over assumptions or guesses.",
     "Do not claim actions you did not take.",
     "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
@@ -155,6 +158,9 @@ export const createWorkersAiAdapter = (
         "Do not mention internal tool names.",
         ...buildToolGuidanceLines(config),
         `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
+        "Never reveal or guess the customer's ZIP code. Only ask the caller to confirm it.",
+        "If identity status is verified, do not ask for ZIP again.",
+        "If you escalated, clearly say a ticket was created and what happens next.",
         "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
       ];
 

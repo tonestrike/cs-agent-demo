@@ -87,6 +87,23 @@ export const createCallRepository = (db: D1Database) => {
         )
         .run();
     },
+    async updateSessionSummary(input: {
+      callSessionId: string;
+      summary: string;
+    }) {
+      await db
+        .prepare("UPDATE call_sessions SET summary = ? WHERE id = ?")
+        .bind(input.summary, input.callSessionId)
+        .run();
+    },
+    async getSession(callSessionId: string) {
+      const session = await db
+        .prepare("SELECT * FROM call_sessions WHERE id = ?")
+        .bind(callSessionId)
+        .first<CallSessionRow>();
+
+      return session ? mapCallSessionRow(session) : null;
+    },
     async addTurn(input: {
       id: string;
       callSessionId: string;

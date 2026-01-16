@@ -20,7 +20,9 @@ export const agentToolGuidanceSchema = z.object({
   verifyAccount: z
     .string()
     .min(1)
-    .default("Use to verify ZIP before sharing sensitive details."),
+    .default(
+      "Use to verify ZIP before sharing sensitive details. Never reveal the ZIP.",
+    ),
   getNextAppointment: z
     .string()
     .min(1)
@@ -62,7 +64,9 @@ export const agentToolGuidanceSchema = z.object({
   crmEscalate: z
     .string()
     .min(1)
-    .default("Use to create a ticket when the request needs escalation."),
+    .default(
+      "Use to create a ticket when the request needs escalation, and tell the caller you created it.",
+    ),
   escalate: z
     .string()
     .min(1)
