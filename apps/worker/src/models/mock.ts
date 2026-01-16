@@ -12,6 +12,15 @@ const normalizeConversationText = (text: string) => {
     .join(" ");
 };
 
+const messagesToText = (
+  messages?: Array<{ role: "user" | "assistant"; content: string }>,
+) => {
+  if (!messages?.length) {
+    return "";
+  }
+  return messages.map((msg) => msg.content).join(" ");
+};
+
 const detectTool = (text: string) => {
   const lowered = normalizeConversationText(text).toLowerCase();
   const wantsConfirm =
@@ -59,7 +68,11 @@ export const createMockModelAdapter = (
     name: "mock",
     modelId: "mock",
     async generate(input: AgentModelInput) {
-      const combinedText = [input.context, input.text]
+      const combinedText = [
+        messagesToText(input.messages),
+        input.context,
+        input.text,
+      ]
         .filter(Boolean)
         .join(" ");
       const toolName = detectTool(combinedText);

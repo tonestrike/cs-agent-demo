@@ -77,6 +77,8 @@ export const availableSlotResultSchema = z.object({
   timeWindow: z.string(),
 });
 
+export const availableSlotListResultSchema = z.array(availableSlotResultSchema);
+
 export const customerMatchResultSchema = z.array(
   z.object({
     id: z.string(),
@@ -156,7 +158,7 @@ export const toolResultSchema = z.discriminatedUnion("toolName", [
   }),
   z.object({
     toolName: z.literal("crm.getAvailableSlots"),
-    result: availableSlotResultSchema,
+    result: availableSlotListResultSchema,
   }),
   z.object({
     toolName: z.literal("crm.getOpenInvoices"),
@@ -198,6 +200,7 @@ export type AgentModelInput = {
     phoneE164: string;
     addressSummary: string;
   };
+  messages?: Array<{ role: "user" | "assistant"; content: string }>;
   context?: string;
   hasContext?: boolean;
 };
@@ -210,6 +213,7 @@ export type AgentResponseInput = {
     phoneE164: string;
     addressSummary: string;
   };
+  messages?: Array<{ role: "user" | "assistant"; content: string }>;
   context?: string;
   hasContext?: boolean;
 } & ToolResult;

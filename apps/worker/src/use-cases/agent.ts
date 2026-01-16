@@ -115,6 +115,8 @@ const formatMatches = (
 type CallSessionSummary = {
   identityStatus?: "unknown" | "pending" | "verified";
   verifiedCustomerId?: string | null;
+  lastToolName?: string | null;
+  lastToolResult?: string | null;
 };
 
 const parseSummary = (summary: string | null) => {
@@ -126,6 +128,8 @@ const parseSummary = (summary: string | null) => {
     return {
       identityStatus: parsed.identityStatus ?? "unknown",
       verifiedCustomerId: parsed.verifiedCustomerId ?? null,
+      lastToolName: parsed.lastToolName ?? null,
+      lastToolResult: parsed.lastToolResult ?? null,
     };
   } catch {
     return { identityStatus: "unknown" } satisfies CallSessionSummary;
@@ -136,7 +140,18 @@ const buildSummary = (summary: CallSessionSummary) =>
   JSON.stringify({
     identityStatus: summary.identityStatus ?? "unknown",
     verifiedCustomerId: summary.verifiedCustomerId ?? null,
+    lastToolName: summary.lastToolName ?? null,
+    lastToolResult: summary.lastToolResult ?? null,
   });
+
+const stringifyToolResult = (result: ToolResult) => {
+  try {
+    const text = JSON.stringify(result);
+    return text.length > 800 ? `${text.slice(0, 800)}…` : text;
+  } catch {
+    return null;
+  }
+};
 
 const getStringArg = (args: Record<string, unknown>, key: string) => {
   const value = args[key];
@@ -161,13 +176,15 @@ const generateReply = async (
   fallbackText: string,
   context: string,
   modelCalls: ModelCall[],
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
 ) => {
   const responseCall = await recordModelCall(model, "respond", () =>
     model.respond({
       text: input.text,
       customer: buildCustomerContext(customer),
+      messages,
       context,
-      hasContext: Boolean(context),
+      hasContext: messages.length > 1,
       ...toolResult,
     }),
   );
@@ -196,8 +213,8 @@ export const handleAgentMessage = async (
   const model = deps.modelFactory(agentConfig);
 
   let callSessionId = input.callSessionId;
-  let recentContext = "";
   let contextTurns = 0;
+  let recentTurns: Array<{ speaker: string; text: string }> = [];
   let summary: CallSessionSummary = { identityStatus: "unknown" };
   if (!callSessionId) {
     callSessionId = crypto.randomUUID();
@@ -212,10 +229,7 @@ export const handleAgentMessage = async (
   } else {
     const session = await deps.calls.getSession(callSessionId);
     summary = parseSummary(session?.summary ?? null);
-    const recentTurns = await deps.calls.getRecentTurns({ callSessionId });
-    recentContext = recentTurns
-      .map((turn) => `${turn.speaker}: ${turn.text}`)
-      .join("\n");
+    recentTurns = await deps.calls.getRecentTurns({ callSessionId });
     contextTurns = recentTurns.length;
   }
 
@@ -250,17 +264,27 @@ export const handleAgentMessage = async (
     summary.verifiedCustomerId
       ? `Verified customer: ${summary.verifiedCustomerId}`
       : "Verified customer: none",
+    summary.lastToolName ? `Last tool: ${summary.lastToolName}` : null,
+    summary.lastToolResult
+      ? `Last tool result: ${summary.lastToolResult}`
+      : null,
   ];
-  const context = [systemContext.join("\n"), recentContext]
-    .filter(Boolean)
-    .join("\n");
+  const context = systemContext.filter(Boolean).join("\n");
+
+  const messageHistory: Array<{ role: "user" | "assistant"; content: string }> =
+    recentTurns.map((turn) => ({
+      role: turn.speaker === "agent" ? "assistant" : "user",
+      content: turn.text,
+    }));
+  messageHistory.push({ role: "user", content: input.text });
 
   const modelDecision = await recordModelCall(model, "decide", () =>
     model.generate({
       text: input.text,
       customer: buildCustomerContext(customer),
+      messages: messageHistory,
       context,
-      hasContext: Boolean(context),
+      hasContext: messageHistory.length > 1,
     }),
   );
   modelCalls.push(modelDecision.record);
@@ -272,7 +296,13 @@ export const handleAgentMessage = async (
   const modelOutput = modelDecision.result;
 
   if (modelOutput.type === "final") {
-    const replyText = modelOutput.text;
+    const requiresAction =
+      /\b(reschedul|schedule|book|created|ticket|payment|refund|cancel)\b/i.test(
+        modelOutput.text,
+      );
+    const replyText = requiresAction
+      ? "I can help with that. Want me to proceed?"
+      : modelOutput.text;
     await deps.calls.addTurn({
       id: crypto.randomUUID(),
       callSessionId,
@@ -541,19 +571,19 @@ export const handleAgentMessage = async (
       );
       tools.push(call.record);
       const slots = Array.isArray(call.result) ? call.result : [];
-      const slot = slots[0];
-      toolResult = slot
-        ? {
-            toolName: "crm.getAvailableSlots",
-            result: slot,
-          }
-        : {
-            toolName: "agent.message",
-            result: {
-              kind: "no_slots",
-              details: "No available time slots were found.",
-            },
-          };
+      toolResult =
+        slots.length > 0
+          ? {
+              toolName: "crm.getAvailableSlots",
+              result: slots,
+            }
+          : {
+              toolName: "agent.message",
+              result: {
+                kind: "no_slots",
+                details: "No available time slots were found.",
+              },
+            };
       break;
     }
     case "crm.rescheduleAppointment": {
@@ -695,6 +725,17 @@ export const handleAgentMessage = async (
     }
   }
 
+  summary = {
+    identityStatus: summary.identityStatus,
+    verifiedCustomerId: summary.verifiedCustomerId ?? null,
+    lastToolName: toolResult.toolName,
+    lastToolResult: stringifyToolResult(toolResult),
+  };
+  await deps.calls.updateSessionSummary({
+    callSessionId,
+    summary: buildSummary(summary),
+  });
+
   const replyText = await generateReply(
     model,
     input,
@@ -703,6 +744,7 @@ export const handleAgentMessage = async (
     agentConfig.scopeMessage,
     context,
     modelCalls,
+    messageHistory,
   );
 
   await deps.calls.addTurn({

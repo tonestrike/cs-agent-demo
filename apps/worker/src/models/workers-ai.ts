@@ -38,6 +38,18 @@ const responseToText = (response: unknown) => {
   return null;
 };
 
+const sanitizeResponse = (text: string, hasContext: boolean) => {
+  const withoutTools = text
+    .split("\n")
+    .filter((line) => !/(^|\s)(crm|agent)\.[a-zA-Z]/.test(line))
+    .join("\n")
+    .trim();
+  if (hasContext && /how can i help today/i.test(withoutTools)) {
+    return withoutTools.replace(/.*how can i help today\??\s*/i, "").trim();
+  }
+  return withoutTools;
+};
+
 const buildToolGuidanceLines = (config: AgentPromptConfig) => {
   return [
     "Tool guidance:",
@@ -59,7 +71,23 @@ const buildToolGuidanceLines = (config: AgentPromptConfig) => {
   ];
 };
 
-const buildPrompt = (input: AgentModelInput, config: AgentPromptConfig) => {
+const NON_OVERRIDABLE_POLICY = [
+  "Policy (non-overridable):",
+  "- Never reveal or guess the customer's ZIP code. Only ask the caller to confirm it.",
+  "- If identity status is verified, do not ask for ZIP again.",
+  "- Stay on the user's topic; do not fetch appointments unless they ask about scheduling.",
+  "- If phone lookup returns a single match, do not ask to confirm the phone number; confirm name or address instead.",
+  "- When rescheduling, look up the appointment before asking for an appointment ID.",
+  "- When listing available slots, only use times provided by the tool result.",
+  "- Do not mention tool names or describe tool mechanics in responses.",
+  "- Do not claim actions you did not take.",
+  "- If you escalated, clearly say a ticket was created and what happens next.",
+];
+
+const buildDecisionInstructions = (
+  input: AgentModelInput,
+  config: AgentPromptConfig,
+) => {
   const lines = [
     config.personaSummary,
     `Company: ${config.companyName}.`,
@@ -67,31 +95,64 @@ const buildPrompt = (input: AgentModelInput, config: AgentPromptConfig) => {
     `Use this greeting only for the first turn when the caller just says hello: ${config.greeting}`,
     "Return JSON only, no prose.",
     "Choose one tool call or a final response.",
+    ...NON_OVERRIDABLE_POLICY,
     ...buildToolGuidanceLines(config),
     `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
     "Ask follow-up questions when details are missing.",
-    "Never reveal or guess the customer's ZIP code. Only ask the caller to confirm it.",
-    "If identity status is verified, do not ask for ZIP again.",
-    "Stay on the user's topic; do not fetch appointments unless they ask about scheduling.",
     "Prefer tool calls over assumptions or guesses.",
-    "Do not claim actions you did not take.",
+    "Never include tool names like crm.* or agent.* in responses.",
     "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
-  ];
-
-  if (input.context) {
-    lines.push("Conversation so far:", input.context);
-  }
-
-  lines.push(
     `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
     `HasContext: ${input.hasContext ? "true" : "false"}`,
-    `User: ${input.text}`,
     "JSON format:",
     '{"type":"tool_call","toolName":"crm.getNextAppointment","arguments":{"customerId":"cust_001"}}',
     '{"type":"final","text":"..."}',
-  );
+  ];
 
   return lines.join("\n");
+};
+
+const buildRespondInstructions = (
+  input: AgentResponseInput,
+  config: AgentPromptConfig,
+) => {
+  const promptLines = [
+    config.personaSummary,
+    `Company: ${config.companyName}.`,
+    `Tone: ${config.tone}.`,
+    `Use this greeting only for the first turn when the caller just says hello: ${config.greeting}`,
+    "Respond conversationally, keeping it concise and clear.",
+    "Use the tool result to answer the customer or ask a follow-up.",
+    ...NON_OVERRIDABLE_POLICY,
+    ...buildToolGuidanceLines(config),
+    `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
+    "Never include tool names like crm.* or agent.* in responses.",
+    "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
+    `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
+    `HasContext: ${input.hasContext ? "true" : "false"}`,
+    `Tool: ${input.toolName}`,
+    `Tool Result: ${JSON.stringify(input.result)}`,
+  ];
+
+  return promptLines.join("\n");
+};
+
+const buildMessages = (
+  instructions: string,
+  context: string | undefined,
+  messages: Array<{ role: "user" | "assistant"; content: string }> | undefined,
+) => {
+  const result: Array<{
+    role: "system" | "user" | "assistant";
+    content: string;
+  }> = [{ role: "system", content: instructions }];
+  if (context) {
+    result.push({ role: "system", content: context });
+  }
+  if (messages) {
+    result.push(...messages);
+  }
+  return result;
 };
 
 export const createWorkersAiAdapter = (
@@ -113,12 +174,9 @@ export const createWorkersAiAdapter = (
         });
       }
 
-      const prompt = buildPrompt(input, config);
+      const instructions = buildDecisionInstructions(input, config);
       const response = await ai.run(model as keyof AiModels, {
-        messages: [
-          { role: "system", content: config.personaSummary },
-          { role: "user", content: prompt },
-        ],
+        messages: buildMessages(instructions, input.context, input.messages),
       });
       const text = responseToText(response);
       if (!text) {
@@ -138,7 +196,7 @@ export const createWorkersAiAdapter = (
       }
       return {
         type: "final",
-        text: "I could not interpret the request. Can you rephrase?",
+        text,
       };
     },
     async respond(input: AgentResponseInput) {
@@ -148,44 +206,15 @@ export const createWorkersAiAdapter = (
         });
       }
 
-      const promptLines = [
-        config.personaSummary,
-        `Company: ${config.companyName}.`,
-        `Tone: ${config.tone}.`,
-        `Use this greeting only for the first turn when the caller just says hello: ${config.greeting}`,
-        "Respond conversationally, keeping it concise and clear.",
-        "Use the tool result to answer the customer or ask a follow-up.",
-        "Do not mention internal tool names.",
-        ...buildToolGuidanceLines(config),
-        `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
-        "Never reveal or guess the customer's ZIP code. Only ask the caller to confirm it.",
-        "If identity status is verified, do not ask for ZIP again.",
-        "If you escalated, clearly say a ticket was created and what happens next.",
-        "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
-      ];
-
-      if (input.context) {
-        promptLines.push("Conversation so far:", input.context);
-      }
-
-      promptLines.push(
-        `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
-        `HasContext: ${input.hasContext ? "true" : "false"}`,
-        `User: ${input.text}`,
-        `Tool: ${input.toolName}`,
-        `Tool Result: ${JSON.stringify(input.result)}`,
-      );
-
-      const prompt = promptLines.join("\n");
-
+      const instructions = buildRespondInstructions(input, config);
       const response = await ai.run(model as keyof AiModels, {
-        messages: [
-          { role: "system", content: config.personaSummary },
-          { role: "user", content: prompt },
-        ],
+        messages: buildMessages(instructions, input.context, input.messages),
       });
       const text = responseToText(response);
-      return text ?? "Thanks for the details. How else can I help?";
+      if (!text) {
+        return "Thanks for the details. How else can I help?";
+      }
+      return sanitizeResponse(text, Boolean(input.hasContext));
     },
   };
 };
