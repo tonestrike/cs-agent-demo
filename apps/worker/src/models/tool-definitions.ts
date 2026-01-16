@@ -89,6 +89,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
   "crm.getAvailableSlots": {
     description: "Fetch available appointment slots for a customer.",
     inputSchema: z.object({
+      appointmentId: z.string().optional(),
       customerId: z.string().optional(),
       daysAhead: z.number().int().positive().optional(),
       fromDate: z.string().optional(),
@@ -107,6 +108,14 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: rescheduleResultSchema,
     missingArgsMessage:
       "Appointment ID and slot ID are required to reschedule.",
+  },
+  "crm.cancelAppointment": {
+    description: "Cancel a scheduled appointment.",
+    inputSchema: z.object({
+      appointmentId: z.string().min(1),
+    }),
+    outputSchema: z.object({ ok: z.boolean() }),
+    missingArgsMessage: "Appointment ID is required to cancel.",
   },
   "crm.createAppointment": {
     description: "Create a new appointment for a customer.",

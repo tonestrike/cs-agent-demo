@@ -112,6 +112,14 @@ export const rescheduleInputSchema = z.object({
   slotId: z.string(),
 });
 
+export const cancelAppointmentInputSchema = z.object({
+  appointmentId: z.string(),
+});
+
+export const cancelAppointmentResultSchema = z.object({
+  ok: z.boolean(),
+});
+
 export const availableSlotsInputSchema = z.object({
   customerId: z.string(),
   daysAhead: z.number().int().positive().optional(),
@@ -192,6 +200,9 @@ export type CrmAdapter = {
   rescheduleAppointment: (
     appointmentId: string,
     slotId: string,
+  ) => Promise<{ ok: boolean; appointment?: Appointment }>;
+  cancelAppointment: (
+    appointmentId: string,
   ) => Promise<{ ok: boolean; appointment?: Appointment }>;
   getAvailableSlots: (
     crmCustomerId: string,

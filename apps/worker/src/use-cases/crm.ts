@@ -94,6 +94,13 @@ export const rescheduleAppointment = (
   return adapter.rescheduleAppointment(appointmentId, slotId);
 };
 
+export const cancelAppointment = (
+  adapter: CrmAdapter,
+  appointmentId: string,
+) => {
+  return adapter.cancelAppointment(appointmentId);
+};
+
 export const getAvailableSlots = (
   adapter: CrmAdapter,
   customerId: string,

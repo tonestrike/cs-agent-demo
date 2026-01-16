@@ -113,6 +113,7 @@ Broaden model selection to the full Cloudflare Workers AI catalog so prompt tuni
 - **Routing** (“Classifies input and directs it to specialized followup tasks”): when the model returns a final response after verification, a routing step classifies intent and triggers a specific tool (appointments, billing, policy).
 - **Workflow input processing**: ZIP validation is a pre-model step when verification is pending.
 - **Tool integration**: tools are centralized with Zod schemas and validated arguments/results.
+- **Workflow orchestration**: reschedule should follow a fixed step sequence (list appointments → select appointment → list slots → select slot → reschedule) with state stored in the call summary to ensure consistent execution. (See [Workflows](https://developers.cloudflare.com/agents/concepts/workflows/))
 
 ## Gaps / Where We’re Still Off
 - **Tool leakage risks**: if the model leaks tool info in the `answer` field, the UI will still render it. Structured output helps but does not eliminate leakage.
@@ -121,6 +122,7 @@ Broaden model selection to the full Cloudflare Workers AI catalog so prompt tuni
 - **“Totally fucked” cases**: if the model refuses to call tools in critical flows (verification, appointments) we have no deterministic fallback besides human escalation or repeated prompts.
 - **Routing JSON compliance**: some Workers AI models ignore JSON-only routing prompts, which breaks the routing step and leads to generic replies.
 - **JSON Mode requirement**: structured routing/response now require JSON Mode models (see docs list); non-compliant models will fail fast.
+- **Workflow sequencing**: rescheduling is still too model-driven; without an explicit workflow state machine, the agent loops on “next appointment” instead of advancing through selection and reschedule steps.
 
 ## Notable Docs Quotes
 > “Prompt Chaining decomposes tasks into a sequence of steps, where each LLM call processes the output of the previous one.”  
@@ -138,6 +140,7 @@ Broaden model selection to the full Cloudflare Workers AI catalog so prompt tuni
 3) Improve the debug view to show decision snapshots, tool call sources, and verification state.
 4) Remove remaining deterministic branches that simulate intent resolution.
 5) Add test coverage for “final reply with action but no tool call”.
+6) Implement a reschedule workflow state machine (select appointment → fetch slots → select slot → reschedule) using JSON-mode selection for step transitions.
 
 ## Local Commands
 - `bun install`

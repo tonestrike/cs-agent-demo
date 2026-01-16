@@ -152,6 +152,31 @@ export const mockCrmAdapter: CrmAdapter = {
     }
     return { ok: true, appointment: updated };
   },
+  async cancelAppointment(
+    appointmentId: string,
+  ): Promise<{ ok: boolean; appointment?: Appointment }> {
+    const appointmentIndex = appointments.findIndex(
+      (appointment) => appointment.id === appointmentId,
+    );
+    if (appointmentIndex === -1) {
+      return { ok: false };
+    }
+    const appointment = appointments[appointmentIndex];
+    if (!appointment) {
+      return { ok: false };
+    }
+    const updated: Appointment = {
+      ...appointment,
+      date: appointment.date,
+      timeWindow: appointment.timeWindow,
+    };
+    appointments = [
+      ...appointments.slice(0, appointmentIndex),
+      updated,
+      ...appointments.slice(appointmentIndex + 1),
+    ];
+    return { ok: true, appointment: updated };
+  },
   async getAvailableSlots(
     _crmCustomerId: string,
     _input: {

@@ -5,6 +5,8 @@ import {
   appointmentSchema,
   availableSlotSchema,
   availableSlotsInputSchema,
+  cancelAppointmentInputSchema,
+  cancelAppointmentResultSchema,
   createAppointmentInputSchema,
   createNoteInputSchema,
   customerMatchSchema,
@@ -25,6 +27,7 @@ import {
 
 import { authedProcedure } from "../middleware/auth";
 import {
+  cancelAppointment,
   createAppointment,
   createNote,
   escalate,
@@ -130,6 +133,21 @@ export const crmProcedures = {
       }
 
       return result.appointment ?? null;
+    }),
+  cancelAppointment: authedProcedure
+    .input(cancelAppointmentInputSchema)
+    .output(cancelAppointmentResultSchema)
+    .handler(async ({ input, context }) => {
+      const result = await cancelAppointment(
+        context.deps.crm,
+        input.appointmentId,
+      );
+      if (!result.ok) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "Unable to cancel appointment",
+        });
+      }
+      return { ok: true };
     }),
   getAvailableSlots: authedProcedure
     .input(availableSlotsInputSchema)

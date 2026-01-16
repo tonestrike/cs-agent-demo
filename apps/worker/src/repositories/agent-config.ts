@@ -49,6 +49,7 @@ const parseToolGuidance = (
       getOpenInvoices: row.tool_guidance,
       getAvailableSlots: row.tool_guidance,
       rescheduleAppointment: row.tool_guidance,
+      cancelAppointment: row.tool_guidance,
       createAppointment: row.tool_guidance,
       getServicePolicy: row.tool_guidance,
       crmEscalate: row.tool_guidance,

@@ -11,6 +11,7 @@ export const agentToolNameSchema = z.enum([
   "crm.getOpenInvoices",
   "crm.getAvailableSlots",
   "crm.rescheduleAppointment",
+  "crm.cancelAppointment",
   "crm.createAppointment",
   "crm.getServicePolicy",
   "crm.escalate",
@@ -40,7 +41,9 @@ export const agentRouteSchema = z.object({
   intent: z.enum([
     "appointments",
     "reschedule",
+    "cancel",
     "billing",
+    "payment",
     "policy",
     "general",
   ]),
@@ -84,6 +87,10 @@ export const invoicesSummaryResultSchema = z.object({
 export const rescheduleResultSchema = z.object({
   date: z.string(),
   timeWindow: z.string(),
+});
+
+export const cancelAppointmentResultSchema = z.object({
+  ok: z.boolean(),
 });
 
 export const availableSlotResultSchema = z.object({
@@ -183,6 +190,10 @@ export const toolResultSchema = z.discriminatedUnion("toolName", [
     result: rescheduleResultSchema,
   }),
   z.object({
+    toolName: z.literal("crm.cancelAppointment"),
+    result: cancelAppointmentResultSchema,
+  }),
+  z.object({
     toolName: z.literal("crm.createAppointment"),
     result: createAppointmentResultSchema,
   }),
@@ -232,10 +243,34 @@ export type AgentResponseInput = {
   hasContext?: boolean;
 } & ToolResult;
 
+export type SelectionOption = {
+  id: string;
+  label: string;
+};
+
+export type SelectionInput = {
+  text: string;
+  options: SelectionOption[];
+  kind: "appointment" | "slot";
+};
+
+export type SelectionResult = {
+  selectedId: string | null;
+  index: number | null;
+  reason?: string;
+};
+
+export type StatusInput = {
+  text: string;
+  contextHint?: string;
+};
+
 export type ModelAdapter = {
   name: "mock" | "workers-ai";
   modelId?: string;
   generate: (input: AgentModelInput) => Promise<AgentModelOutput>;
   respond: (input: AgentResponseInput) => Promise<string>;
   route: (input: AgentModelInput) => Promise<AgentRouteDecision>;
+  selectOption: (input: SelectionInput) => Promise<SelectionResult>;
+  status: (input: StatusInput) => Promise<string>;
 };

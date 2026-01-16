@@ -86,6 +86,14 @@ export const appointments: Appointment[] = [
     addressSummary: "123 Harbor Drive",
   },
   {
+    id: "appt_005",
+    customerId: "cust_002",
+    addressId: "addr_002",
+    date: "2025-03-05",
+    timeWindow: "09:00-11:00",
+    addressSummary: "123 Harbor Drive",
+  },
+  {
     id: "appt_003",
     customerId: "cust_003",
     addressId: "addr_003",

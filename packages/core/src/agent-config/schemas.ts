@@ -53,6 +53,10 @@ export const agentToolGuidanceSchema = z.object({
     .default(
       "Use to move appointments only after the caller confirms the new time.",
     ),
+  cancelAppointment: z
+    .string()
+    .min(1)
+    .default("Use to cancel an appointment after confirmation."),
   createAppointment: z
     .string()
     .min(1)

@@ -111,7 +111,9 @@ const buildToolGuidanceLines = (
     `- crm.getAppointmentById: ${config.toolGuidance.getAppointmentById}`,
     `- crm.getOpenInvoices: ${config.toolGuidance.getOpenInvoices}`,
     `- crm.getAvailableSlots: ${config.toolGuidance.getAvailableSlots}`,
+    "- crm.getAvailableSlots: When rescheduling, include appointmentId from the previously listed appointments.",
     `- crm.rescheduleAppointment: ${config.toolGuidance.rescheduleAppointment}`,
+    `- crm.cancelAppointment: ${config.toolGuidance.cancelAppointment}`,
     `- crm.createAppointment: ${config.toolGuidance.createAppointment}`,
     `- crm.getServicePolicy: ${config.toolGuidance.getServicePolicy}`,
     `- crm.escalate: ${config.toolGuidance.crmEscalate}`,
@@ -201,9 +203,11 @@ const buildRespondInstructions = (
 
 const buildRouteInstructions = (input: AgentModelInput) => {
   const lines = [
-    "Classify the customer's request into one of: appointments, reschedule, billing, policy, general.",
-    'Return JSON only. No prose. Schema: {"intent":"appointments|reschedule|billing|policy|general","topic"?:"string"}.',
+    "Classify the customer's request into one of: appointments, reschedule, cancel, billing, payment, policy, general.",
+    'Return JSON only. No prose. Schema: {"intent":"appointments|reschedule|cancel|billing|payment|policy|general","topic"?:"string"}.',
     "Use reschedule when the caller wants to change or move an existing appointment.",
+    "Use cancel when the caller wants to cancel an appointment.",
+    "Use payment when the caller wants to pay a balance.",
     "If the request is about service policy, include a short topic string.",
     `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
     `Message: ${input.text}`,
@@ -211,9 +215,47 @@ const buildRouteInstructions = (input: AgentModelInput) => {
   return lines.join("\n");
 };
 
+const buildSelectionInstructions = (
+  kind: "appointment" | "slot",
+  options: Array<{ label: string }>,
+) => {
+  const optionLines = options
+    .map((option, index) => `${index + 1}) ${option.label}`)
+    .join("\n");
+  return [
+    `Choose the best matching ${kind} option based on the caller's reply.`,
+    "Return JSON only. No prose.",
+    'Schema: {"index": number | null, "reason"?: string}.',
+    "If the reply does not clearly map to a single option, return null.",
+    "Options:",
+    optionLines || "None",
+  ].join("\n");
+};
+
+const buildStatusInstructions = (contextHint?: string) => {
+  return [
+    "Write one short sentence that acknowledges the caller and says you are checking.",
+    "Do not mention tools, internal systems, or IDs.",
+    "Keep it friendly and concise.",
+    contextHint ? `Context: ${contextHint}.` : null,
+    'Return JSON only. Schema: {"message":"string"}.',
+  ]
+    .filter(Boolean)
+    .join("\n");
+};
+
 const responseSchema = z.object({
   answer: z.string().min(1),
   citations: z.array(z.string().url()).optional(),
+});
+
+const selectionSchema = z.object({
+  index: z.number().int().nullable(),
+  reason: z.string().optional(),
+});
+
+const statusSchema = z.object({
+  message: z.string().min(1),
 });
 
 const responseJsonSchema = {
@@ -226,12 +268,41 @@ const responseJsonSchema = {
   additionalProperties: false,
 };
 
+const selectionJsonSchema = {
+  type: "object",
+  properties: {
+    index: {
+      anyOf: [{ type: "integer" }, { type: "null" }],
+    },
+    reason: { type: "string" },
+  },
+  required: ["index"],
+  additionalProperties: false,
+};
+
+const statusJsonSchema = {
+  type: "object",
+  properties: {
+    message: { type: "string" },
+  },
+  required: ["message"],
+  additionalProperties: false,
+};
+
 const routeJsonSchema = {
   type: "object",
   properties: {
     intent: {
       type: "string",
-      enum: ["appointments", "reschedule", "billing", "policy", "general"],
+      enum: [
+        "appointments",
+        "reschedule",
+        "cancel",
+        "billing",
+        "payment",
+        "policy",
+        "general",
+      ],
     },
     topic: { type: "string" },
   },
@@ -327,7 +398,7 @@ export const createWorkersAiAdapter = (
           max_new_tokens: MAX_NEW_TOKENS,
           max_tokens: MAX_NEW_TOKENS,
         };
-        logger.debug(
+        logger.info(
           {
             model,
             max_new_tokens: MAX_NEW_TOKENS,
@@ -371,7 +442,7 @@ export const createWorkersAiAdapter = (
           max_new_tokens: MAX_NEW_TOKENS,
           max_tokens: MAX_NEW_TOKENS,
         };
-        logger.debug(
+        logger.info(
           {
             model,
             max_new_tokens: MAX_NEW_TOKENS,
@@ -403,7 +474,7 @@ export const createWorkersAiAdapter = (
 
       ensureJsonModeModel(model);
       const instructions = buildRespondInstructions(input, config);
-      logger.debug(
+      logger.info(
         {
           model,
           max_new_tokens: MAX_NEW_TOKENS,
@@ -439,7 +510,7 @@ export const createWorkersAiAdapter = (
       }
 
       ensureJsonModeModel(model);
-      logger.debug(
+      logger.info(
         {
           model,
           max_new_tokens: MAX_NEW_TOKENS,
@@ -470,6 +541,108 @@ export const createWorkersAiAdapter = (
         });
       }
       return validated.data;
+    },
+    async selectOption(input) {
+      if (!ai) {
+        throw new AppError("Workers AI binding is not configured.", {
+          code: "AI_NOT_CONFIGURED",
+        });
+      }
+
+      ensureJsonModeModel(model);
+      logger.info(
+        {
+          model,
+          max_new_tokens: MAX_NEW_TOKENS,
+          max_tokens: MAX_NEW_TOKENS,
+          optionCount: input.options.length,
+          kind: input.kind,
+        },
+        "workers_ai.select.payload",
+      );
+      const response = await ai.run(model as keyof AiModels, {
+        messages: [
+          {
+            role: "system",
+            content: buildSelectionInstructions(
+              input.kind,
+              input.options.map((option) => ({ label: option.label })),
+            ),
+          },
+          {
+            role: "user",
+            content: input.text,
+          },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: selectionJsonSchema,
+        },
+        max_new_tokens: MAX_NEW_TOKENS,
+        max_tokens: MAX_NEW_TOKENS,
+      });
+      const parsed =
+        responseToJsonObject<z.infer<typeof selectionSchema>>(response);
+      const validated = selectionSchema.safeParse(parsed);
+      if (!validated.success) {
+        throw new AppError("Invalid JSON selection response", {
+          code: "JSON_MODE_FAILED",
+        });
+      }
+      const index = validated.data.index;
+      if (!index || index < 1 || index > input.options.length) {
+        return { selectedId: null, index: null, reason: validated.data.reason };
+      }
+      return {
+        selectedId: input.options[index - 1]?.id ?? null,
+        index,
+        reason: validated.data.reason,
+      };
+    },
+    async status(input) {
+      if (!ai) {
+        throw new AppError("Workers AI binding is not configured.", {
+          code: "AI_NOT_CONFIGURED",
+        });
+      }
+
+      ensureJsonModeModel(model);
+      logger.info(
+        {
+          model,
+          max_new_tokens: MAX_NEW_TOKENS,
+          max_tokens: MAX_NEW_TOKENS,
+          contextHint: input.contextHint ?? null,
+        },
+        "workers_ai.status.payload",
+      );
+      const response = await ai.run(model as keyof AiModels, {
+        messages: [
+          {
+            role: "system",
+            content: buildStatusInstructions(input.contextHint),
+          },
+          {
+            role: "user",
+            content: input.text,
+          },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: statusJsonSchema,
+        },
+        max_new_tokens: MAX_NEW_TOKENS,
+        max_tokens: MAX_NEW_TOKENS,
+      });
+      const parsed =
+        responseToJsonObject<z.infer<typeof statusSchema>>(response);
+      const validated = statusSchema.safeParse(parsed);
+      if (!validated.success) {
+        throw new AppError("Invalid JSON status response", {
+          code: "JSON_MODE_FAILED",
+        });
+      }
+      return validated.data.message.trim();
     },
   };
 };

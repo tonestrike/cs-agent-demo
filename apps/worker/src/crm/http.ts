@@ -120,6 +120,14 @@ export const createHttpCrmAdapter = (env: Env): CrmAdapter => {
       }
       return { ok: false };
     },
+    async cancelAppointment(
+      _appointmentId: string,
+    ): Promise<{ ok: boolean; appointment?: Appointment }> {
+      if (!baseUrl || !apiKey) {
+        notConfigured();
+      }
+      return { ok: false };
+    },
     async getAvailableSlots(
       _crmCustomerId: string,
       _input: {

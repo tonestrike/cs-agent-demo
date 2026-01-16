@@ -58,3 +58,19 @@ export const rescheduleAppointment = async (
 
   return nextAppointment;
 };
+
+export const cancelAppointment = async (
+  repo: ReturnType<typeof createAppointmentRepository>,
+  input: { appointment: ServiceAppointment },
+  nowIso = new Date().toISOString(),
+) => {
+  await repo.markCancelled({
+    appointmentId: input.appointment.id,
+    updatedAt: nowIso,
+  });
+  return {
+    ...input.appointment,
+    status: "cancelled",
+    updatedAt: nowIso,
+  };
+};

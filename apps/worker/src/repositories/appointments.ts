@@ -183,5 +183,13 @@ export const createAppointmentRepository = (db: D1Database) => {
         .bind(input.rescheduledFromId, input.updatedAt, input.appointmentId)
         .run();
     },
+    async markCancelled(input: { appointmentId: string; updatedAt: string }) {
+      await db
+        .prepare(
+          "UPDATE appointments SET status = 'cancelled', updated_at = ? WHERE id = ?",
+        )
+        .bind(input.updatedAt, input.appointmentId)
+        .run();
+    },
   };
 };

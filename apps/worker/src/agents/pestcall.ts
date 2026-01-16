@@ -32,6 +32,13 @@ export class PestCallAgent extends Agent<Env, AgentState> {
   @callable()
   async message(input: AgentMessageInput) {
     const deps = createDependencies(this.env);
+    deps.logger.info(
+      {
+        callSessionId: input.callSessionId ?? "new",
+        build: this.env.BUILD_ID ?? null,
+      },
+      "agent.stream.start",
+    );
     const response = await handleAgentMessage(deps, input);
     this.setState({
       lastCallSessionId: response.callSessionId,
@@ -43,9 +50,22 @@ export class PestCallAgent extends Agent<Env, AgentState> {
   @callable({ streaming: true })
   async messageStream(stream: StreamingResponse, input: AgentMessageInput) {
     const deps = createDependencies(this.env);
-    stream.send({ type: "status", text: "One moment while I check that." });
+    deps.logger.info(
+      {
+        callSessionId: input.callSessionId ?? "new",
+        build: this.env.BUILD_ID ?? null,
+      },
+      "agent.stream.start",
+    );
     const response = await handleAgentMessage(deps, input, undefined, {
       onStatus: (status) => {
+        deps.logger.debug(
+          {
+            callSessionId: input.callSessionId ?? response.callSessionId,
+            statusText: status.text,
+          },
+          "agent.stream.status",
+        );
         stream.send({ type: "status", text: status.text });
       },
     });
@@ -59,6 +79,14 @@ export class PestCallAgent extends Agent<Env, AgentState> {
       stream.send({ type: "delta", text: chunk });
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
+    deps.logger.info(
+      {
+        callSessionId: response.callSessionId,
+        replyTextLength: response.replyText.length,
+        build: this.env.BUILD_ID ?? null,
+      },
+      "agent.stream.final",
+    );
     stream.end({ type: "final", data: response });
   }
 

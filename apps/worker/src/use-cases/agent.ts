@@ -14,7 +14,10 @@ import type {
   ToolResult,
 } from "../models/types";
 import type { AgentMessageInput, AgentMessageOutput } from "../schemas/agent";
-import { rescheduleAppointment as rescheduleAppointmentUseCase } from "./appointments";
+import {
+  cancelAppointment as cancelAppointmentUseCase,
+  rescheduleAppointment as rescheduleAppointmentUseCase,
+} from "./appointments";
 import { createTicketUseCase } from "./tickets";
 
 type ToolCall = {
@@ -27,7 +30,7 @@ type ToolCall = {
 type ModelCall = {
   modelName: string;
   modelId?: string;
-  kind: "decide" | "respond";
+  kind: "decide" | "respond" | "status";
   latencyMs: number;
   success: boolean;
   errorCode?: string;
@@ -36,7 +39,7 @@ type ModelCall = {
 type AgentStatusUpdate = {
   text: string;
   toolName: AgentToolName;
-  source: "model" | "input_processing" | "routing";
+  source: "model" | "input_processing" | "routing" | "workflow";
 };
 
 type AgentMessageOptions = {
@@ -59,6 +62,8 @@ const statusMessageForTool = (toolName: AgentToolName) => {
       return "Checking available time slots.";
     case "crm.rescheduleAppointment":
       return "Rescheduling your appointment now.";
+    case "crm.cancelAppointment":
+      return "Cancelling your appointment now.";
     case "crm.createAppointment":
       return "Scheduling that appointment now.";
     case "crm.getServicePolicy":
@@ -71,20 +76,34 @@ const statusMessageForTool = (toolName: AgentToolName) => {
   }
 };
 
-const logModelCall = (
-  logger: Logger,
-  callSessionId: string,
-  record: ModelCall,
-) => {
-  logger.debug({ callSessionId, modelCall: record }, "agent.model_call");
+const statusHintForTool = (toolName: AgentToolName) => {
+  switch (toolName) {
+    case "crm.getNextAppointment":
+    case "crm.listUpcomingAppointments":
+      return "next appointment";
+    case "crm.getAvailableSlots":
+      return "available time slots";
+    case "crm.rescheduleAppointment":
+      return "rescheduling your appointment";
+    case "crm.cancelAppointment":
+      return "cancelling your appointment";
+    case "crm.getOpenInvoices":
+      return "your balance";
+    case "crm.getServicePolicy":
+      return "service policy";
+    case "crm.verifyAccount":
+      return "verification";
+    default:
+      return "your request";
+  }
 };
 
-const logToolCall = (
-  logger: Logger,
-  callSessionId: string,
-  record: ToolCall,
-) => {
-  logger.debug({ callSessionId, toolCall: record }, "agent.tool_call");
+const logModelCall = (logger: Logger, record: ModelCall) => {
+  logger.debug({ modelCall: record }, "agent.model_call");
+};
+
+const logToolCall = (logger: Logger, record: ToolCall) => {
+  logger.debug({ toolCall: record }, "agent.tool_call");
 };
 
 const recordToolCall = async <T>(
@@ -200,6 +219,11 @@ type CallSessionSummary = {
     addressSummary: string;
     zipCode?: string | null;
   } | null;
+  workflow?: {
+    kind: "reschedule" | "cancel";
+    step: "select_appointment" | "select_slot";
+    appointmentId?: string | null;
+  } | null;
   lastToolName?: string | null;
   lastToolResult?: string | null;
   lastAppointmentId?: string | null;
@@ -223,12 +247,26 @@ const parseSummary = (summary: string | null) => {
     return { identityStatus: "unknown" } satisfies CallSessionSummary;
   }
   try {
-    const parsed = JSON.parse(summary) as CallSessionSummary;
+    const parsed = JSON.parse(summary) as Partial<CallSessionSummary>;
+    const workflow =
+      parsed.workflow &&
+      (parsed.workflow.kind === "reschedule" ||
+        parsed.workflow.kind === "cancel")
+        ? {
+            kind: parsed.workflow.kind,
+            step:
+              parsed.workflow.step === "select_slot"
+                ? ("select_slot" as const)
+                : ("select_appointment" as const),
+            appointmentId: parsed.workflow.appointmentId ?? null,
+          }
+        : null;
     return {
       identityStatus: parsed.identityStatus ?? "unknown",
       verifiedCustomerId: parsed.verifiedCustomerId ?? null,
       pendingCustomerId: parsed.pendingCustomerId ?? null,
       pendingCustomerProfile: parsed.pendingCustomerProfile ?? null,
+      workflow,
       lastToolName: parsed.lastToolName ?? null,
       lastToolResult: parsed.lastToolResult ?? null,
       lastAppointmentId: parsed.lastAppointmentId ?? null,
@@ -261,6 +299,7 @@ const buildSummary = (summary: CallSessionSummary) =>
     verifiedCustomerId: summary.verifiedCustomerId ?? null,
     pendingCustomerId: summary.pendingCustomerId ?? null,
     pendingCustomerProfile: summary.pendingCustomerProfile ?? null,
+    workflow: summary.workflow ?? null,
     lastToolName: summary.lastToolName ?? null,
     lastToolResult: summary.lastToolResult ?? null,
     lastAppointmentId: summary.lastAppointmentId ?? null,
@@ -355,8 +394,56 @@ const formatSlotChoices = (
 ) => {
   return slots
     .slice(0, 3)
-    .map((slot, index) => `${index + 1}) ${slot.date} ${slot.timeWindow}`)
+    .map(
+      (slot, index) =>
+        `${index + 1}) ${formatDateForSpeech(slot.date)} ${formatTimeWindowForSpeech(
+          slot.timeWindow,
+        )}`,
+    )
     .join(" ");
+};
+
+const formatDateForSpeech = (dateValue: string) => {
+  const [yearRaw, monthRaw, dayRaw] = dateValue.split("-");
+  const year = Number(yearRaw);
+  const monthIndex = Number(monthRaw) - 1;
+  const day = Number(dayRaw);
+  if (!year || Number.isNaN(monthIndex) || !day) {
+    return dateValue;
+  }
+  const date = new Date(Date.UTC(year, monthIndex, day));
+  const weekday = date.toLocaleDateString("en-US", { weekday: "long" });
+  const month = date.toLocaleDateString("en-US", { month: "long" });
+  const suffix =
+    day % 10 === 1 && day % 100 !== 11
+      ? "st"
+      : day % 10 === 2 && day % 100 !== 12
+        ? "nd"
+        : day % 10 === 3 && day % 100 !== 13
+          ? "rd"
+          : "th";
+  return `${weekday}, ${month} ${day}${suffix}`;
+};
+
+const formatTimeForSpeech = (timeValue: string) => {
+  const [hourRaw, minuteRaw] = timeValue.split(":");
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) {
+    return timeValue;
+  }
+  const period = hour >= 12 ? "PM" : "AM";
+  const adjustedHour = ((hour + 11) % 12) + 1;
+  const minuteValue = minute.toString().padStart(2, "0");
+  return `${adjustedHour}:${minuteValue} ${period}`;
+};
+
+const formatTimeWindowForSpeech = (timeWindow: string) => {
+  const [start, end] = timeWindow.split("-");
+  if (!start || !end) {
+    return timeWindow;
+  }
+  return `${formatTimeForSpeech(start)} to ${formatTimeForSpeech(end)}`;
 };
 
 const getMissingArgsDetails = (
@@ -365,7 +452,7 @@ const getMissingArgsDetails = (
 ) => {
   if (toolName === "crm.rescheduleAppointment") {
     if (summary.lastAvailableSlots?.length) {
-      return `Which slot should I book? ${formatSlotChoices(summary.lastAvailableSlots)}. You can say "first" or give the date/time.`;
+      return `Which slot should I book? ${formatSlotChoices(summary.lastAvailableSlots)}.`;
     }
     return "Which appointment and time should I reschedule? If you want, I can look up your next appointment.";
   }
@@ -381,24 +468,6 @@ const hasActionCommitment = (text: string) =>
   /\b(check|look up|lookup|find|fetch|pull up|review|confirm|verify|reschedule|schedule|book)\b/i.test(
     text,
   );
-
-const parseOrdinalSelection = (text: string, max: number) => {
-  const lower = text.toLowerCase();
-  const ordinalMap: Array<[RegExp, number]> = [
-    [/\b(first|1st|one|1)\b/, 1],
-    [/\b(second|2nd|two|2)\b/, 2],
-    [/\b(third|3rd|three|3)\b/, 3],
-  ];
-  for (const [pattern, value] of ordinalMap) {
-    if (pattern.test(lower) && value <= max) {
-      return value;
-    }
-  }
-  return null;
-};
-
-const wantsRescheduleOptions = (text: string) =>
-  /\b(reschedule|move|change|options|available)\b/i.test(text);
 
 const enforceVerificationLanguage = (
   text: string,
@@ -467,7 +536,11 @@ const generateReply = async (
     if (!appointment) {
       return "I couldn't find a scheduled appointment.";
     }
-    return `Your next appointment is ${appointment.date} ${appointment.timeWindow} at ${appointment.addressSummary}.`;
+    return `Your next appointment is ${formatDateForSpeech(
+      appointment.date,
+    )} from ${formatTimeWindowForSpeech(
+      appointment.timeWindow,
+    )} at ${appointment.addressSummary}.`;
   }
   if (toolResult.toolName === "crm.listUpcomingAppointments") {
     const list = toolResult.result as Array<{
@@ -479,9 +552,37 @@ const generateReply = async (
       return "I couldn't find any upcoming appointments to reschedule.";
     }
     const lines = list.slice(0, 3).map((appointment, index) => {
-      return `${index + 1}) ${appointment.date} ${appointment.timeWindow} at ${appointment.addressSummary}`;
+      return `${index + 1}) ${formatDateForSpeech(
+        appointment.date,
+      )} from ${formatTimeWindowForSpeech(
+        appointment.timeWindow,
+      )} at ${appointment.addressSummary}`;
     });
     return `Here are your upcoming appointments:\n${lines.join("\n")}\nWhich one would you like to reschedule?`;
+  }
+  if (toolResult.toolName === "crm.getAvailableSlots") {
+    const slots = toolResult.result as Array<{
+      date?: string;
+      timeWindow?: string;
+    }>;
+    if (!Array.isArray(slots) || slots.length === 0) {
+      return "I couldn't find any available time slots to reschedule.";
+    }
+    const lines = slots
+      .filter((slot): slot is { date: string; timeWindow: string } =>
+        Boolean(slot.date && slot.timeWindow),
+      )
+      .slice(0, 3)
+      .map(
+        (slot, index) =>
+          `${index + 1}) ${formatDateForSpeech(
+            slot.date,
+          )} from ${formatTimeWindowForSpeech(slot.timeWindow)}`,
+      );
+    if (lines.length === 0) {
+      return "I couldn't find any available time slots to reschedule.";
+    }
+    return `Here are the available time slots:\n${lines.join("\n")}\nWhich one would you like to book?`;
   }
   if (toolResult.toolName === "crm.getOpenInvoices") {
     const invoice = toolResult.result as { balanceCents?: number };
@@ -501,7 +602,24 @@ const generateReply = async (
       date: string;
       timeWindow: string;
     };
-    return `Your appointment has been rescheduled to ${rescheduled.date} ${rescheduled.timeWindow}.`;
+    return `Your appointment has been rescheduled to ${formatDateForSpeech(
+      rescheduled.date,
+    )} from ${formatTimeWindowForSpeech(rescheduled.timeWindow)}.`;
+  }
+  if (toolResult.toolName === "crm.cancelAppointment") {
+    const result = toolResult.result as { ok?: boolean };
+    return result.ok
+      ? "Your appointment has been canceled."
+      : "I couldn't cancel that appointment. Would you like me to try again?";
+  }
+  if (toolResult.toolName === "crm.escalate") {
+    const result = toolResult.result as { ticketId?: string };
+    return result.ticketId
+      ? `Got it. I’ve created a ticket (${result.ticketId}) and a specialist will reach out to take payment.`
+      : "Got it. I’ll have a specialist reach out to take payment.";
+  }
+  if (toolResult.toolName === "agent.escalate") {
+    return "Got it. I’ll have a specialist reach out to help with that.";
   }
   const responseCall = await recordModelCall(model, "respond", () =>
     model.respond({
@@ -514,7 +632,7 @@ const generateReply = async (
     }),
   );
   modelCalls.push(responseCall.record);
-  logModelCall(logger, callSessionId, responseCall.record);
+  logModelCall(logger, responseCall.record);
 
   if (responseCall.record.success) {
     const text =
@@ -548,7 +666,7 @@ export const handleAgentMessage = async (
   const modelCalls: ModelCall[] = [];
   const agentConfig = await deps.agentConfig.get(deps.agentConfigDefaults);
   const model = deps.modelFactory(agentConfig);
-  const logger = deps.logger;
+  let logger = deps.logger;
 
   logger.info(
     {
@@ -592,6 +710,10 @@ export const handleAgentMessage = async (
     }
   }
 
+  logger = logger.child({
+    callSessionId,
+  });
+
   await deps.calls.addTurn({
     id: crypto.randomUUID(),
     callSessionId,
@@ -605,7 +727,7 @@ export const handleAgentMessage = async (
     deps.crm.lookupCustomerByPhone(phoneE164),
   );
   tools.push(lookup.record);
-  logToolCall(logger, callSessionId, lookup.record);
+  logToolCall(logger, lookup.record);
 
   const matches = Array.isArray(lookup.result) ? lookup.result : [];
   if (
@@ -673,6 +795,9 @@ export const handleAgentMessage = async (
     summary.pendingCustomerId
       ? `Pending customer: ${summary.pendingCustomerId}`
       : "Pending customer: none",
+    summary.workflow
+      ? `Workflow: ${summary.workflow.kind}:${summary.workflow.step}`
+      : "Workflow: none",
     `Phone lookup matches: ${matches.length}`,
     summary.lastAppointmentId
       ? `Last appointment id: ${summary.lastAppointmentId}`
@@ -689,10 +814,10 @@ export const handleAgentMessage = async (
 
   logger.debug(
     {
-      callSessionId,
       identityStatus: summary.identityStatus,
       pendingCustomerId: summary.pendingCustomerId,
       verifiedCustomerId: summary.verifiedCustomerId,
+      workflow: summary.workflow ?? null,
       inputText: input.text,
     },
     "agent.message.start",
@@ -718,10 +843,18 @@ export const handleAgentMessage = async (
       text: output.text.slice(0, 400),
     };
   };
-  let toolCallSource: "model" | "input_processing" | "routing" | null = null;
+  let toolCallSource:
+    | "model"
+    | "input_processing"
+    | "routing"
+    | "workflow"
+    | null = null;
   let toolCall: AgentModelOutput | null = null;
   let decisionSnapshot: ReturnType<typeof summarizeModelOutput> | null = null;
   let modelOutput: AgentModelOutput | null = null;
+  let workflow = summary.workflow ?? null;
+  let workflowReply: string | null = null;
+  let statusOpen = true;
 
   if (summary.identityStatus !== "verified" && summary.pendingCustomerId) {
     const zipCandidate = input.text.match(/\b\d{5}\b/)?.[0] ?? null;
@@ -748,61 +881,267 @@ export const handleAgentMessage = async (
     }
   }
 
-  if (!toolCall && summary.identityStatus === "verified") {
-    if (summary.lastAvailableSlots?.length && summary.lastAppointmentId) {
-      const slotOrdinal = parseOrdinalSelection(
-        input.text,
-        summary.lastAvailableSlots.length,
+  const activeCustomerId =
+    verifiedCustomerId ??
+    summary.verifiedCustomerId ??
+    resolvedCustomer?.id ??
+    session?.customerCacheId ??
+    null;
+
+  const trySelectOption = async (
+    options: Array<{ id: string; label: string }>,
+    kind: "appointment" | "slot",
+  ) => {
+    logger.debug(
+      {
+        callSessionId,
+        kind,
+        optionCount: options.length,
+      },
+      "agent.workflow.select.start",
+    );
+    const trimmed = input.text.trim();
+    const directMatch = options.find((option) => option.id === trimmed);
+    if (directMatch) {
+      const selection = {
+        selectedId: directMatch.id,
+        index: options.indexOf(directMatch) + 1,
+      };
+      logger.debug(
+        { callSessionId, kind, selection },
+        "agent.workflow.select.direct",
       );
-      if (slotOrdinal) {
-        const slot = summary.lastAvailableSlots[slotOrdinal - 1];
-        if (slot) {
+      return selection;
+    }
+    const selectionCall = await recordModelCall(model, "decide", () =>
+      model.selectOption({ text: input.text, options, kind }),
+    );
+    modelCalls.push(selectionCall.record);
+    logModelCall(logger, selectionCall.record);
+    if (!selectionCall.record.success) {
+      logger.info(
+        {
+          callSessionId,
+          kind,
+          errorCode: selectionCall.record.errorCode ?? "unknown",
+        },
+        "agent.workflow.select.failed",
+      );
+      return { selectedId: null, index: null };
+    }
+    logger.debug(
+      {
+        callSessionId,
+        kind,
+        selection: selectionCall.result,
+      },
+      "agent.workflow.select.result",
+    );
+    return selectionCall.result;
+  };
+
+  if (
+    !toolCall &&
+    summary.identityStatus === "verified" &&
+    workflow?.kind === "reschedule"
+  ) {
+    if (workflow.step === "select_appointment") {
+      const appointmentOptions = summary.lastAppointmentOptions ?? [];
+      if (!appointmentOptions.length) {
+        if (activeCustomerId) {
           toolCall = {
             type: "tool_call",
-            toolName: "crm.rescheduleAppointment",
-            arguments: {
-              appointmentId: summary.lastAppointmentId,
-              slotId: slot.id,
-            },
+            toolName: "crm.listUpcomingAppointments",
+            arguments: { customerId: activeCustomerId, limit: 3 },
           };
-          toolCallSource = "input_processing";
+          toolCallSource = "workflow";
           decisionSnapshot = summarizeModelOutput(toolCall);
         }
-      }
-    }
-  }
-
-  if (!toolCall && summary.identityStatus === "verified") {
-    const appointmentOptions = summary.lastAppointmentOptions ?? [];
-    if (appointmentOptions.length > 0 && wantsRescheduleOptions(input.text)) {
-      const ordinal =
-        parseOrdinalSelection(input.text, appointmentOptions.length) ??
-        (appointmentOptions.length === 1 ? 1 : null);
-      if (ordinal) {
-        const appointment = appointmentOptions[ordinal - 1];
-        const customerId =
-          verifiedCustomerId ??
-          summary.verifiedCustomerId ??
-          resolvedCustomer?.id ??
-          session?.customerCacheId ??
-          null;
-        if (appointment && customerId) {
+      } else if (appointmentOptions.length === 1) {
+        const appointment = appointmentOptions[0];
+        if (!appointment) {
+          workflowReply =
+            "Which appointment would you like to reschedule? Please choose one of the listed options.";
+        } else {
+          workflow = {
+            kind: "reschedule",
+            step: "select_slot",
+            appointmentId: appointment.id,
+          };
           summary = {
             ...summary,
+            workflow,
             lastAppointmentId: appointment.id,
           };
           await deps.calls.updateSessionSummary({
             callSessionId,
             summary: buildSummary(summary),
           });
+          if (activeCustomerId) {
+            toolCall = {
+              type: "tool_call",
+              toolName: "crm.getAvailableSlots",
+              arguments: {
+                customerId: activeCustomerId,
+                appointmentId: appointment.id,
+                daysAhead: 14,
+                preference: "any",
+              },
+            };
+            toolCallSource = "workflow";
+            decisionSnapshot = summarizeModelOutput(toolCall);
+          }
+        }
+      } else {
+        const options = appointmentOptions.map((appointment) => ({
+          id: appointment.id,
+          label: `${formatDateForSpeech(appointment.date)} from ${formatTimeWindowForSpeech(
+            appointment.timeWindow,
+          )} at ${appointment.addressSummary}`,
+        }));
+        const selection = await trySelectOption(options, "appointment");
+        if (selection.selectedId) {
+          workflow = {
+            kind: "reschedule",
+            step: "select_slot",
+            appointmentId: selection.selectedId,
+          };
+          summary = {
+            ...summary,
+            workflow,
+            lastAppointmentId: selection.selectedId,
+          };
+          await deps.calls.updateSessionSummary({
+            callSessionId,
+            summary: buildSummary(summary),
+          });
+          if (activeCustomerId) {
+            toolCall = {
+              type: "tool_call",
+              toolName: "crm.getAvailableSlots",
+              arguments: {
+                customerId: activeCustomerId,
+                appointmentId: selection.selectedId,
+                daysAhead: 14,
+                preference: "any",
+              },
+            };
+            toolCallSource = "workflow";
+            decisionSnapshot = summarizeModelOutput(toolCall);
+          }
+        } else {
+          workflowReply =
+            "Which appointment would you like to reschedule? Please choose one of the listed options.";
+        }
+      }
+    } else if (workflow.step === "select_slot") {
+      const slots = summary.lastAvailableSlots ?? [];
+      const appointmentId = workflow.appointmentId ?? summary.lastAppointmentId;
+      if (!slots.length) {
+        if (activeCustomerId && appointmentId) {
           toolCall = {
             type: "tool_call",
             toolName: "crm.getAvailableSlots",
-            arguments: { customerId, daysAhead: 14, preference: "any" },
+            arguments: {
+              customerId: activeCustomerId,
+              appointmentId,
+              daysAhead: 14,
+              preference: "any",
+            },
           };
-          toolCallSource = "input_processing";
+          toolCallSource = "workflow";
           decisionSnapshot = summarizeModelOutput(toolCall);
+        } else {
+          workflow = {
+            kind: "reschedule",
+            step: "select_appointment",
+          };
+          summary = { ...summary, workflow };
+          await deps.calls.updateSessionSummary({
+            callSessionId,
+            summary: buildSummary(summary),
+          });
+          workflowReply =
+            "Which appointment would you like to reschedule? Please choose one of the listed options.";
         }
+      } else {
+        const options = slots.map((slot) => ({
+          id: slot.id,
+          label: `${formatDateForSpeech(
+            slot.date,
+          )} from ${formatTimeWindowForSpeech(slot.timeWindow)}`,
+        }));
+        const selection = await trySelectOption(options, "slot");
+        if (selection.selectedId && appointmentId) {
+          toolCall = {
+            type: "tool_call",
+            toolName: "crm.rescheduleAppointment",
+            arguments: {
+              appointmentId,
+              slotId: selection.selectedId,
+            },
+          };
+          toolCallSource = "workflow";
+          decisionSnapshot = summarizeModelOutput(toolCall);
+        } else {
+          workflowReply =
+            "Which time slot should I book? Please choose one of the listed options.";
+        }
+      }
+    }
+  }
+
+  if (
+    !toolCall &&
+    summary.identityStatus === "verified" &&
+    workflow?.kind === "cancel"
+  ) {
+    const appointmentOptions = summary.lastAppointmentOptions ?? [];
+    if (!appointmentOptions.length) {
+      if (activeCustomerId) {
+        toolCall = {
+          type: "tool_call",
+          toolName: "crm.listUpcomingAppointments",
+          arguments: { customerId: activeCustomerId, limit: 3 },
+        };
+        toolCallSource = "workflow";
+        decisionSnapshot = summarizeModelOutput(toolCall);
+      }
+    } else if (appointmentOptions.length === 1) {
+      const appointment = appointmentOptions[0];
+      if (appointment) {
+        workflow = null;
+        toolCall = {
+          type: "tool_call",
+          toolName: "crm.cancelAppointment",
+          arguments: { appointmentId: appointment.id },
+        };
+        toolCallSource = "workflow";
+        decisionSnapshot = summarizeModelOutput(toolCall);
+      } else {
+        workflowReply =
+          "Which appointment would you like to cancel? Please choose one of the listed options.";
+      }
+    } else {
+      const options = appointmentOptions.map((appointment) => ({
+        id: appointment.id,
+        label: `${formatDateForSpeech(appointment.date)} from ${formatTimeWindowForSpeech(
+          appointment.timeWindow,
+        )} at ${appointment.addressSummary}`,
+      }));
+      const selection = await trySelectOption(options, "appointment");
+      if (selection.selectedId) {
+        workflow = null;
+        toolCall = {
+          type: "tool_call",
+          toolName: "crm.cancelAppointment",
+          arguments: { appointmentId: selection.selectedId },
+        };
+        toolCallSource = "workflow";
+        decisionSnapshot = summarizeModelOutput(toolCall);
+      } else {
+        workflowReply =
+          "Which appointment would you like to cancel? Please choose one of the listed options.";
       }
     }
   }
@@ -818,7 +1157,7 @@ export const handleAgentMessage = async (
       }),
     );
     modelCalls.push(modelDecision.record);
-    logModelCall(logger, callSessionId, modelDecision.record);
+    logModelCall(logger, modelDecision.record);
 
     if (!modelDecision.record.success) {
       throw modelDecision.result;
@@ -848,7 +1187,7 @@ export const handleAgentMessage = async (
       }),
     );
     modelCalls.push(routeDecision.record);
-    logModelCall(logger, callSessionId, routeDecision.record);
+    logModelCall(logger, routeDecision.record);
 
     if (routeDecision.record.success) {
       logger.debug(
@@ -872,6 +1211,32 @@ export const handleAgentMessage = async (
             toolCallSource = "routing";
             break;
           case "reschedule":
+            workflow = {
+              kind: "reschedule",
+              step: "select_appointment",
+            };
+            summary = { ...summary, workflow };
+            await deps.calls.updateSessionSummary({
+              callSessionId,
+              summary: buildSummary(summary),
+            });
+            toolCall = {
+              type: "tool_call",
+              toolName: "crm.listUpcomingAppointments",
+              arguments: { customerId, limit: 3 },
+            };
+            toolCallSource = "routing";
+            break;
+          case "cancel":
+            workflow = {
+              kind: "cancel",
+              step: "select_appointment",
+            };
+            summary = { ...summary, workflow };
+            await deps.calls.updateSessionSummary({
+              callSessionId,
+              summary: buildSummary(summary),
+            });
             toolCall = {
               type: "tool_call",
               toolName: "crm.listUpcomingAppointments",
@@ -884,6 +1249,20 @@ export const handleAgentMessage = async (
               type: "tool_call",
               toolName: "crm.getOpenInvoices",
               arguments: { customerId },
+            };
+            toolCallSource = "routing";
+            break;
+          case "payment":
+            toolCall = {
+              type: "tool_call",
+              toolName: "crm.escalate",
+              arguments: {
+                reason: "Payment request",
+                summary: summary.lastToolResult
+                  ? `Customer wants to pay their balance. Last invoice summary: ${summary.lastToolResult}`
+                  : "Customer wants to pay their balance.",
+                customerId,
+              },
             };
             toolCallSource = "routing";
             break;
@@ -942,7 +1321,7 @@ export const handleAgentMessage = async (
         errorCode: "blocked_unverified",
       };
       tools.push(blockedRecord);
-      logToolCall(logger, callSessionId, blockedRecord);
+      logToolCall(logger, blockedRecord);
       toolResult = {
         toolName: "agent.message",
         result: {
@@ -969,7 +1348,7 @@ export const handleAgentMessage = async (
               deps.crm.lookupCustomerByPhone(phone),
             );
             tools.push(call.record);
-            logToolCall(logger, callSessionId, call.record);
+            logToolCall(logger, call.record);
             const result = Array.isArray(call.result) ? call.result : [];
             const candidateId =
               result.length === 1 && result[0] ? result[0].id : null;
@@ -1031,7 +1410,7 @@ export const handleAgentMessage = async (
               () => deps.crm.lookupCustomerByNameAndZip(fullName, zipCode),
             );
             tools.push(call.record);
-            logToolCall(logger, callSessionId, call.record);
+            logToolCall(logger, call.record);
             const result = Array.isArray(call.result) ? call.result : [];
             const candidateId =
               result.length === 1 && result[0] ? result[0].id : null;
@@ -1088,7 +1467,7 @@ export const handleAgentMessage = async (
               deps.crm.lookupCustomerByEmail(email),
             );
             tools.push(call.record);
-            logToolCall(logger, callSessionId, call.record);
+            logToolCall(logger, call.record);
             const result = Array.isArray(call.result) ? call.result : [];
             const candidateId =
               result.length === 1 && result[0] ? result[0].id : null;
@@ -1154,7 +1533,7 @@ export const handleAgentMessage = async (
               deps.crm.verifyAccount(customerId, zipCode),
             );
             tools.push(call.record);
-            logToolCall(logger, callSessionId, call.record);
+            logToolCall(logger, call.record);
             const ok = Boolean(call.result);
             const nextZipAttempts = ok ? 0 : (summary.zipAttempts ?? 0) + 1;
             summary = {
@@ -1249,7 +1628,7 @@ export const handleAgentMessage = async (
               deps.crm.getNextAppointment(customerId),
             );
             tools.push(call.record);
-            logToolCall(logger, callSessionId, call.record);
+            logToolCall(logger, call.record);
             await upsertAppointmentSnapshot(
               deps,
               phoneE164,
@@ -1297,7 +1676,7 @@ export const handleAgentMessage = async (
               () => deps.crm.listUpcomingAppointments(customerId, limit),
             );
             tools.push(call.record);
-            logToolCall(logger, callSessionId, call.record);
+            logToolCall(logger, call.record);
             const result = Array.isArray(call.result) ? call.result : [];
             for (const appointment of result) {
               await upsertAppointmentSnapshot(
@@ -1346,7 +1725,7 @@ export const handleAgentMessage = async (
               deps.crm.getAppointmentById(appointmentId),
             );
             tools.push(call.record);
-            logToolCall(logger, callSessionId, call.record);
+            logToolCall(logger, call.record);
             await upsertAppointmentSnapshot(
               deps,
               phoneE164,
@@ -1392,7 +1771,7 @@ export const handleAgentMessage = async (
               deps.crm.getOpenInvoices(customerId),
             );
             tools.push(call.record);
-            logToolCall(logger, callSessionId, call.record);
+            logToolCall(logger, call.record);
             const invoices = Array.isArray(call.result) ? call.result : [];
             const balanceCents = invoices.reduce(
               (sum, invoice) => sum + (invoice.balanceCents ?? 0),
@@ -1427,6 +1806,13 @@ export const handleAgentMessage = async (
               };
               break;
             }
+            const appointmentId = getStringArg(toolArgs, "appointmentId");
+            if (appointmentId) {
+              selectedAppointmentId = appointmentId;
+              if (workflow?.kind === "reschedule") {
+                workflow = { ...workflow, appointmentId };
+              }
+            }
             const customerId =
               getStringArg(toolArgs, "customerId") ?? resolvedCustomer?.id;
             if (!customerId) {
@@ -1454,7 +1840,7 @@ export const handleAgentMessage = async (
               deps.crm.getAvailableSlots(customerId, inputArgs),
             );
             tools.push(call.record);
-            logToolCall(logger, callSessionId, call.record);
+            logToolCall(logger, call.record);
             const slots = Array.isArray(call.result) ? call.result : [];
             toolResult =
               slots.length > 0
@@ -1500,7 +1886,7 @@ export const handleAgentMessage = async (
               deps.crm.rescheduleAppointment(appointmentId, slotId),
             );
             tools.push(call.record);
-            logToolCall(logger, callSessionId, call.record);
+            logToolCall(logger, call.record);
             if (call.result && (call.result as { ok?: boolean }).ok) {
               const updated = (
                 call.result as {
@@ -1531,11 +1917,35 @@ export const handleAgentMessage = async (
                     },
                   });
                 } else {
-                  await upsertAppointmentSnapshot(
-                    deps,
-                    phoneE164,
-                    appointmentSnapshot,
-                  );
+                  const customerId =
+                    appointmentSnapshot?.customerId ??
+                    summary.verifiedCustomerId ??
+                    summary.pendingCustomerId ??
+                    resolvedCustomer?.id ??
+                    "unknown";
+                  const addressSummary =
+                    appointmentSnapshot?.addressSummary ??
+                    summary.pendingCustomerProfile?.addressSummary ??
+                    resolvedCustomer?.addressSummary ??
+                    "Unknown";
+                  await rescheduleAppointmentUseCase(deps.appointments, {
+                    appointment: {
+                      id: appointmentId,
+                      customerId,
+                      phoneE164,
+                      addressSummary,
+                      date: appointmentSnapshot?.date ?? updated.date,
+                      timeWindow:
+                        appointmentSnapshot?.timeWindow ?? updated.timeWindow,
+                      status: "scheduled",
+                      createdAt: new Date().toISOString(),
+                      updatedAt: new Date().toISOString(),
+                    },
+                    slot: {
+                      date: updated.date,
+                      timeWindow: updated.timeWindow,
+                    },
+                  });
                 }
                 toolResult = {
                   toolName: "crm.rescheduleAppointment",
@@ -1544,6 +1954,7 @@ export const handleAgentMessage = async (
                     timeWindow: updated.timeWindow,
                   },
                 };
+                workflow = null;
                 break;
               }
             }
@@ -1554,6 +1965,74 @@ export const handleAgentMessage = async (
                 details:
                   "Unable to reschedule with the provided appointment and slot.",
               },
+            };
+            break;
+          }
+          case "crm.cancelAppointment": {
+            if (summary.identityStatus !== "verified") {
+              toolResult = {
+                toolName: "agent.message",
+                result: {
+                  kind: "request_zip",
+                  details:
+                    "Please confirm your ZIP code to verify your account.",
+                },
+              };
+              break;
+            }
+            const appointmentId = getStringArg(toolArgs, "appointmentId");
+            if (!appointmentId) {
+              toolResult = {
+                toolName: "agent.message",
+                result: {
+                  kind: "missing_arguments",
+                  details: "Appointment ID is required to cancel.",
+                },
+              };
+              break;
+            }
+            const call = await recordToolCall("crm.cancelAppointment", () =>
+              deps.crm.cancelAppointment(appointmentId),
+            );
+            tools.push(call.record);
+            logToolCall(logger, call.record);
+            if (call.result && (call.result as { ok?: boolean }).ok) {
+              const appointmentSnapshot = (
+                call.result as {
+                  appointment?: unknown;
+                }
+              )?.appointment
+                ? ((call.result as { appointment: unknown }).appointment as {
+                    id: string;
+                    customerId: string;
+                    addressSummary: string;
+                    date: string;
+                    timeWindow: string;
+                  })
+                : null;
+              const existing = await deps.appointments.get(appointmentId);
+              if (existing) {
+                await cancelAppointmentUseCase(deps.appointments, {
+                  appointment: existing,
+                });
+              } else {
+                await upsertAppointmentSnapshot(
+                  deps,
+                  phoneE164,
+                  appointmentSnapshot,
+                  "cancelled",
+                );
+              }
+              toolResult = {
+                toolName: "crm.cancelAppointment",
+                result: { ok: true },
+              };
+              workflow = null;
+              break;
+            }
+            toolResult = {
+              toolName: "crm.cancelAppointment",
+              result: { ok: false },
             };
             break;
           }
@@ -1592,7 +2071,7 @@ export const handleAgentMessage = async (
               }),
             );
             tools.push(call.record);
-            logToolCall(logger, callSessionId, call.record);
+            logToolCall(logger, call.record);
             toolResult = {
               toolName: "crm.createAppointment",
               result: {
@@ -1619,7 +2098,7 @@ export const handleAgentMessage = async (
               deps.crm.getServicePolicy(topic),
             );
             tools.push(call.record);
-            logToolCall(logger, callSessionId, call.record);
+            logToolCall(logger, call.record);
             toolResult = {
               toolName: "crm.getServicePolicy",
               result: { text: String(call.result ?? "") },
@@ -1702,6 +2181,9 @@ export const handleAgentMessage = async (
     let lastAppointmentId = summary.lastAppointmentId ?? null;
     let lastAppointmentOptions = summary.lastAppointmentOptions ?? null;
     let lastAvailableSlots = summary.lastAvailableSlots ?? null;
+    if (selectedAppointmentId) {
+      lastAppointmentId = selectedAppointmentId;
+    }
     if (toolResult.toolName === "crm.getNextAppointment") {
       const appointment = toolResult.result as {
         id?: string | null;
@@ -1765,7 +2247,9 @@ export const handleAgentMessage = async (
       if (list?.length) {
         lastAppointmentOptions = list
           .filter(
-            (appointment): appointment is {
+            (
+              appointment,
+            ): appointment is {
               id: string;
               date: string;
               timeWindow: string;
@@ -1807,6 +2291,7 @@ export const handleAgentMessage = async (
       verifiedCustomerId: summary.verifiedCustomerId ?? null,
       pendingCustomerId: summary.pendingCustomerId ?? null,
       pendingCustomerProfile: summary.pendingCustomerProfile ?? null,
+      workflow,
       zipAttempts: summary.zipAttempts ?? 0,
       lastToolName: toolResult.toolName,
       lastToolResult: stringifyToolResult(redactedToolResult),
@@ -1821,6 +2306,57 @@ export const handleAgentMessage = async (
 
     return { toolResult, toolCustomer, ticketId };
   };
+
+  if (!toolCall && workflowReply) {
+    const replyText = workflowReply;
+    statusOpen = false;
+    summary = {
+      ...summary,
+      callSummary: trimSummaryText(replyText),
+    };
+    await deps.calls.updateSessionSummary({
+      callSessionId,
+      summary: buildSummary(summary),
+    });
+    await deps.calls.addTurn({
+      id: crypto.randomUUID(),
+      callSessionId,
+      ts: new Date().toISOString(),
+      speaker: "agent",
+      text: replyText,
+      meta: {
+        intent: "final",
+        tools,
+        modelCalls,
+        customerId: resolvedCustomer?.id ?? customer.id,
+        contextUsed: Boolean(context),
+        contextTurns,
+        decisionSnapshot,
+        toolCallSource,
+        replyTextLength: replyText.length,
+        replyTextWasEmpty: !replyText.trim(),
+      },
+    });
+
+    logger.info(
+      {
+        callSessionId,
+        intent: "final",
+        toolCallSource,
+        toolCount: tools.length,
+        modelCallCount: modelCalls.length,
+        replyTextLength: replyText.length,
+        replyPreview: replyText.slice(0, 160),
+      },
+      "agent.message.complete",
+    );
+
+    return {
+      callSessionId,
+      replyText,
+      actions,
+    };
+  }
 
   if (!toolCall && modelOutput?.type === "final") {
     let replyText =
@@ -1879,6 +2415,7 @@ export const handleAgentMessage = async (
       "agent.message.complete",
     );
 
+    statusOpen = false;
     return {
       callSessionId,
       replyText,
@@ -1890,26 +2427,67 @@ export const handleAgentMessage = async (
   let intent = toolCall?.toolName ?? "final";
   let ticketId: string | undefined;
   let toolCustomer = customer;
+  let selectedAppointmentId: string | null = summary.lastAppointmentId ?? null;
   const maxToolPasses = 10;
   let iterations = 0;
 
   if (toolCall && toolCall.type === "tool_call" && options?.onStatus) {
+    const emitStatus = options.onStatus;
+    const toolName = toolCall.toolName;
     const source = toolCallSource ?? "model";
-    const status: AgentStatusUpdate = {
-      text: statusMessageForTool(toolCall.toolName),
-      toolName: toolCall.toolName,
-      source,
-    };
-    logger.debug(
-      {
-        callSessionId,
-        toolName: status.toolName,
-        source: status.source,
-        statusText: status.text,
-      },
-      "agent.status.emit",
-    );
-    options.onStatus(status);
+    const hint = statusHintForTool(toolName);
+    void recordModelCall(model, "status", () =>
+      model.status({
+        text: input.text,
+        contextHint: hint,
+      }),
+    )
+      .then((statusCall) => {
+        modelCalls.push(statusCall.record);
+        logModelCall(logger, statusCall.record);
+        const text =
+          statusCall.record.success && typeof statusCall.result === "string"
+            ? statusCall.result.trim()
+            : "";
+        if (!statusOpen) {
+          return;
+        }
+        const status: AgentStatusUpdate = {
+          text: text || statusMessageForTool(toolName),
+          toolName,
+          source,
+        };
+        logger.debug(
+          {
+            callSessionId,
+            toolName: status.toolName,
+            source: status.source,
+            statusText: status.text,
+          },
+          "agent.status.emit",
+        );
+        emitStatus(status);
+      })
+      .catch(() => {
+        if (!statusOpen) {
+          return;
+        }
+        const status: AgentStatusUpdate = {
+          text: statusMessageForTool(toolName),
+          toolName,
+          source,
+        };
+        logger.debug(
+          {
+            callSessionId,
+            toolName: status.toolName,
+            source: status.source,
+            statusText: status.text,
+          },
+          "agent.status.emit",
+        );
+        emitStatus(status);
+      });
   }
 
   while (toolCall && iterations < maxToolPasses) {
@@ -1950,6 +2528,7 @@ export const handleAgentMessage = async (
   if (!replyText.trim()) {
     replyText = agentConfig.scopeMessage;
   }
+  statusOpen = false;
   summary = {
     ...summary,
     callSummary: trimSummaryText(replyText),

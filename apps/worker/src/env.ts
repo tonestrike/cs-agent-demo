@@ -22,6 +22,7 @@ export const envSchema = z.object({
   AGENT_PERSONA_SUMMARY: z.string().optional(),
   AGENT_TOOL_GUIDANCE: z.string().optional(),
   AGENT_MODEL_ID: z.string().optional(),
+  BUILD_ID: z.string().optional(),
   AI: z.custom<Ai>().optional(),
   PestCallAgent: z.custom<DurableObjectNamespace>().optional(),
 });

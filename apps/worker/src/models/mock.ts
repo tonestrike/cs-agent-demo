@@ -194,7 +194,15 @@ export const createMockModelAdapter = (
         lowered.includes("schedule") ||
         lowered.includes("reschedule")
       ) {
-        return { intent: "appointments" };
+        if (lowered.includes("cancel")) {
+          return { intent: "cancel" };
+        }
+        return lowered.includes("reschedule")
+          ? { intent: "reschedule" }
+          : { intent: "appointments" };
+      }
+      if (lowered.includes("pay")) {
+        return { intent: "payment" };
       }
       if (
         lowered.includes("bill") ||
@@ -208,6 +216,23 @@ export const createMockModelAdapter = (
         return { intent: "policy", topic: input.text };
       }
       return { intent: "general" };
+    },
+    async selectOption(input) {
+      const trimmed = input.text.trim();
+      const direct = input.options.find((option) => option.id === trimmed);
+      if (direct) {
+        return {
+          selectedId: direct.id,
+          index: input.options.indexOf(direct) + 1,
+        };
+      }
+      if (input.options.length === 1) {
+        return { selectedId: input.options[0]?.id ?? null, index: 1 };
+      }
+      return { selectedId: null, index: null };
+    },
+    async status() {
+      return "Give me a moment to check that for you.";
     },
   };
 };
