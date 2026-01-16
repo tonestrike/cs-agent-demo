@@ -1,5 +1,6 @@
 "use client";
 
+import type { CustomerCacheListOutput } from "@pestcall/core";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -41,7 +42,7 @@ export default function CustomerPage() {
     };
   }, []);
 
-  const customersQuery = useQuery({
+  const customersQuery = useQuery<CustomerCacheListOutput>({
     queryKey: ["customer-portal", "customers"],
     queryFn: () => rpcClient.customers.list({ limit: 50 }),
   });
