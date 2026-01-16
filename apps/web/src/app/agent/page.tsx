@@ -45,7 +45,7 @@ export default function AgentDashboardPage() {
   const [appointmentsCursor, setAppointmentsCursor] = useState<string | null>(
     null,
   );
-  const [appointmentsRefreshKey, setAppointmentsRefreshKey] = useState(0);
+  const [appointmentsRefreshKey, setAppointmentsRefreshKey] = useState(1);
   const callsQuery = useQuery({
     queryKey: ["calls", callsCursor],
     queryFn: () =>

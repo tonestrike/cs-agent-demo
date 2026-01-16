@@ -9,7 +9,7 @@
     "lint": "biome lint .",
     "lint:fix": "biome lint . --write",
     "format": "biome format . --write",
-    "format:check": "biome format . --check",
+    "format:check": "biome check .",
     "fix": "biome check . --write",
     "deploy:worker": "bun scripts/deploy-worker.ts",
     "smoke:agent": "bun scripts/smoke-agent.ts",

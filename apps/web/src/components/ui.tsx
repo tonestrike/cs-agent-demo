@@ -29,16 +29,19 @@ export const Badge = ({
 
 export const Button = ({
   className,
+  style,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement>) => (
-  <button
-    className={clsx(
-      "relative inline-flex items-center justify-center rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-sand shadow-soft transition duration-200 hover:-translate-y-0.5 hover:bg-slate hover:shadow-[0_18px_40px_rgba(12,27,31,0.28)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 disabled:cursor-not-allowed disabled:bg-ink/60",
-      typeof className === "string" && className.includes("bg-white")
-        ? "!text-ink"
-        : null,
-      className,
-    )}
-    {...props}
-  />
-);
+}: ButtonHTMLAttributes<HTMLButtonElement>) => {
+  const needsInkText =
+    typeof className === "string" && className.includes("bg-white");
+  return (
+    <button
+      className={clsx(
+        "relative inline-flex items-center justify-center rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-sand shadow-soft transition duration-200 hover:-translate-y-0.5 hover:bg-slate hover:shadow-[0_18px_40px_rgba(12,27,31,0.28)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/60 disabled:cursor-not-allowed disabled:bg-ink/60",
+        className,
+      )}
+      style={needsInkText ? { ...style, color: "rgb(12, 27, 31)" } : style}
+      {...props}
+    />
+  );
+};

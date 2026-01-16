@@ -233,7 +233,29 @@ describe("agent RPC", () => {
       });
 
       expect(response.callSessionId.length).toBeGreaterThan(0);
-      expect(response.replyText).toContain("Your next appointment is");
+      expect(response.replyText.toLowerCase()).toContain("zip");
+
+      const verified = await callRpc<{
+        callSessionId: string;
+        replyText: string;
+      }>(platform, "agent/message", {
+        callSessionId: response.callSessionId,
+        phoneNumber: "+14155552671",
+        text: "94107",
+      });
+
+      expect(verified.replyText.length).toBeGreaterThan(0);
+
+      const followUp = await callRpc<{
+        callSessionId: string;
+        replyText: string;
+      }>(platform, "agent/message", {
+        callSessionId: response.callSessionId,
+        phoneNumber: "+14155552671",
+        text: "When is my next appointment?",
+      });
+
+      expect(followUp.replyText).toContain("Your next appointment is");
     } finally {
       await platform.dispose();
     }

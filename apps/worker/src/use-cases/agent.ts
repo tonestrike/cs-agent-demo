@@ -551,10 +551,14 @@ export const handleAgentMessage = async (
         break;
       }
       case "crm.verifyAccount": {
-        const customerId =
+        const rawCustomerId =
           getStringArg(args, "customerId") ??
           summary.pendingCustomerId ??
           resolvedCustomer?.id;
+        const customerId =
+          rawCustomerId && rawCustomerId !== "unknown"
+            ? rawCustomerId
+            : (summary.pendingCustomerId ?? resolvedCustomer?.id);
         const zipCode = getStringArg(args, "zipCode");
         if (!customerId || !zipCode) {
           toolResult = {

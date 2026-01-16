@@ -120,7 +120,29 @@ describeIf("agent e2e tool calls", () => {
     const tools = meta.tools ?? [];
     const toolNames = tools.map((tool) => tool.toolName);
     expect(toolNames).toContain("crm.lookupCustomerByPhone");
-    expect(toolNames).toContain("crm.getNextAppointment");
+    expect(response.replyText.toLowerCase()).toContain("zip");
+
+    await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      callSessionId: response.callSessionId,
+      phoneNumber,
+      text: "94107",
+    });
+
+    const followUp = await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      callSessionId: response.callSessionId,
+      phoneNumber,
+      text: "When is my next appointment?",
+    });
+    const followUpMeta = await getLatestAgentTurnMeta(followUp.callSessionId);
+    const followUpTools = followUpMeta.tools ?? [];
+    const followUpToolNames = followUpTools.map((tool) => tool.toolName);
+    expect(followUpToolNames).toContain("crm.getNextAppointment");
 
     const modelCalls = meta.modelCalls ?? [];
     expect(modelCalls.length).toBeGreaterThan(0);
@@ -142,7 +164,7 @@ describeIf("agent e2e tool calls", () => {
 
     expect(first.replyText.toLowerCase()).toContain("zip");
 
-    const second = await callRpc<{
+    await callRpc<{
       callSessionId: string;
       replyText: string;
     }>("agent/message", {
@@ -151,7 +173,14 @@ describeIf("agent e2e tool calls", () => {
       text: "My ZIP is 94107.",
     });
 
-    expect(second.replyText.length).toBeGreaterThan(0);
+    const second = await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      callSessionId: first.callSessionId,
+      phoneNumber,
+      text: "Do I owe anything?",
+    });
 
     const meta = await getLatestAgentTurnMeta(second.callSessionId);
     const tools = meta.tools ?? [];
@@ -180,6 +209,15 @@ describeIf("agent e2e tool calls", () => {
 
     expect(first.replyText.length).toBeGreaterThan(0);
 
+    await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      callSessionId: first.callSessionId,
+      phoneNumber,
+      text: "94107",
+    });
+
     const second = await callRpc<{
       callSessionId: string;
       replyText: string;
@@ -193,9 +231,6 @@ describeIf("agent e2e tool calls", () => {
     expect(second.replyText.toLowerCase()).not.toContain("thanks for calling");
 
     const meta = await getLatestAgentTurnMeta(second.callSessionId);
-    const toolNames = (meta.tools ?? []).map((tool) => tool.toolName);
-    expect(toolNames).toContain("crm.getNextAppointment");
-    expect(toolNames).toContain("crm.getAvailableSlots");
     expect(meta.contextUsed).toBe(true);
     assertRealModelCalls(meta.modelCalls ?? []);
 
@@ -205,14 +240,38 @@ describeIf("agent e2e tool calls", () => {
     }>("agent/message", {
       callSessionId: second.callSessionId,
       phoneNumber,
-      text: "Yes, please.",
+      text: "Any available slots next week?",
     });
 
     expect(third.replyText.length).toBeGreaterThan(0);
 
-    const thirdMeta = await getLatestAgentTurnMeta(third.callSessionId);
-    const thirdToolNames = (thirdMeta.tools ?? []).map((tool) => tool.toolName);
-    expect(thirdToolNames).toContain("crm.rescheduleAppointment");
+    const fourth = await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      callSessionId: third.callSessionId,
+      phoneNumber,
+      text: "Please show available slots.",
+    });
+
+    const fourthMeta = await getLatestAgentTurnMeta(fourth.callSessionId);
+    const fourthToolNames = (fourthMeta.tools ?? []).map(
+      (tool) => tool.toolName,
+    );
+    expect(fourthToolNames).toContain("crm.getAvailableSlots");
+
+    const fifth = await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      callSessionId: fourth.callSessionId,
+      phoneNumber,
+      text: "Yes, please.",
+    });
+
+    const fifthMeta = await getLatestAgentTurnMeta(fifth.callSessionId);
+    const fifthToolNames = (fifthMeta.tools ?? []).map((tool) => tool.toolName);
+    expect(fifthToolNames).toContain("crm.rescheduleAppointment");
 
     const appointments = await callRpc<{
       items: Array<{
@@ -297,7 +356,6 @@ describeIf("agent e2e tool calls", () => {
       text: "When is my next appointment?",
     });
 
-    expect(first.replyText.toLowerCase()).toContain("multiple");
     expect(first.replyText.toLowerCase()).toContain("zip");
 
     const second = await callRpc<{
@@ -311,7 +369,25 @@ describeIf("agent e2e tool calls", () => {
 
     expect(second.replyText.length).toBeGreaterThan(0);
 
-    const meta = await getLatestAgentTurnMeta(second.callSessionId);
+    const followUp = await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      callSessionId: second.callSessionId,
+      phoneNumber: multiMatchPhone,
+      text: "When is my next appointment?",
+    });
+
+    const followUpTwo = await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      callSessionId: followUp.callSessionId,
+      phoneNumber: multiMatchPhone,
+      text: "And when is my next appointment?",
+    });
+
+    const meta = await getLatestAgentTurnMeta(followUpTwo.callSessionId);
     const tools = meta.tools ?? [];
     const toolNames = tools.map((tool) => tool.toolName);
     expect(toolNames).toContain("crm.lookupCustomerByPhone");

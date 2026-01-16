@@ -60,6 +60,7 @@ export default function CustomerDetailPage({
       rpcClient.appointments.list({
         limit: 50,
         customerId: params.id,
+        refresh: true,
       }),
   });
 

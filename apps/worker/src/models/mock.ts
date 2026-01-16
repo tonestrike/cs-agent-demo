@@ -21,13 +21,18 @@ const messagesToText = (
   return messages.map((msg) => msg.content).join(" ");
 };
 
-const detectTool = (text: string) => {
+const detectTool = (text: string, latestInput: string) => {
   const lowered = normalizeConversationText(text).toLowerCase();
+  const latestLowered = normalizeConversationText(latestInput).toLowerCase();
+  const hasZip = /\b\d{5}\b/.test(latestLowered);
   const wantsConfirm =
-    lowered.includes("yes") ||
-    lowered.includes("sure") ||
-    lowered.includes("ok") ||
-    lowered.includes("okay");
+    latestLowered.includes("yes") ||
+    latestLowered.includes("sure") ||
+    latestLowered.includes("ok") ||
+    latestLowered.includes("okay");
+  if (hasZip) {
+    return "crm.verifyAccount" as const;
+  }
   if (
     wantsConfirm &&
     (lowered.includes("reschedule") ||
@@ -36,11 +41,7 @@ const detectTool = (text: string) => {
   ) {
     return "crm.rescheduleAppointment" as const;
   }
-  if (
-    lowered.includes("agent") ||
-    lowered.includes("human") ||
-    lowered.includes("representative")
-  ) {
+  if (lowered.includes("human") || lowered.includes("representative")) {
     return "agent.escalate" as const;
   }
   if (
@@ -61,6 +62,11 @@ const detectTool = (text: string) => {
   return "agent.fallback" as const;
 };
 
+const extractZip = (text: string) => {
+  const match = text.match(/\b(\d{5})\b/);
+  return match?.[1];
+};
+
 export const createMockModelAdapter = (
   config?: AgentPromptConfig,
 ): ModelAdapter => {
@@ -75,7 +81,8 @@ export const createMockModelAdapter = (
       ]
         .filter(Boolean)
         .join(" ");
-      const toolName = detectTool(combinedText);
+      const toolName = detectTool(combinedText, input.text);
+      const zipCode = extractZip(input.text);
       if (toolName === "agent.fallback") {
         return {
           type: "final",
@@ -85,11 +92,23 @@ export const createMockModelAdapter = (
       return {
         type: "tool_call",
         toolName,
-        arguments: { customerId: input.customer.id },
+        arguments:
+          toolName === "crm.verifyAccount"
+            ? {
+                customerId: input.customer.id,
+                ...(zipCode ? { zipCode } : {}),
+              }
+            : { customerId: input.customer.id },
       };
     },
     async respond(input: AgentResponseInput) {
       switch (input.toolName) {
+        case "crm.verifyAccount": {
+          if (input.result?.ok === false) {
+            return "That ZIP code does not match our records. Do you have another ZIP code on file?";
+          }
+          return "Thanks, you're verified. What would you like to do next?";
+        }
         case "crm.getNextAppointment": {
           if (!input.result) {
             return "I couldn't find a scheduled appointment.";
