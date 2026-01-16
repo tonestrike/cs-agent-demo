@@ -1,77 +1,8 @@
-import { type ServiceAppointment, normalizePhoneE164 } from "@pestcall/core";
+import { normalizePhoneE164 } from "@pestcall/core";
 import type { Dependencies } from "../context";
 import type { ModelAdapter, ToolResult } from "../models/types";
 import type { AgentMessageInput, AgentMessageOutput } from "../schemas/agent";
-import { getNextAppointment, rescheduleAppointment } from "./appointments";
 import { createTicketUseCase } from "./tickets";
-
-const zipRegex = /\b\d{5}\b/;
-
-const extractZip = (text: string) => text.match(zipRegex)?.[0] ?? null;
-
-const extractLastName = (displayName: string) => {
-  const parts = displayName.trim().split(/\s+/);
-  return parts.at(-1) ?? "";
-};
-
-const resolveCustomerMatch = (
-  matches: Array<{
-    id: string;
-    displayName: string;
-    phoneE164: string;
-    addressSummary: string;
-    zipCode?: string;
-  }>,
-  text: string,
-) => {
-  const zip = extractZip(text);
-  const lowered = text.toLowerCase();
-  const candidates = matches.filter((match) => {
-    const lastName = extractLastName(match.displayName).toLowerCase();
-    const hasLastName = lastName.length > 0 && lowered.includes(lastName);
-    const hasZip = match.zipCode ? zip === match.zipCode : false;
-    if (zip && match.zipCode) {
-      return hasLastName && hasZip;
-    }
-    return hasLastName;
-  });
-
-  if (candidates.length === 1) {
-    return candidates[0];
-  }
-
-  if (zip) {
-    const zipMatches = matches.filter((match) => match.zipCode === zip);
-    if (zipMatches.length === 1) {
-      return zipMatches[0];
-    }
-  }
-
-  return null;
-};
-
-const hasRescheduleRequest = (text: string) => {
-  const lowered = text.toLowerCase();
-  return lowered.includes("reschedule") || lowered.includes("change");
-};
-
-const hasPaymentRequest = (text: string) => {
-  const lowered = text.toLowerCase();
-  return lowered.includes("pay") || lowered.includes("payment");
-};
-
-const agentMessageKinds = {
-  requestCustomerInfo: "request_customer_info",
-  requestZip: "request_zip",
-  noAppointment: "no_appointment",
-  noSlots: "no_slots",
-  rescheduleConfirmed: "reschedule_confirmed",
-  ticketCreated: "ticket_created",
-} as const;
-
-const agentIntents = {
-  rescheduleOffer: "reschedule_offer",
-} as const;
 
 type ToolCall = {
   toolName: string;
@@ -162,6 +93,37 @@ const buildCustomerContext = (customer: {
   addressSummary: customer.addressSummary,
 });
 
+const formatMatches = (
+  matches: Array<{
+    id: string;
+    displayName: string;
+    addressSummary: string;
+    zipCode?: string;
+    email?: string;
+  }>,
+) => {
+  if (matches.length === 0) {
+    return "none";
+  }
+  return matches
+    .map((match) => {
+      const zip = match.zipCode ? ` ZIP ${match.zipCode}` : "";
+      const email = match.email ? ` ${match.email}` : "";
+      return `${match.id} ${match.displayName}${zip} ${match.addressSummary}${email}`.trim();
+    })
+    .join(" | ");
+};
+
+const getStringArg = (args: Record<string, unknown>, key: string) => {
+  const value = args[key];
+  return typeof value === "string" ? value : undefined;
+};
+
+const getNumberArg = (args: Record<string, unknown>, key: string) => {
+  const value = args[key];
+  return typeof value === "number" ? value : undefined;
+};
+
 const generateReply = async (
   model: ModelAdapter,
   input: AgentMessageInput,
@@ -212,11 +174,6 @@ export const handleAgentMessage = async (
   let callSessionId = input.callSessionId;
   let recentContext = "";
   let contextTurns = 0;
-  let lastSuggestedSlot: {
-    id?: string;
-    date: string;
-    timeWindow: string;
-  } | null = null;
   if (!callSessionId) {
     callSessionId = crypto.randomUUID();
     await deps.calls.createSession({
@@ -227,22 +184,11 @@ export const handleAgentMessage = async (
       transport: "web",
     });
   } else {
-    const recentTurns = await deps.calls.getTurns(callSessionId);
+    const recentTurns = await deps.calls.getRecentTurns({ callSessionId });
     recentContext = recentTurns
       .map((turn) => `${turn.speaker}: ${turn.text}`)
       .join("\n");
     contextTurns = recentTurns.length;
-    for (const turn of [...recentTurns].reverse()) {
-      if (turn.speaker === "agent") {
-        const meta = turn.meta as {
-          suggestedSlot?: { id?: string; date: string; timeWindow: string };
-        };
-        if (!lastSuggestedSlot && meta.suggestedSlot) {
-          lastSuggestedSlot = meta.suggestedSlot;
-        }
-        break;
-      }
-    }
   }
 
   await deps.calls.addTurn({
@@ -261,150 +207,28 @@ export const handleAgentMessage = async (
 
   const matches = Array.isArray(lookup.result) ? lookup.result : [];
   const actions: string[] = [];
+  const resolvedCustomer = matches.length === 1 ? matches[0] : null;
+  const customer = resolvedCustomer ?? {
+    id: "unknown",
+    displayName: "Unknown caller",
+    phoneE164,
+    addressSummary: "Unknown",
+  };
 
-  if (matches.length === 0) {
-    const ticket = await createTicketUseCase(deps.tickets, {
-      subject: "Unknown caller",
-      description: `No CRM match for ${phoneE164}. Caller said: ${input.text}`,
-      category: "unknown",
-      source: "agent",
-      phoneE164,
-    });
-
-    actions.push("created_ticket");
-
-    const replyText = await generateReply(
-      model,
-      input,
-      {
-        id: "unknown",
-        displayName: "Unknown caller",
-        phoneE164,
-        addressSummary: "Unknown",
-      },
-      {
-        toolName: "agent.message",
-        result: {
-          kind: agentMessageKinds.requestCustomerInfo,
-          details: `No CRM match for ${phoneE164}. Ticket ${ticket.id} created.`,
-        },
-      },
-      agentConfig.scopeMessage,
-      recentContext,
-      modelCalls,
-    );
-
-    await deps.calls.addTurn({
-      id: crypto.randomUUID(),
-      callSessionId,
-      ts: new Date().toISOString(),
-      speaker: "agent",
-      text: replyText,
-      meta: {
-        intent: "lookup",
-        tools,
-        modelCalls,
-        ticketId: ticket.id,
-        contextUsed: Boolean(recentContext),
-        contextTurns,
-      },
-    });
-
-    return {
-      callSessionId,
-      replyText,
-      actions,
-      ticketId: ticket.id,
-    };
-  }
-
-  const resolvedCustomer =
-    matches.length > 1 ? resolveCustomerMatch(matches, input.text) : null;
-
-  if (matches.length > 1 && !resolvedCustomer) {
-    const replyText =
-      "I found multiple accounts. Please confirm your last name and ZIP code.";
-
-    await deps.calls.addTurn({
-      id: crypto.randomUUID(),
-      callSessionId,
-      ts: new Date().toISOString(),
-      speaker: "agent",
-      text: replyText,
-      meta: {
-        intent: "lookup",
-        tools,
-        modelCalls,
-        contextUsed: Boolean(recentContext),
-        contextTurns,
-      },
-    });
-
-    return {
-      callSessionId,
-      replyText,
-      actions,
-    };
-  }
-
-  const customer = resolvedCustomer ?? matches[0];
-  if (!customer) {
-    const replyText =
-      "I could not identify your account. Can you confirm your phone number?";
-
-    await deps.calls.addTurn({
-      id: crypto.randomUUID(),
-      callSessionId,
-      ts: new Date().toISOString(),
-      speaker: "agent",
-      text: replyText,
-      meta: {
-        intent: "lookup",
-        tools,
-        modelCalls,
-        contextUsed: Boolean(recentContext),
-        contextTurns,
-      },
-    });
-
-    return {
-      callSessionId,
-      replyText,
-      actions,
-    };
-  }
-
-  if (!input.text.trim()) {
-    const replyText = agentConfig.greeting;
-    await deps.calls.addTurn({
-      id: crypto.randomUUID(),
-      callSessionId,
-      ts: new Date().toISOString(),
-      speaker: "agent",
-      text: replyText,
-      meta: {
-        intent: "greeting",
-        tools,
-        modelCalls,
-        customerId: customer.id,
-        contextUsed: Boolean(recentContext),
-        contextTurns,
-      },
-    });
-
-    return {
-      callSessionId,
-      replyText,
-      actions,
-    };
-  }
+  const systemContext = [
+    "System context:",
+    `Phone lookup matches: ${formatMatches(matches)}`,
+  ];
+  const context = [systemContext.join("\n"), recentContext]
+    .filter(Boolean)
+    .join("\n");
 
   const modelDecision = await recordModelCall(model, "decide", () =>
     model.generate({
       text: input.text,
       customer: buildCustomerContext(customer),
-      context: recentContext,
-      hasContext: Boolean(recentContext),
+      context,
+      hasContext: Boolean(context),
     }),
   );
   modelCalls.push(modelDecision.record);
@@ -427,8 +251,8 @@ export const handleAgentMessage = async (
         intent: "final",
         tools,
         modelCalls,
-        customerId: customer.id,
-        contextUsed: Boolean(recentContext),
+        customerId: resolvedCustomer?.id ?? customer.id,
+        contextUsed: Boolean(context),
         contextTurns,
       },
     });
@@ -441,493 +265,402 @@ export const handleAgentMessage = async (
   }
 
   const intent = modelOutput.toolName;
+  const args = (modelOutput.arguments ?? {}) as Record<string, unknown>;
+  let toolResult: ToolResult;
+  let toolCustomer = customer;
+  let ticketId: string | undefined;
 
-  if (modelOutput.toolName === "crm.getNextAppointment") {
-    const appointmentCall = await recordToolCall(
-      "appointments.getNextAppointment",
-      () => getNextAppointment(deps.appointments, customer.id),
-    );
-    tools.push(appointmentCall.record);
-
-    const appointment = appointmentCall.result as ServiceAppointment | null;
-
-    if (!appointment) {
-      const ticket = await createTicketUseCase(deps.tickets, {
-        subject: "Appointment not found",
-        description: `No appointment found for ${customer.displayName}.`,
-        category: "appointment",
-        source: "agent",
-        phoneE164,
-      });
-
-      actions.push("created_ticket");
-
-      const replyText = await generateReply(
-        model,
-        input,
-        customer,
-        {
-          toolName: "agent.message",
-          result: {
-            kind: agentMessageKinds.noAppointment,
-            details: `No appointment found for ${customer.displayName}. Ticket ${ticket.id} created.`,
-          },
-        },
-        agentConfig.scopeMessage,
-        recentContext,
-        modelCalls,
+  switch (modelOutput.toolName) {
+    case "crm.lookupCustomerByPhone": {
+      const phone = getStringArg(args, "phoneE164") ?? phoneE164;
+      const call = await recordToolCall("crm.lookupCustomerByPhone", () =>
+        deps.crm.lookupCustomerByPhone(phone),
       );
-
-      await deps.calls.addTurn({
-        id: crypto.randomUUID(),
-        callSessionId,
-        ts: new Date().toISOString(),
-        speaker: "agent",
-        text: replyText,
-        meta: {
-          intent,
-          tools,
-          modelCalls,
-          ticketId: ticket.id,
-          customerId: customer.id,
-        },
-      });
-
-      return {
-        callSessionId,
-        replyText,
-        actions,
-        ticketId: ticket.id,
-      };
-    }
-
-    if (hasRescheduleRequest(input.text)) {
-      const slotsCall = await recordToolCall("crm.getAvailableSlots", () =>
-        deps.crm.getAvailableSlots(customer.id, {
-          fromDate: appointment.date,
-          toDate: appointment.date,
-        }),
-      );
-      tools.push(slotsCall.record);
-
-      const slots = Array.isArray(slotsCall.result) ? slotsCall.result : [];
-      const slot = slots[0];
-      if (slot) {
-        const replyText = await generateReply(
-          model,
-          input,
-          customer,
-          {
-            toolName: "crm.getAvailableSlots",
-            result: slot,
-          },
-          agentConfig.scopeMessage,
-          recentContext,
-          modelCalls,
-        );
-
-        await deps.calls.addTurn({
-          id: crypto.randomUUID(),
-          callSessionId,
-          ts: new Date().toISOString(),
-          speaker: "agent",
-          text: replyText,
-          meta: {
-            intent: agentIntents.rescheduleOffer,
-            tools,
-            modelCalls,
-            customerId: customer.id,
-            suggestedSlot: slot,
-            contextUsed: Boolean(recentContext),
-            contextTurns,
-          },
-        });
-
-        return {
-          callSessionId,
-          replyText,
-          actions,
-        };
+      tools.push(call.record);
+      const result = Array.isArray(call.result) ? call.result : [];
+      if (result.length === 1 && result[0]) {
+        toolCustomer = result[0];
       }
+      toolResult = {
+        toolName: "crm.lookupCustomerByPhone",
+        result,
+      };
+      break;
     }
-
-    const replyText = await generateReply(
-      model,
-      input,
-      customer,
-      {
+    case "crm.lookupCustomerByNameAndZip": {
+      const fullName = getStringArg(args, "fullName");
+      const zipCode = getStringArg(args, "zipCode");
+      if (!fullName || !zipCode) {
+        toolResult = {
+          toolName: "agent.message",
+          result: {
+            kind: "missing_arguments",
+            details:
+              "Full name and ZIP code are required to look up the account.",
+          },
+        };
+        break;
+      }
+      const call = await recordToolCall("crm.lookupCustomerByNameAndZip", () =>
+        deps.crm.lookupCustomerByNameAndZip(fullName, zipCode),
+      );
+      tools.push(call.record);
+      const result = Array.isArray(call.result) ? call.result : [];
+      if (result.length === 1 && result[0]) {
+        toolCustomer = result[0];
+      }
+      toolResult = {
+        toolName: "crm.lookupCustomerByNameAndZip",
+        result,
+      };
+      break;
+    }
+    case "crm.lookupCustomerByEmail": {
+      const email = getStringArg(args, "email");
+      if (!email) {
+        toolResult = {
+          toolName: "agent.message",
+          result: {
+            kind: "missing_arguments",
+            details: "An email address is required to look up the account.",
+          },
+        };
+        break;
+      }
+      const call = await recordToolCall("crm.lookupCustomerByEmail", () =>
+        deps.crm.lookupCustomerByEmail(email),
+      );
+      tools.push(call.record);
+      const result = Array.isArray(call.result) ? call.result : [];
+      if (result.length === 1 && result[0]) {
+        toolCustomer = result[0];
+      }
+      toolResult = {
+        toolName: "crm.lookupCustomerByEmail",
+        result,
+      };
+      break;
+    }
+    case "crm.verifyAccount": {
+      const customerId =
+        getStringArg(args, "customerId") ?? resolvedCustomer?.id;
+      const zipCode = getStringArg(args, "zipCode");
+      if (!customerId || !zipCode) {
+        toolResult = {
+          toolName: "agent.message",
+          result: {
+            kind: "missing_arguments",
+            details:
+              "Customer ID and ZIP code are required to verify the account.",
+          },
+        };
+        break;
+      }
+      const call = await recordToolCall("crm.verifyAccount", () =>
+        deps.crm.verifyAccount(customerId, zipCode),
+      );
+      tools.push(call.record);
+      toolResult = {
+        toolName: "crm.verifyAccount",
+        result: { ok: Boolean(call.result) },
+      };
+      break;
+    }
+    case "crm.getNextAppointment": {
+      const customerId =
+        getStringArg(args, "customerId") ?? resolvedCustomer?.id;
+      if (!customerId) {
+        toolResult = {
+          toolName: "agent.message",
+          result: {
+            kind: "missing_arguments",
+            details: "Customer ID is required to load appointments.",
+          },
+        };
+        break;
+      }
+      const call = await recordToolCall("crm.getNextAppointment", () =>
+        deps.crm.getNextAppointment(customerId),
+      );
+      tools.push(call.record);
+      toolResult = {
         toolName: "crm.getNextAppointment",
-        result: {
-          date: appointment.date,
-          timeWindow: appointment.timeWindow,
-          addressSummary: appointment.addressSummary,
-        },
-      },
-      agentConfig.scopeMessage,
-      recentContext,
-      modelCalls,
-    );
-
-    await deps.calls.addTurn({
-      id: crypto.randomUUID(),
-      callSessionId,
-      ts: new Date().toISOString(),
-      speaker: "agent",
-      text: replyText,
-      meta: {
-        intent,
-        tools,
-        modelCalls,
-        customerId: customer.id,
-        contextUsed: Boolean(recentContext),
-        contextTurns,
-      },
-    });
-
-    return {
-      callSessionId,
-      replyText,
-      actions,
-    };
-  }
-
-  if (modelOutput.toolName === "crm.rescheduleAppointment") {
-    const appointmentCall = await recordToolCall(
-      "appointments.getNextAppointment",
-      () => getNextAppointment(deps.appointments, customer.id),
-    );
-    tools.push(appointmentCall.record);
-
-    const appointment = appointmentCall.result as ServiceAppointment | null;
-    if (!appointment) {
-      const replyText = await generateReply(
-        model,
-        input,
-        customer,
-        {
+        result: call.result ?? null,
+      };
+      break;
+    }
+    case "crm.listUpcomingAppointments": {
+      const customerId =
+        getStringArg(args, "customerId") ?? resolvedCustomer?.id;
+      if (!customerId) {
+        toolResult = {
           toolName: "agent.message",
           result: {
-            kind: agentMessageKinds.noAppointment,
-            details: "No scheduled appointment was found for this customer.",
+            kind: "missing_arguments",
+            details: "Customer ID is required to list appointments.",
           },
-        },
-        agentConfig.scopeMessage,
-        recentContext,
-        modelCalls,
+        };
+        break;
+      }
+      const limit = getNumberArg(args, "limit");
+      const call = await recordToolCall("crm.listUpcomingAppointments", () =>
+        deps.crm.listUpcomingAppointments(customerId, limit),
       );
-
-      await deps.calls.addTurn({
-        id: crypto.randomUUID(),
-        callSessionId,
-        ts: new Date().toISOString(),
-        speaker: "agent",
-        text: replyText,
-        meta: {
-          intent: "crm.rescheduleAppointment",
-          tools,
-          modelCalls,
-          customerId: customer.id,
-          contextUsed: Boolean(recentContext),
-          contextTurns,
-        },
-      });
-
-      return {
-        callSessionId,
-        replyText,
-        actions,
+      tools.push(call.record);
+      toolResult = {
+        toolName: "crm.listUpcomingAppointments",
+        result: Array.isArray(call.result) ? call.result : [],
       };
+      break;
     }
-
-    let slot = lastSuggestedSlot;
-    if (!slot) {
-      const slotsCall = await recordToolCall("crm.getAvailableSlots", () =>
-        deps.crm.getAvailableSlots(customer.id, {
-          fromDate: appointment.date,
-          toDate: appointment.date,
-        }),
-      );
-      tools.push(slotsCall.record);
-
-      const slots = Array.isArray(slotsCall.result) ? slotsCall.result : [];
-      slot = slots[0]
-        ? {
-            id: slots[0].id,
-            date: slots[0].date,
-            timeWindow: slots[0].timeWindow,
-          }
-        : null;
-    }
-
-    if (!slot) {
-      const replyText = await generateReply(
-        model,
-        input,
-        customer,
-        {
+    case "crm.getAppointmentById": {
+      const appointmentId = getStringArg(args, "appointmentId");
+      if (!appointmentId) {
+        toolResult = {
           toolName: "agent.message",
           result: {
-            kind: agentMessageKinds.noSlots,
-            details: "No alternate time slots are available for rescheduling.",
+            kind: "missing_arguments",
+            details: "Appointment ID is required to load that appointment.",
           },
-        },
-        agentConfig.scopeMessage,
-        recentContext,
-        modelCalls,
+        };
+        break;
+      }
+      const call = await recordToolCall("crm.getAppointmentById", () =>
+        deps.crm.getAppointmentById(appointmentId),
       );
-
-      await deps.calls.addTurn({
-        id: crypto.randomUUID(),
-        callSessionId,
-        ts: new Date().toISOString(),
-        speaker: "agent",
-        text: replyText,
-        meta: {
-          intent: "crm.rescheduleAppointment",
-          tools,
-          modelCalls,
-          customerId: customer.id,
-          contextUsed: Boolean(recentContext),
-          contextTurns,
-        },
-      });
-
-      return {
-        callSessionId,
-        replyText,
-        actions,
+      tools.push(call.record);
+      toolResult = {
+        toolName: "crm.getAppointmentById",
+        result: call.result ?? null,
       };
+      break;
     }
-
-    const rescheduled = await recordToolCall("appointments.reschedule", () =>
-      rescheduleAppointment(deps.appointments, {
-        appointment,
-        slot: {
-          date: slot.date,
-          timeWindow: slot.timeWindow,
-        },
-      }),
-    );
-    tools.push(rescheduled.record);
-
-    const replyText = await generateReply(
-      model,
-      input,
-      customer,
-      {
-        toolName: "crm.rescheduleAppointment",
-        result: {
-          date: (rescheduled.result as { date: string }).date,
-          timeWindow: (rescheduled.result as { timeWindow: string }).timeWindow,
-        },
-      },
-      agentConfig.scopeMessage,
-      recentContext,
-      modelCalls,
-    );
-
-    await deps.calls.addTurn({
-      id: crypto.randomUUID(),
-      callSessionId,
-      ts: new Date().toISOString(),
-      speaker: "agent",
-      text: replyText,
-      meta: {
-        intent: "crm.rescheduleAppointment",
-        tools,
-        modelCalls,
-        customerId: customer.id,
-        contextUsed: Boolean(recentContext),
-        contextTurns,
-      },
-    });
-
-    return {
-      callSessionId,
-      replyText,
-      actions,
-    };
-  }
-
-  if (modelOutput.toolName === "crm.getOpenInvoices") {
-    const hasZip = zipRegex.test(input.text);
-    if (!hasZip) {
-      const replyText = await generateReply(
-        model,
-        input,
-        customer,
-        {
+    case "crm.getOpenInvoices": {
+      const customerId =
+        getStringArg(args, "customerId") ?? resolvedCustomer?.id;
+      if (!customerId) {
+        toolResult = {
           toolName: "agent.message",
           result: {
-            kind: agentMessageKinds.requestZip,
-            details: "Billing details require ZIP verification.",
+            kind: "missing_arguments",
+            details: "Customer ID is required to look up invoices.",
           },
-        },
-        agentConfig.scopeMessage,
-        recentContext,
-        modelCalls,
+        };
+        break;
+      }
+      const call = await recordToolCall("crm.getOpenInvoices", () =>
+        deps.crm.getOpenInvoices(customerId),
       );
-
-      await deps.calls.addTurn({
-        id: crypto.randomUUID(),
-        callSessionId,
-        ts: new Date().toISOString(),
-        speaker: "agent",
-        text: replyText,
-        meta: {
-          intent,
-          tools,
-          modelCalls,
-          customerId: customer.id,
-          contextUsed: Boolean(recentContext),
-          contextTurns,
-        },
-      });
-
-      return {
-        callSessionId,
-        replyText,
-        actions,
-      };
-    }
-
-    const invoicesCall = await recordToolCall("crm.getOpenInvoices", () =>
-      deps.crm.getOpenInvoices(customer.id),
-    );
-    tools.push(invoicesCall.record);
-
-    const invoices = Array.isArray(invoicesCall.result)
-      ? invoicesCall.result
-      : [];
-    const balanceCents = invoices.reduce(
-      (sum, invoice) => sum + (invoice.balanceCents ?? 0),
-      0,
-    );
-
-    const replyText = await generateReply(
-      model,
-      input,
-      customer,
-      {
+      tools.push(call.record);
+      const invoices = Array.isArray(call.result) ? call.result : [];
+      const balanceCents = invoices.reduce(
+        (sum, invoice) => sum + (invoice.balanceCents ?? 0),
+        0,
+      );
+      const balance =
+        invoices.find((invoice) => invoice.balance)?.balance ??
+        (balanceCents / 100).toFixed(2);
+      const currency = invoices.find((invoice) => invoice.currency)?.currency;
+      toolResult = {
         toolName: "crm.getOpenInvoices",
         result: {
           balanceCents,
+          balance,
+          currency,
           invoiceCount: invoices.length,
         },
-      },
-      agentConfig.scopeMessage,
-      recentContext,
-      modelCalls,
-    );
-
-    let ticketId: string | undefined;
-    if (hasPaymentRequest(input.text)) {
+      };
+      break;
+    }
+    case "crm.getAvailableSlots": {
+      const customerId =
+        getStringArg(args, "customerId") ?? resolvedCustomer?.id;
+      if (!customerId) {
+        toolResult = {
+          toolName: "agent.message",
+          result: {
+            kind: "missing_arguments",
+            details: "Customer ID is required to look up available slots.",
+          },
+        };
+        break;
+      }
+      const inputArgs = {
+        daysAhead: getNumberArg(args, "daysAhead"),
+        fromDate: getStringArg(args, "fromDate"),
+        toDate: getStringArg(args, "toDate"),
+        preference: getStringArg(args, "preference") as
+          | "morning"
+          | "afternoon"
+          | "any"
+          | undefined,
+      };
+      const call = await recordToolCall("crm.getAvailableSlots", () =>
+        deps.crm.getAvailableSlots(customerId, inputArgs),
+      );
+      tools.push(call.record);
+      const slots = Array.isArray(call.result) ? call.result : [];
+      const slot = slots[0];
+      toolResult = slot
+        ? {
+            toolName: "crm.getAvailableSlots",
+            result: slot,
+          }
+        : {
+            toolName: "agent.message",
+            result: {
+              kind: "no_slots",
+              details: "No available time slots were found.",
+            },
+          };
+      break;
+    }
+    case "crm.rescheduleAppointment": {
+      const appointmentId = getStringArg(args, "appointmentId");
+      const slotId = getStringArg(args, "slotId");
+      if (!appointmentId || !slotId) {
+        toolResult = {
+          toolName: "agent.message",
+          result: {
+            kind: "missing_arguments",
+            details: "Appointment ID and slot ID are required to reschedule.",
+          },
+        };
+        break;
+      }
+      const call = await recordToolCall("crm.rescheduleAppointment", () =>
+        deps.crm.rescheduleAppointment(appointmentId, slotId),
+      );
+      tools.push(call.record);
+      if (call.result && (call.result as { ok?: boolean }).ok) {
+        const updated = (
+          call.result as { appointment?: { date: string; timeWindow: string } }
+        ).appointment;
+        if (updated) {
+          toolResult = {
+            toolName: "crm.rescheduleAppointment",
+            result: {
+              date: updated.date,
+              timeWindow: updated.timeWindow,
+            },
+          };
+          break;
+        }
+      }
+      toolResult = {
+        toolName: "agent.message",
+        result: {
+          kind: "reschedule_failed",
+          details:
+            "Unable to reschedule with the provided appointment and slot.",
+        },
+      };
+      break;
+    }
+    case "crm.createAppointment": {
+      const customerId =
+        getStringArg(args, "customerId") ?? resolvedCustomer?.id;
+      const preferredWindow = getStringArg(args, "preferredWindow");
+      if (!customerId || !preferredWindow) {
+        toolResult = {
+          toolName: "agent.message",
+          result: {
+            kind: "missing_arguments",
+            details:
+              "Customer ID and preferred window are required to create an appointment.",
+          },
+        };
+        break;
+      }
+      const call = await recordToolCall("crm.createAppointment", () =>
+        deps.crm.createAppointment({
+          customerId,
+          preferredWindow,
+          notes: getStringArg(args, "notes"),
+          pestType: getStringArg(args, "pestType"),
+        }),
+      );
+      tools.push(call.record);
+      toolResult = {
+        toolName: "crm.createAppointment",
+        result: {
+          ok: Boolean((call.result as { ok?: boolean })?.ok),
+          appointmentId: (call.result as { appointmentId?: string })
+            ?.appointmentId,
+        },
+      };
+      break;
+    }
+    case "crm.getServicePolicy": {
+      const topic = getStringArg(args, "topic");
+      if (!topic) {
+        toolResult = {
+          toolName: "agent.message",
+          result: {
+            kind: "missing_arguments",
+            details: "A policy topic is required.",
+          },
+        };
+        break;
+      }
+      const call = await recordToolCall("crm.getServicePolicy", () =>
+        deps.crm.getServicePolicy(topic),
+      );
+      tools.push(call.record);
+      toolResult = {
+        toolName: "crm.getServicePolicy",
+        result: { text: String(call.result ?? "") },
+      };
+      break;
+    }
+    case "crm.escalate":
+    case "agent.escalate": {
+      const reason =
+        getStringArg(args, "reason") ?? "Customer requested escalation";
+      const summary =
+        getStringArg(args, "summary") ??
+        getStringArg(args, "message") ??
+        input.text;
       const ticket = await createTicketUseCase(deps.tickets, {
-        subject: "Payment requested",
-        description: `Customer requested payment link. Balance: ${balanceCents}`,
-        category: "billing",
+        subject: reason,
+        description: summary,
+        category: "general",
         source: "agent",
         phoneE164,
       });
       ticketId = ticket.id;
       actions.push("created_ticket");
+      toolResult =
+        modelOutput.toolName === "crm.escalate"
+          ? {
+              toolName: "crm.escalate",
+              result: { ok: true, ticketId },
+            }
+          : {
+              toolName: "agent.escalate",
+              result: { escalated: true },
+            };
+      break;
     }
-
-    await deps.calls.addTurn({
-      id: crypto.randomUUID(),
-      callSessionId,
-      ts: new Date().toISOString(),
-      speaker: "agent",
-      text: replyText,
-      meta: {
-        intent,
-        tools,
-        modelCalls,
-        ticketId,
-        customerId: customer.id,
-        contextUsed: Boolean(recentContext),
-        contextTurns,
-      },
-    });
-
-    return {
-      callSessionId,
-      replyText,
-      actions,
-      ticketId,
-    };
+    default: {
+      toolResult = {
+        toolName: "agent.message",
+        result: {
+          kind: "fallback",
+          details: agentConfig.scopeMessage,
+        },
+      };
+      break;
+    }
   }
-
-  if (modelOutput.toolName === "agent.escalate") {
-    const ticket = await createTicketUseCase(deps.tickets, {
-      subject: "Customer requested human",
-      description: `Customer asked for a human. Message: ${input.text}`,
-      category: "general",
-      source: "agent",
-      phoneE164,
-    });
-    actions.push("created_ticket");
-
-    const replyText = await generateReply(
-      model,
-      input,
-      customer,
-      {
-        toolName: "agent.escalate",
-        result: { escalated: true },
-      },
-      agentConfig.scopeMessage,
-      recentContext,
-      modelCalls,
-    );
-
-    await deps.calls.addTurn({
-      id: crypto.randomUUID(),
-      callSessionId,
-      ts: new Date().toISOString(),
-      speaker: "agent",
-      text: replyText,
-      meta: {
-        intent,
-        tools,
-        modelCalls,
-        ticketId: ticket.id,
-        customerId: customer.id,
-        contextUsed: Boolean(recentContext),
-        contextTurns,
-      },
-    });
-
-    return {
-      callSessionId,
-      replyText,
-      actions,
-      ticketId: ticket.id,
-    };
-  }
-
-  const ticket = await createTicketUseCase(deps.tickets, {
-    subject: "Needs follow-up",
-    description: `Unhandled request: ${input.text}`,
-    category: "general",
-    source: "agent",
-    phoneE164,
-  });
-  actions.push("created_ticket");
 
   const replyText = await generateReply(
     model,
     input,
-    customer,
-    {
-      toolName: "agent.message",
-      result: {
-        kind: agentMessageKinds.ticketCreated,
-        details: `Ticket ${ticket.id} created for follow-up.`,
-      },
-    },
+    toolCustomer,
+    toolResult,
     agentConfig.scopeMessage,
-    recentContext,
+    context,
     modelCalls,
   );
 
@@ -938,12 +671,12 @@ export const handleAgentMessage = async (
     speaker: "agent",
     text: replyText,
     meta: {
-      intent: "fallback",
+      intent,
       tools,
       modelCalls,
-      ticketId: ticket.id,
-      customerId: customer.id,
-      contextUsed: Boolean(recentContext),
+      ticketId,
+      customerId: resolvedCustomer?.id ?? customer.id,
+      contextUsed: Boolean(context),
       contextTurns,
     },
   });
@@ -952,6 +685,6 @@ export const handleAgentMessage = async (
     callSessionId,
     replyText,
     actions,
-    ticketId: ticket.id,
+    ticketId,
   };
 };
