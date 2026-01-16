@@ -7,6 +7,16 @@ import type {
   TicketStatus,
 } from "@pestcall/core";
 
+type JoinedCustomerRow = {
+  customer_id?: string | null;
+  customer_join_id?: string | null;
+  customer_phone_e164?: string | null;
+  customer_crm_id?: string | null;
+  customer_display_name?: string | null;
+  customer_address_summary?: string | null;
+  customer_updated_at?: string | null;
+};
+
 export type TicketRow = {
   id: string;
   created_at: string;
@@ -21,7 +31,7 @@ export type TicketRow = {
   assignee: string | null;
   source: Ticket["source"];
   external_ref: string | null;
-};
+} & JoinedCustomerRow;
 
 export type TicketEventRow = {
   id: string;
@@ -40,7 +50,7 @@ export type CallSessionRow = {
   status: string;
   transport: string;
   summary: string | null;
-};
+} & JoinedCustomerRow;
 
 export type CallTurnRow = {
   id: string;
@@ -63,7 +73,7 @@ export type AppointmentRow = {
   rescheduled_to_id: string | null;
   created_at: string;
   updated_at: string;
-};
+} & JoinedCustomerRow;
 
 export type CustomerCacheRow = {
   id: string;
@@ -72,16 +82,6 @@ export type CustomerCacheRow = {
   display_name: string;
   address_summary: string | null;
   updated_at: string;
-};
-
-type JoinedCustomerRow = {
-  customer_id?: string | null;
-  customer_join_id?: string | null;
-  customer_phone_e164?: string | null;
-  customer_crm_id?: string | null;
-  customer_display_name?: string | null;
-  customer_address_summary?: string | null;
-  customer_updated_at?: string | null;
 };
 
 const safeJsonParse = (value: string): Record<string, unknown> => {
@@ -123,7 +123,7 @@ const extractCallSummary = (summary: string | null) => {
     return null;
   }
   const parsed = safeJsonParse(summary);
-  const value = parsed.callSummary;
+  const value = parsed["callSummary"];
   return typeof value === "string" ? value : null;
 };
 
