@@ -212,8 +212,6 @@ export const handleAgentMessage = async (
   let callSessionId = input.callSessionId;
   let recentContext = "";
   let contextTurns = 0;
-  let lastAgentIntent: string | null = null;
-  let lastAgentText: string | null = null;
   let lastSuggestedSlot: {
     id?: string;
     date: string;
@@ -237,11 +235,8 @@ export const handleAgentMessage = async (
     for (const turn of [...recentTurns].reverse()) {
       if (turn.speaker === "agent") {
         const meta = turn.meta as {
-          intent?: string;
           suggestedSlot?: { id?: string; date: string; timeWindow: string };
         };
-        lastAgentIntent = meta.intent ?? null;
-        lastAgentText = turn.text ?? null;
         if (!lastSuggestedSlot && meta.suggestedSlot) {
           lastSuggestedSlot = meta.suggestedSlot;
         }
