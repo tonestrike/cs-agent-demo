@@ -3,6 +3,7 @@ import type { CrmAdapter } from "@pestcall/core";
 import { getAgentConfig } from "./agents/config";
 import { getCrmAdapter } from "./crm";
 import { type Env, envSchema } from "./env";
+import { type Logger, createLogger } from "./logger";
 import { getModelAdapter } from "./models";
 import {
   createAgentConfigRepository,
@@ -23,6 +24,7 @@ export type Dependencies = {
   agentConfigDefaults: ReturnType<typeof getAgentConfig>;
   agentConfig: ReturnType<typeof createAgentConfigRepository>;
   appointments: ReturnType<typeof createAppointmentRepository>;
+  logger: Logger;
 };
 
 export type RequestContext = {
@@ -41,6 +43,7 @@ export const createDependencies = (env: Env): Dependencies => {
     modelFactory: (config) => getModelAdapter(env, config),
     agentConfigDefaults: getAgentConfig(env),
     agentConfig: createAgentConfigRepository(env.DB),
+    logger: createLogger(env),
   };
 };
 

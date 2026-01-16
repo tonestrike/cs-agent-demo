@@ -1,75 +1,135 @@
 import type { Ai, AiModels } from "@cloudflare/workers-types";
 import { AppError } from "@pestcall/core";
+import { generateObject } from "ai";
 
 import type { AgentPromptConfig } from "@pestcall/core";
+import { z } from "zod";
+import { toolDefinitions } from "./tool-definitions";
+import {
+  createWorkersAiLanguageModel,
+  responseToText,
+} from "./workers-ai-language-model";
 import {
   type AgentModelInput,
   type AgentResponseInput,
   type ModelAdapter,
   agentModelOutputSchema,
+  agentToolCallSchema,
 } from "./types";
 
-const responseToText = (response: unknown) => {
-  if (
-    response &&
-    typeof response === "object" &&
-    "response" in response &&
-    typeof (response as { response?: unknown }).response === "string"
-  ) {
-    return (response as { response: string }).response;
+const isToolCallJson = (text: string) => {
+  if (!text.startsWith("{") || !text.endsWith("}")) {
+    return false;
   }
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return agentToolCallSchema.safeParse(parsed).success;
+  } catch {
+    return false;
+  }
+};
 
-  if (
-    response &&
-    typeof response === "object" &&
-    "choices" in response &&
-    Array.isArray((response as { choices?: unknown }).choices)
-  ) {
-    const choice = (response as { choices: Array<{ message?: unknown }> })
-      .choices[0];
-    if (
-      choice?.message &&
-      typeof (choice.message as { content?: unknown }).content === "string"
-    ) {
-      return (choice.message as { content: string }).content;
+const stripToolCallJsonBlocks = (text: string) => {
+  let output = "";
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] !== "{") {
+      output += text[i];
+      i += 1;
+      continue;
     }
+    let depth = 0;
+    let j = i;
+    let inString = false;
+    let escapeNext = false;
+    for (; j < text.length; j += 1) {
+      const char = text[j];
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+      if (char === "\\" && inString) {
+        escapeNext = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+      }
+      if (inString) {
+        continue;
+      }
+      if (char === "{") {
+        depth += 1;
+      } else if (char === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          j += 1;
+          break;
+        }
+      }
+    }
+    const candidate = text.slice(i, j);
+    if (isToolCallJson(candidate.trim())) {
+      i = j;
+      continue;
+    }
+    output += text[i];
+    i += 1;
   }
-
-  return null;
+  return output;
 };
 
 const sanitizeResponse = (text: string, hasContext: boolean) => {
-  const withoutInlineTools = text.replace(
-    /[*`]?((crm|agent)\.[a-zA-Z0-9_]+)[*`]?/g,
-    "",
-  );
-  const withoutTools = withoutInlineTools
-    .split("\n")
-    .filter(
-      (line) =>
-        !/^system context:/i.test(line.trim()) &&
-        !/^tool result:/i.test(line.trim()) &&
-        !/^tool:/i.test(line.trim()) &&
-        !/^verified customer:/i.test(line.trim()) &&
-        !/^verified zip:/i.test(line.trim()),
-    )
-    .join("\n")
+  const trimmed = text.trim();
+  if (isToolCallJson(trimmed)) {
+    return "";
+  }
+  const withoutToolCalls = stripToolCallJsonBlocks(text)
     .replace(/\s{2,}/g, " ")
     .replace(/\s+([,.;:!?])/g, "$1")
     .trim();
-  if (hasContext && /how can i help today/i.test(withoutTools)) {
-    return withoutTools.replace(/.*how can i help today\??\s*/i, "").trim();
+  if (hasContext && /how can i help today/i.test(withoutToolCalls)) {
+    return withoutToolCalls.replace(/.*how can i help today\??\s*/i, "").trim();
   }
-  return withoutTools;
+  return withoutToolCalls;
 };
 
-const buildToolGuidanceLines = (config: AgentPromptConfig) => {
+const buildToolGuidanceLines = (
+  config: AgentPromptConfig,
+  options?: { hideVerification?: boolean },
+) => {
+  const hideVerification = options?.hideVerification ?? false;
+  const describeSchema = (schema: z.ZodTypeAny) => {
+    if (schema instanceof z.ZodObject) {
+      const entries = Object.entries(
+        (schema.shape as z.ZodRawShape) ?? {},
+      ) as Array<[string, z.ZodTypeAny]>;
+      if (!entries.length) {
+        return "none";
+      }
+      return entries
+        .map(([key, value]) => `${key}${value.isOptional() ? "?" : ""}`)
+        .join(", ");
+    }
+    if (schema instanceof z.ZodArray) {
+      return "array";
+    }
+    return "see tool description";
+  };
+  const toolSchemaLines = Object.entries(toolDefinitions).map(
+    ([toolName, definition]) =>
+      `- ${toolName} inputs: ${describeSchema(
+        definition.inputSchema,
+      )}; outputs: ${describeSchema(definition.outputSchema)}`,
+  );
   return [
     "Tool guidance:",
     `- crm.lookupCustomerByPhone: ${config.toolGuidance.lookupCustomerByPhone}`,
     `- crm.lookupCustomerByNameAndZip: ${config.toolGuidance.lookupCustomerByNameAndZip}`,
     `- crm.lookupCustomerByEmail: ${config.toolGuidance.lookupCustomerByEmail}`,
-    `- crm.verifyAccount: ${config.toolGuidance.verifyAccount}`,
+    ...(hideVerification
+      ? []
+      : [`- crm.verifyAccount: ${config.toolGuidance.verifyAccount}`]),
     `- crm.getNextAppointment: ${config.toolGuidance.getNextAppointment}`,
     `- crm.listUpcomingAppointments: ${config.toolGuidance.listUpcomingAppointments}`,
     `- crm.getAppointmentById: ${config.toolGuidance.getAppointmentById}`,
@@ -81,6 +141,8 @@ const buildToolGuidanceLines = (config: AgentPromptConfig) => {
     `- crm.escalate: ${config.toolGuidance.crmEscalate}`,
     `- agent.escalate: ${config.toolGuidance.escalate}`,
     "- agent.message: Use result.kind and result.details to craft a helpful response.",
+    "Tool schemas:",
+    ...toolSchemaLines,
   ];
 };
 
@@ -91,6 +153,7 @@ const NON_OVERRIDABLE_POLICY = [
   "- Do not ask the caller to confirm their phone number; request ZIP for verification.",
   "- If phone lookup yields a single match, verify with ZIP only; do not ask for full name.",
   "- Only say verification succeeded after crm.verifyAccount returns ok true.",
+  "- If the caller is not verified, do not ask for name or phone number; request ZIP only.",
   "- Stay on the user's topic; do not fetch appointments unless they ask about scheduling.",
   "- If phone lookup returns a single match, do not ask to confirm the phone number; confirm name or address instead.",
   "- When rescheduling, look up the appointment before asking for an appointment ID.",
@@ -109,6 +172,7 @@ const buildDecisionInstructions = (
   input: AgentModelInput,
   config: AgentPromptConfig,
 ) => {
+  const hideVerification = input.context?.includes("Identity status: verified");
   const lines = [
     config.personaSummary,
     `Company: ${config.companyName}.`,
@@ -117,7 +181,7 @@ const buildDecisionInstructions = (
     "Return JSON only, no prose.",
     "Choose one tool call or a final response.",
     ...NON_OVERRIDABLE_POLICY,
-    ...buildToolGuidanceLines(config),
+    ...buildToolGuidanceLines(config, { hideVerification }),
     `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
     "Ask follow-up questions when details are missing.",
     "Prefer tool calls over assumptions or guesses.",
@@ -138,6 +202,7 @@ const buildRespondInstructions = (
   input: AgentResponseInput,
   config: AgentPromptConfig,
 ) => {
+  const hideVerification = input.context?.includes("Identity status: verified");
   const promptLines = [
     config.personaSummary,
     `Company: ${config.companyName}.`,
@@ -147,7 +212,7 @@ const buildRespondInstructions = (
     "Use the tool result to answer the customer or ask a follow-up.",
     "When a customer accepts help, move forward with the next step or ask for the missing detail instead of asking if you should proceed.",
     ...NON_OVERRIDABLE_POLICY,
-    ...buildToolGuidanceLines(config),
+    ...buildToolGuidanceLines(config, { hideVerification }),
     `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
     "Never include tool names like crm.* or agent.* in responses.",
     "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
@@ -198,29 +263,31 @@ export const createWorkersAiAdapter = (
       }
 
       const instructions = buildDecisionInstructions(input, config);
-      const response = await ai.run(model as keyof AiModels, {
-        messages: buildMessages(instructions, input.context, input.messages),
-      });
-      const text = responseToText(response);
-      if (!text) {
+      const systemPrompt = [instructions, input.context]
+        .filter(Boolean)
+        .join("\n");
+      try {
+        const sdkModel = createWorkersAiLanguageModel(ai, model);
+        const result = await generateObject({
+          model: sdkModel,
+          schema: agentModelOutputSchema,
+          system: systemPrompt,
+          messages: input.messages,
+          mode: "json",
+        });
+        return result.object;
+      } catch (error) {
+        const fallbackResponse = await ai.run(model as keyof AiModels, {
+          messages: buildMessages(instructions, input.context, input.messages),
+        });
+        const text = responseToText(fallbackResponse);
         return {
           type: "final",
-          text: "I could not interpret the request. Can you rephrase?",
+          text: text?.trim()
+            ? text
+            : "I could not interpret the request. Can you rephrase?",
         };
       }
-      try {
-        const parsed = JSON.parse(text) as unknown;
-        const validated = agentModelOutputSchema.safeParse(parsed);
-        if (validated.success) {
-          return validated.data;
-        }
-      } catch {
-        // fall through
-      }
-      return {
-        type: "final",
-        text,
-      };
     },
     async respond(input: AgentResponseInput) {
       if (!ai) {

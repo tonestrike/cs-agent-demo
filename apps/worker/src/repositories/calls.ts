@@ -223,5 +223,15 @@ export const createCallRepository = (db: D1Database) => {
 
       return (result.results ?? []).map(mapCallTurnRow);
     },
+    async getLatestAgentTurn(callSessionId: string) {
+      const row = await db
+        .prepare(
+          "SELECT * FROM call_turns WHERE call_session_id = ? AND speaker = 'agent' ORDER BY ts DESC LIMIT 1",
+        )
+        .bind(callSessionId)
+        .first<CallTurnRow>();
+
+      return row ? mapCallTurnRow(row) : null;
+    },
   };
 };

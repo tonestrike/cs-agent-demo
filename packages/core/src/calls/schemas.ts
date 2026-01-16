@@ -53,6 +53,12 @@ export const callTicketLookupOutputSchema = z.object({
   callSessionId: z.string().nullable(),
 });
 
+export const callContextOutputSchema = z.object({
+  session: callSessionSchema.nullable(),
+  summary: z.record(z.unknown()).nullable(),
+  lastAgentTurn: callTurnSchema.nullable(),
+});
+
 export type CallListInput = z.infer<typeof callListInputSchema>;
 export type CallListOutput = z.infer<typeof callListOutputSchema>;
 export type CallSession = z.infer<typeof callSessionSchema>;
@@ -63,3 +69,4 @@ export type CallTicketLookupInput = z.infer<typeof callTicketLookupInputSchema>;
 export type CallTicketLookupOutput = z.infer<
   typeof callTicketLookupOutputSchema
 >;
+export type CallContextOutput = z.infer<typeof callContextOutputSchema>;

@@ -23,3 +23,9 @@ class_name = "PestCallAgent"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["PestCallAgent"]
+
+[observability]
+
+[observability.logs]
+enabled = true
+invocation_logs = true

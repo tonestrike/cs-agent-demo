@@ -1,4 +1,5 @@
 import {
+  callContextOutputSchema,
   callDetailSchema,
   callIdInputSchema,
   callListInputSchema,
@@ -8,7 +9,7 @@ import {
 } from "@pestcall/core";
 
 import { authedProcedure } from "../middleware/auth";
-import { getCallDetail, listCalls } from "../use-cases/calls";
+import { getCallContext, getCallDetail, listCalls } from "../use-cases/calls";
 
 export const callProcedures = {
   list: authedProcedure
@@ -26,6 +27,12 @@ export const callProcedures = {
         input.callSessionId,
       );
       return detail ?? { session: null, turns: [] };
+    }),
+  context: authedProcedure
+    .input(callIdInputSchema)
+    .output(callContextOutputSchema)
+    .handler(async ({ input, context }) => {
+      return getCallContext(context.deps.calls, input.callSessionId);
     }),
   findByTicketId: authedProcedure
     .input(callTicketLookupInputSchema)
