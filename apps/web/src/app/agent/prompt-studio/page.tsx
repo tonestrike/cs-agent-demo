@@ -31,8 +31,10 @@ import { z } from "zod";
 import { Badge, Button, Card } from "../../../components/ui";
 import { orpc } from "../../../lib/orpc";
 import {
+  OPENROUTER_MODELS,
   WORKERS_AI_MODELS,
   isJsonModeModel,
+  isOpenRouterModel,
 } from "../../../lib/workers-ai-models";
 
 const schemaToSummary = (
@@ -163,8 +165,14 @@ export default function PromptStudioPage() {
   const [jsonOnly, setJsonOnly] = useState(true);
   const queryClient = useQueryClient();
   const modelOptions = configDraft?.modelId
-    ? Array.from(new Set([configDraft.modelId, ...WORKERS_AI_MODELS]))
-    : [...WORKERS_AI_MODELS];
+    ? Array.from(
+        new Set([
+          configDraft.modelId,
+          ...WORKERS_AI_MODELS,
+          ...OPENROUTER_MODELS,
+        ]),
+      )
+    : [...WORKERS_AI_MODELS, ...OPENROUTER_MODELS];
   const filteredModelOptions = modelOptions.filter((option) =>
     option.toLowerCase().includes(modelSearch.trim().toLowerCase()),
   );
@@ -396,12 +404,18 @@ export default function PromptStudioPage() {
                     handleConfigChange("modelId", event.target.value)
                   }
                 >
-                  {visibleModelOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                      {isJsonModeModel(option) ? " (JSON)" : ""}
-                    </option>
-                  ))}
+                  {visibleModelOptions.map((option) => {
+                    const labelParts = [
+                      option,
+                      isJsonModeModel(option) ? "JSON" : null,
+                      isOpenRouterModel(option) ? "OpenRouter" : "Workers AI",
+                    ].filter(Boolean);
+                    return (
+                      <option key={option} value={option}>
+                        {labelParts.join(" · ")}
+                      </option>
+                    );
+                  })}
                 </select>
                 <span className="text-xs text-ink/50 normal-case">
                   JSON Mode models are required for strict routing and response

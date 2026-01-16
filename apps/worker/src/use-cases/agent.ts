@@ -720,12 +720,10 @@ export const handleAgentMessage = async (
   let decisionSnapshot: ReturnType<typeof summarizeModelOutput> | null = null;
   let modelOutput: AgentModelOutput | null = null;
   let workflow = summary.workflow ?? null;
-  let workflowPrompt:
-    | {
-        kind: "select_appointment" | "select_slot";
-        options: Array<{ id: string; label: string }>;
-      }
-    | null = null;
+  let workflowPrompt: {
+    kind: "select_appointment" | "select_slot";
+    options: Array<{ id: string; label: string }>;
+  } | null = null;
   let statusOpen = true;
   const trimmedInput = input.text.trim();
   const isZipInput = zipCodeSchema.safeParse(trimmedInput).success;

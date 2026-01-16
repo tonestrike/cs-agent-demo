@@ -56,6 +56,16 @@ export const WORKERS_AI_MODELS = [
   "@hf/thebloke/zephyr-7b-beta-awq",
 ] as const;
 
+export const OPENROUTER_MODELS = [
+  "openai/gpt-5-mini",
+  "openai/gpt-4.1-mini",
+  "openai/gpt-4.1",
+  "openai/gpt-4o-mini",
+  "openai/gpt-4o",
+  "anthropic/claude-3.5-sonnet",
+  "anthropic/claude-3.5-haiku",
+] as const;
+
 export const JSON_MODE_MODELS = [
   "@cf/meta/llama-3.1-8b-instruct-fast",
   "@cf/meta/llama-3.1-70b-instruct",
@@ -66,8 +76,18 @@ export const JSON_MODE_MODELS = [
   "@hf/nousresearch/hermes-2-pro-mistral-7b",
   "@hf/thebloke/deepseek-coder-6.7b-instruct-awq",
   "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+  "openai/gpt-5-mini",
+  "openai/gpt-4.1-mini",
+  "openai/gpt-4.1",
+  "openai/gpt-4o-mini",
+  "openai/gpt-4o",
 ] as const;
 
 const jsonModeSet = new Set<string>(JSON_MODE_MODELS);
 
 export const isJsonModeModel = (modelId: string) => jsonModeSet.has(modelId);
+
+const openRouterSet = new Set<string>(OPENROUTER_MODELS);
+
+export const isOpenRouterModel = (modelId: string) =>
+  openRouterSet.has(modelId);

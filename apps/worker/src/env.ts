@@ -3,7 +3,7 @@ import { z } from "zod";
 export const crmProviderSchema = z.enum(["mock", "http"]);
 export type CrmProvider = z.infer<typeof crmProviderSchema>;
 
-export const agentModelSchema = z.enum(["mock", "workers-ai"]);
+export const agentModelSchema = z.enum(["mock", "workers-ai", "openrouter"]);
 export const agentToneSchema = z.enum(["warm", "neutral", "direct"]);
 
 export const envSchema = z.object({
@@ -24,6 +24,9 @@ export const envSchema = z.object({
   AGENT_MODEL_ID: z.string().optional(),
   BUILD_ID: z.string().optional(),
   AI: z.custom<Ai>().optional(),
+  AI_GATEWAY_ACCOUNT_ID: z.string().optional(),
+  AI_GATEWAY_ID: z.string().optional(),
+  OPENROUTER_TOKEN: z.string().optional(),
   PestCallAgent: z.custom<DurableObjectNamespace>().optional(),
 });
 
