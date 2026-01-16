@@ -307,6 +307,28 @@ export const handleAgentMessage = async (
   tools.push(lookup.record);
 
   const matches = Array.isArray(lookup.result) ? lookup.result : [];
+  if (
+    summary.identityStatus !== "verified" &&
+    !summary.pendingCustomerId &&
+    matches.length === 1 &&
+    matches[0]
+  ) {
+    summary = {
+      ...summary,
+      identityStatus: "pending",
+      pendingCustomerId: matches[0].id,
+      pendingCustomerProfile: {
+        id: matches[0].id,
+        displayName: matches[0].displayName,
+        phoneE164: matches[0].phoneE164,
+        addressSummary: matches[0].addressSummary,
+      },
+    };
+    await deps.calls.updateSessionSummary({
+      callSessionId,
+      summary: buildSummary(summary),
+    });
+  }
   const actions: string[] = [];
   const resolvedCustomer = matches.length === 1 ? matches[0] : null;
   const customer =
@@ -328,6 +350,7 @@ export const handleAgentMessage = async (
     summary.pendingCustomerId
       ? `Pending customer: ${summary.pendingCustomerId}`
       : "Pending customer: none",
+    `Phone lookup matches: ${matches.length}`,
     summary.lastToolName ? `Last tool: ${summary.lastToolName}` : null,
     summary.lastToolResult
       ? `Last tool result: ${summary.lastToolResult}`
@@ -440,30 +463,37 @@ export const handleAgentMessage = async (
         const result = Array.isArray(call.result) ? call.result : [];
         const candidateId =
           result.length === 1 && result[0] ? result[0].id : null;
-        summary = {
-          ...summary,
-          identityStatus: "pending",
-          pendingCustomerId: candidateId,
-          pendingCustomerProfile:
-            candidateId && result[0]
-              ? {
-                  id: result[0].id,
-                  displayName: result[0].displayName,
-                  phoneE164: result[0].phoneE164,
-                  addressSummary: result[0].addressSummary,
-                }
-              : null,
-        };
-        await deps.calls.updateSessionSummary({
-          callSessionId,
-          summary: buildSummary(summary),
-        });
+        if (summary.identityStatus !== "verified") {
+          summary = {
+            ...summary,
+            identityStatus: "pending",
+            pendingCustomerId: candidateId,
+            pendingCustomerProfile:
+              candidateId && result[0]
+                ? {
+                    id: result[0].id,
+                    displayName: result[0].displayName,
+                    phoneE164: result[0].phoneE164,
+                    addressSummary: result[0].addressSummary,
+                  }
+                : null,
+          };
+          await deps.calls.updateSessionSummary({
+            callSessionId,
+            summary: buildSummary(summary),
+          });
+          toolResult = {
+            toolName: "agent.message",
+            result: {
+              kind: "request_zip",
+              details: "Please confirm your ZIP code to verify your account.",
+            },
+          };
+          break;
+        }
         toolResult = {
-          toolName: "agent.message",
-          result: {
-            kind: "request_zip",
-            details: "Please confirm your ZIP code to verify your account.",
-          },
+          toolName: "crm.lookupCustomerByNameAndZip",
+          result,
         };
         break;
       }
@@ -486,30 +516,37 @@ export const handleAgentMessage = async (
         const result = Array.isArray(call.result) ? call.result : [];
         const candidateId =
           result.length === 1 && result[0] ? result[0].id : null;
-        summary = {
-          ...summary,
-          identityStatus: "pending",
-          pendingCustomerId: candidateId,
-          pendingCustomerProfile:
-            candidateId && result[0]
-              ? {
-                  id: result[0].id,
-                  displayName: result[0].displayName,
-                  phoneE164: result[0].phoneE164,
-                  addressSummary: result[0].addressSummary,
-                }
-              : null,
-        };
-        await deps.calls.updateSessionSummary({
-          callSessionId,
-          summary: buildSummary(summary),
-        });
+        if (summary.identityStatus !== "verified") {
+          summary = {
+            ...summary,
+            identityStatus: "pending",
+            pendingCustomerId: candidateId,
+            pendingCustomerProfile:
+              candidateId && result[0]
+                ? {
+                    id: result[0].id,
+                    displayName: result[0].displayName,
+                    phoneE164: result[0].phoneE164,
+                    addressSummary: result[0].addressSummary,
+                  }
+                : null,
+          };
+          await deps.calls.updateSessionSummary({
+            callSessionId,
+            summary: buildSummary(summary),
+          });
+          toolResult = {
+            toolName: "agent.message",
+            result: {
+              kind: "request_zip",
+              details: "Please confirm your ZIP code to verify your account.",
+            },
+          };
+          break;
+        }
         toolResult = {
-          toolName: "agent.message",
-          result: {
-            kind: "request_zip",
-            details: "Please confirm your ZIP code to verify your account.",
-          },
+          toolName: "crm.lookupCustomerByEmail",
+          result,
         };
         break;
       }
@@ -979,6 +1016,7 @@ export const handleAgentMessage = async (
           category: "general",
           source: "agent",
           phoneE164,
+          customerCacheId: summary.verifiedCustomerId ?? undefined,
         });
         ticketId = ticket.id;
         actions.push("created_ticket");
@@ -1029,13 +1067,7 @@ export const handleAgentMessage = async (
       : parseToolCallFromText(modelOutput.text);
 
   if (!toolCall && modelOutput.type === "final") {
-    const requiresAction =
-      /\b(reschedul|schedule|book|created|ticket|payment|refund|cancel)\b/i.test(
-        modelOutput.text,
-      );
-    const replyText = requiresAction
-      ? "I can help with that. Want me to proceed?"
-      : modelOutput.text;
+    const replyText = modelOutput.text;
     await deps.calls.addTurn({
       id: crypto.randomUUID(),
       callSessionId,

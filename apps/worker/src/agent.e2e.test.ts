@@ -120,7 +120,7 @@ describeIf("agent e2e tool calls", () => {
     const tools = meta.tools ?? [];
     const toolNames = tools.map((tool) => tool.toolName);
     expect(toolNames).toContain("crm.lookupCustomerByPhone");
-    expect(toolNames).toContain("appointments.getNextAppointment");
+    expect(toolNames).toContain("crm.getNextAppointment");
 
     const modelCalls = meta.modelCalls ?? [];
     expect(modelCalls.length).toBeGreaterThan(0);
@@ -194,7 +194,7 @@ describeIf("agent e2e tool calls", () => {
 
     const meta = await getLatestAgentTurnMeta(second.callSessionId);
     const toolNames = (meta.tools ?? []).map((tool) => tool.toolName);
-    expect(toolNames).toContain("appointments.getNextAppointment");
+    expect(toolNames).toContain("crm.getNextAppointment");
     expect(toolNames).toContain("crm.getAvailableSlots");
     expect(meta.contextUsed).toBe(true);
     assertRealModelCalls(meta.modelCalls ?? []);
@@ -212,7 +212,7 @@ describeIf("agent e2e tool calls", () => {
 
     const thirdMeta = await getLatestAgentTurnMeta(third.callSessionId);
     const thirdToolNames = (thirdMeta.tools ?? []).map((tool) => tool.toolName);
-    expect(thirdToolNames).toContain("appointments.reschedule");
+    expect(thirdToolNames).toContain("crm.rescheduleAppointment");
 
     const appointments = await callRpc<{
       items: Array<{
@@ -249,15 +249,43 @@ describeIf("agent e2e tool calls", () => {
       expect(response.ticketId).toBeTruthy();
     }
     const disallowed = [
-      "appointments.getNextAppointment",
+      "crm.getNextAppointment",
       "crm.getOpenInvoices",
       "crm.getAvailableSlots",
-      "appointments.reschedule",
+      "crm.rescheduleAppointment",
     ];
     for (const toolName of disallowed) {
       expect(toolNames).not.toContain(toolName);
     }
     assertRealModelCalls(meta.modelCalls ?? []);
+  });
+
+  it("persists verified identity in the session summary", async () => {
+    const first = await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      phoneNumber,
+      text: "Do I owe anything?",
+    });
+
+    await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      callSessionId: first.callSessionId,
+      phoneNumber,
+      text: "ZIP 94107.",
+    });
+
+    const detail = await callRpc<{
+      session: { summary: string | null };
+    }>("calls/get", { callSessionId: first.callSessionId });
+    expect(detail.session?.summary).toBeTypeOf("string");
+    const parsed = detail.session?.summary
+      ? (JSON.parse(detail.session.summary) as { identityStatus?: string })
+      : null;
+    expect(parsed?.identityStatus).toBe("verified");
   });
 
   it("disambiguates multiple customers before disclosing details", async () => {
@@ -287,11 +315,65 @@ describeIf("agent e2e tool calls", () => {
     const tools = meta.tools ?? [];
     const toolNames = tools.map((tool) => tool.toolName);
     expect(toolNames).toContain("crm.lookupCustomerByPhone");
-    expect(toolNames).toContain("appointments.getNextAppointment");
+    expect(toolNames).toContain("crm.getNextAppointment");
     expect(meta.customerId).toBe("cust_003");
 
     const modelCalls = meta.modelCalls ?? [];
     expect(modelCalls.length).toBeGreaterThan(0);
     assertRealModelCalls(modelCalls);
+  });
+
+  it("exposes customer cache and supports filtered lists", async () => {
+    const first = await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      phoneNumber,
+      text: "I need my balance.",
+    });
+
+    await callRpc<{
+      callSessionId: string;
+      replyText: string;
+    }>("agent/message", {
+      callSessionId: first.callSessionId,
+      phoneNumber,
+      text: "ZIP 94107.",
+    });
+
+    const customers = await callRpc<{
+      items: Array<{ id: string }>;
+    }>("customers/list", { limit: 10 });
+    expect(customers.items.some((customer) => customer.id === "cust_001")).toBe(
+      true,
+    );
+
+    const customer = await callRpc<{
+      id: string;
+      phoneE164: string;
+    }>("customers/get", { customerId: "cust_001" });
+    expect(customer.id).toBe("cust_001");
+
+    const calls = await callRpc<{
+      items: Array<{ id: string; customerCacheId: string | null }>;
+    }>("calls/list", { customerCacheId: "cust_001", limit: 20 });
+    expect(
+      calls.items.some((call) => call.customerCacheId === "cust_001"),
+    ).toBe(true);
+
+    const createdTicket = await callRpc<{ id: string }>("tickets/create", {
+      subject: "Test ticket",
+      description: "Seed for customer filters.",
+      phoneE164: customer.phoneE164,
+      customerCacheId: "cust_001",
+    });
+    expect(createdTicket.id).toBeTypeOf("string");
+
+    const tickets = await callRpc<{
+      items: Array<{ id: string }>;
+    }>("tickets/list", { customerCacheId: "cust_001", limit: 10 });
+    expect(tickets.items.some((ticket) => ticket.id === createdTicket.id)).toBe(
+      true,
+    );
   });
 });

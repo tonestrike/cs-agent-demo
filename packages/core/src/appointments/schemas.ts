@@ -25,6 +25,7 @@ export type ServiceAppointment = z.infer<typeof serviceAppointmentSchema>;
 export const serviceAppointmentListInputSchema = z.object({
   customerId: z.string().optional(),
   phoneE164: z.string().optional(),
+  refresh: z.boolean().optional(),
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().optional(),
 });
