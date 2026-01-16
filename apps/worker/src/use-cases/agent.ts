@@ -130,6 +130,12 @@ type CallSessionSummary = {
   identityStatus?: "unknown" | "pending" | "verified";
   verifiedCustomerId?: string | null;
   pendingCustomerId?: string | null;
+  pendingCustomerProfile?: {
+    id: string;
+    displayName: string;
+    phoneE164: string;
+    addressSummary: string;
+  } | null;
   lastToolName?: string | null;
   lastToolResult?: string | null;
   zipAttempts?: number | null;
@@ -145,6 +151,7 @@ const parseSummary = (summary: string | null) => {
       identityStatus: parsed.identityStatus ?? "unknown",
       verifiedCustomerId: parsed.verifiedCustomerId ?? null,
       pendingCustomerId: parsed.pendingCustomerId ?? null,
+      pendingCustomerProfile: parsed.pendingCustomerProfile ?? null,
       lastToolName: parsed.lastToolName ?? null,
       lastToolResult: parsed.lastToolResult ?? null,
       zipAttempts: parsed.zipAttempts ?? 0,
@@ -159,6 +166,7 @@ const buildSummary = (summary: CallSessionSummary) =>
     identityStatus: summary.identityStatus ?? "unknown",
     verifiedCustomerId: summary.verifiedCustomerId ?? null,
     pendingCustomerId: summary.pendingCustomerId ?? null,
+    pendingCustomerProfile: summary.pendingCustomerProfile ?? null,
     lastToolName: summary.lastToolName ?? null,
     lastToolResult: summary.lastToolResult ?? null,
     zipAttempts: summary.zipAttempts ?? 0,
@@ -378,6 +386,15 @@ export const handleAgentMessage = async (
             ...summary,
             identityStatus: "pending",
             pendingCustomerId: candidateId,
+            pendingCustomerProfile:
+              candidateId && result[0]
+                ? {
+                    id: result[0].id,
+                    displayName: result[0].displayName,
+                    phoneE164: result[0].phoneE164,
+                    addressSummary: result[0].addressSummary,
+                  }
+                : null,
           };
           await deps.calls.updateSessionSummary({
             callSessionId,
@@ -427,6 +444,15 @@ export const handleAgentMessage = async (
           ...summary,
           identityStatus: "pending",
           pendingCustomerId: candidateId,
+          pendingCustomerProfile:
+            candidateId && result[0]
+              ? {
+                  id: result[0].id,
+                  displayName: result[0].displayName,
+                  phoneE164: result[0].phoneE164,
+                  addressSummary: result[0].addressSummary,
+                }
+              : null,
         };
         await deps.calls.updateSessionSummary({
           callSessionId,
@@ -464,6 +490,15 @@ export const handleAgentMessage = async (
           ...summary,
           identityStatus: "pending",
           pendingCustomerId: candidateId,
+          pendingCustomerProfile:
+            candidateId && result[0]
+              ? {
+                  id: result[0].id,
+                  displayName: result[0].displayName,
+                  phoneE164: result[0].phoneE164,
+                  addressSummary: result[0].addressSummary,
+                }
+              : null,
         };
         await deps.calls.updateSessionSummary({
           callSessionId,
@@ -507,12 +542,34 @@ export const handleAgentMessage = async (
           pendingCustomerId: ok
             ? null
             : (summary.pendingCustomerId ?? customerId),
+          pendingCustomerProfile: ok ? null : summary.pendingCustomerProfile,
           zipAttempts: nextZipAttempts,
         };
         await deps.calls.updateSessionSummary({
           callSessionId,
           summary: buildSummary(summary),
         });
+        if (ok) {
+          await deps.calls.updateSessionCustomer({
+            callSessionId,
+            customerCacheId: customerId,
+          });
+          const profile =
+            matches.find((match) => match.id === customerId) ??
+            (summary.pendingCustomerProfile?.id === customerId
+              ? summary.pendingCustomerProfile
+              : null);
+          if (profile) {
+            await deps.customers.upsert({
+              id: customerId,
+              crmCustomerId: customerId,
+              displayName: profile.displayName,
+              phoneE164: profile.phoneE164 ?? phoneE164,
+              addressSummary: profile.addressSummary ?? null,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        }
         if (!ok) {
           toolResult =
             nextZipAttempts >= 2
@@ -953,6 +1010,8 @@ export const handleAgentMessage = async (
       identityStatus: summary.identityStatus,
       verifiedCustomerId: summary.verifiedCustomerId ?? null,
       pendingCustomerId: summary.pendingCustomerId ?? null,
+      pendingCustomerProfile: summary.pendingCustomerProfile ?? null,
+      zipAttempts: summary.zipAttempts ?? 0,
       lastToolName: toolResult.toolName,
       lastToolResult: stringifyToolResult(toolResult),
     };

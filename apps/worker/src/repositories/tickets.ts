@@ -21,6 +21,8 @@ export const createTicketRepository = (db: D1Database) => {
     async list(params: {
       status?: TicketStatus;
       q?: string;
+      customerCacheId?: string;
+      phoneE164?: string;
       limit?: number;
       cursor?: string;
     }) {
@@ -36,6 +38,16 @@ export const createTicketRepository = (db: D1Database) => {
       if (params.q) {
         conditions.push("(subject LIKE ? OR description LIKE ?)");
         queryParams.push(`%${params.q}%`, `%${params.q}%`);
+      }
+
+      if (params.customerCacheId) {
+        conditions.push("customer_cache_id = ?");
+        queryParams.push(params.customerCacheId);
+      }
+
+      if (params.phoneE164) {
+        conditions.push("phone_e164 = ?");
+        queryParams.push(params.phoneE164);
       }
 
       if (params.cursor) {

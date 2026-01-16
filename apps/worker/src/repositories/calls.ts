@@ -10,10 +10,22 @@ export const createCallRepository = (db: D1Database) => {
     async list(params: {
       limit?: number;
       cursor?: string;
+      phoneE164?: string;
+      customerCacheId?: string;
     }) {
       const limit = params.limit ?? 50;
       const queryParams: unknown[] = [];
       const conditions: string[] = [];
+
+      if (params.phoneE164) {
+        conditions.push("phone_e164 = ?");
+        queryParams.push(params.phoneE164);
+      }
+
+      if (params.customerCacheId) {
+        conditions.push("customer_cache_id = ?");
+        queryParams.push(params.customerCacheId);
+      }
 
       if (params.cursor) {
         conditions.push("started_at < ?");
@@ -94,6 +106,15 @@ export const createCallRepository = (db: D1Database) => {
       await db
         .prepare("UPDATE call_sessions SET summary = ? WHERE id = ?")
         .bind(input.summary, input.callSessionId)
+        .run();
+    },
+    async updateSessionCustomer(input: {
+      callSessionId: string;
+      customerCacheId: string;
+    }) {
+      await db
+        .prepare("UPDATE call_sessions SET customer_cache_id = ? WHERE id = ?")
+        .bind(input.customerCacheId, input.callSessionId)
         .run();
     },
     async getSession(callSessionId: string) {

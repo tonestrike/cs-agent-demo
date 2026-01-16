@@ -5,6 +5,16 @@ export * from "./agent-config";
 export * from "./calls";
 export * from "./crm";
 export {
+  customerCacheIdInputSchema,
+  customerCacheListInputSchema,
+  customerCacheListOutputSchema,
+  customerCacheSchema,
+  type CustomerCache,
+  type CustomerCacheIdInput,
+  type CustomerCacheListInput,
+  type CustomerCacheListOutput,
+} from "./customers/schemas";
+export {
   serviceAppointmentIdInputSchema,
   serviceAppointmentListInputSchema,
   serviceAppointmentListOutputSchema,

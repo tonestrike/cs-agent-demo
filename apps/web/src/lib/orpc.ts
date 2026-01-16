@@ -10,6 +10,10 @@ import type {
   CallListOutput,
   CallTicketLookupInput,
   CallTicketLookupOutput,
+  CustomerCache,
+  CustomerCacheIdInput,
+  CustomerCacheListInput,
+  CustomerCacheListOutput,
   ServiceAppointment,
   ServiceAppointmentIdInput,
   ServiceAppointmentListInput,
@@ -52,6 +56,15 @@ type RpcClient = {
       ServiceAppointment,
       unknown
     >;
+  };
+  customers: {
+    list: Client<
+      RpcContext,
+      CustomerCacheListInput,
+      CustomerCacheListOutput,
+      unknown
+    >;
+    get: Client<RpcContext, CustomerCacheIdInput, CustomerCache, unknown>;
   };
   agentConfig: {
     get: Client<RpcContext, undefined, AgentPromptConfigRecord, unknown>;

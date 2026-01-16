@@ -1,11 +1,14 @@
 "use client";
 
-import type { ServiceAppointment, Ticket } from "@pestcall/core";
+import type {
+  CallSession,
+  CustomerCache,
+  ServiceAppointment,
+  Ticket,
+} from "@pestcall/core";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-
-import type { CallSession } from "@pestcall/core";
 
 import { Badge, Button, Card } from "../../components/ui";
 import { rpcClient } from "../../lib/orpc";
@@ -25,8 +28,15 @@ const formatDateTime = (iso: string) =>
 
 export default function AgentDashboardPage() {
   const [activeTab, setActiveTab] = useState<
-    "calls" | "tickets" | "appointments"
+    "calls" | "tickets" | "appointments" | "customers"
   >("calls");
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [customersItems, setCustomersItems] = useState<CustomerCache[]>([]);
+  const [customersCursor, setCustomersCursor] = useState<string | null>(null);
+  const [ticketSearch, setTicketSearch] = useState("");
+  const [ticketStatus, setTicketStatus] = useState<
+    "open" | "in_progress" | "resolved" | "all"
+  >("open");
   const [callsItems, setCallsItems] = useState<CallSession[]>([]);
   const [callsCursor, setCallsCursor] = useState<string | null>(null);
   const [appointmentsItems, setAppointmentsItems] = useState<
@@ -43,8 +53,13 @@ export default function AgentDashboardPage() {
   });
 
   const ticketsQuery = useQuery({
-    queryKey: ["tickets"],
-    queryFn: () => rpcClient.tickets.list({ limit: 12 }),
+    queryKey: ["tickets", ticketSearch, ticketStatus],
+    queryFn: () =>
+      rpcClient.tickets.list({
+        limit: 50,
+        q: ticketSearch || undefined,
+        status: ticketStatus === "all" ? undefined : ticketStatus,
+      }),
   });
 
   const appointmentsQuery = useQuery({
@@ -53,6 +68,16 @@ export default function AgentDashboardPage() {
       rpcClient.appointments.list({
         limit: 50,
         cursor: appointmentsCursor ?? undefined,
+      }),
+  });
+
+  const customersQuery = useQuery({
+    queryKey: ["customers", customerSearch, customersCursor],
+    queryFn: () =>
+      rpcClient.customers.list({
+        limit: 50,
+        q: customerSearch || undefined,
+        cursor: customersCursor ?? undefined,
       }),
   });
 
@@ -72,7 +97,8 @@ export default function AgentDashboardPage() {
     if (
       stored === "calls" ||
       stored === "tickets" ||
-      stored === "appointments"
+      stored === "appointments" ||
+      stored === "customers"
     ) {
       setActiveTab(stored);
     }
@@ -119,6 +145,24 @@ export default function AgentDashboardPage() {
     });
     setAppointmentsCursor(appointmentsQuery.data?.nextCursor ?? null);
   }, [appointmentsQuery.data]);
+
+  useEffect(() => {
+    const items = customersQuery.data?.items ?? [];
+    if (items.length === 0) {
+      return;
+    }
+    setCustomersItems((prev) => {
+      const seen = new Set(prev.map((item) => item.id));
+      const merged = [...prev];
+      for (const item of items) {
+        if (!seen.has(item.id)) {
+          merged.push(item);
+        }
+      }
+      return merged;
+    });
+    setCustomersCursor(customersQuery.data?.nextCursor ?? null);
+  }, [customersQuery.data]);
 
   const ticketCallMap = useMemo(() => {
     const entries = (ticketsQuery.data?.items ?? []).map((ticket, index) => {
@@ -213,6 +257,16 @@ export default function AgentDashboardPage() {
           >
             Appointments
           </Button>
+          <Button
+            className={
+              activeTab === "customers"
+                ? "bg-ink"
+                : "bg-white/80 text-ink hover:bg-ink hover:text-sand"
+            }
+            onClick={() => setActiveTab("customers")}
+          >
+            Customers
+          </Button>
         </Card>
 
         {activeTab === "calls" ? (
@@ -301,12 +355,38 @@ export default function AgentDashboardPage() {
           <Card className="flex flex-col gap-5 animate-rise">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold">Open Tickets</h2>
-              <Button
-                className="bg-clay hover:bg-ink"
-                onClick={() => ticketsQuery.refetch()}
-              >
-                Refresh
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  className="rounded-full border border-ink/15 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/70"
+                  placeholder="Search tickets"
+                  value={ticketSearch}
+                  onChange={(event) => setTicketSearch(event.target.value)}
+                />
+                <select
+                  className="rounded-full border border-ink/15 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/70"
+                  value={ticketStatus}
+                  onChange={(event) =>
+                    setTicketStatus(
+                      event.target.value as
+                        | "open"
+                        | "in_progress"
+                        | "resolved"
+                        | "all",
+                    )
+                  }
+                >
+                  <option value="open">Open</option>
+                  <option value="in_progress">In progress</option>
+                  <option value="resolved">Resolved</option>
+                  <option value="all">All</option>
+                </select>
+                <Button
+                  className="bg-clay hover:bg-ink"
+                  onClick={() => ticketsQuery.refetch()}
+                >
+                  Refresh
+                </Button>
+              </div>
             </div>
             <div className="space-y-3">
               {(ticketsQuery.data?.items ?? []).map((ticket: Ticket) => {
@@ -426,6 +506,90 @@ export default function AgentDashboardPage() {
               !appointmentsQuery.isError &&
               appointmentsItems.length === 0 ? (
                 <p className="text-sm text-ink/60">No appointments yet.</p>
+              ) : null}
+            </div>
+          </Card>
+        ) : null}
+
+        {activeTab === "customers" ? (
+          <Card className="flex flex-col gap-5 animate-rise">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold">Customers</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  className="rounded-full border border-ink/15 bg-white/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/70"
+                  placeholder="Search customers"
+                  value={customerSearch}
+                  onChange={(event) => {
+                    setCustomersItems([]);
+                    setCustomersCursor(null);
+                    setCustomerSearch(event.target.value);
+                  }}
+                />
+                <Button
+                  className="bg-moss hover:bg-ink"
+                  onClick={() => {
+                    setCustomersItems([]);
+                    setCustomersCursor(null);
+                    customersQuery.refetch();
+                  }}
+                >
+                  Refresh
+                </Button>
+                {customersQuery.data?.nextCursor ? (
+                  <Button
+                    className="bg-white/80 text-ink hover:bg-ink hover:text-sand"
+                    onClick={() =>
+                      setCustomersCursor(
+                        customersQuery.data?.nextCursor ?? null,
+                      )
+                    }
+                  >
+                    Load more
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+            <div className="space-y-3">
+              {customersItems.map((customer) => (
+                <div
+                  key={customer.id}
+                  className="rounded-2xl border border-ink/10 bg-white/70 p-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-ink">
+                        {customer.displayName}
+                      </p>
+                      <p className="text-xs text-ink/60">
+                        {maskPhone(customer.phoneE164)}
+                        {customer.addressSummary
+                          ? ` • ${customer.addressSummary}`
+                          : ""}
+                      </p>
+                    </div>
+                    <Link
+                      href={`/agent/customers/${customer.id}`}
+                      className="rounded-full border border-ink/20 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-ink/70 transition hover:border-ink/40 hover:text-ink"
+                    >
+                      Open
+                    </Link>
+                  </div>
+                  <p className="mt-2 text-xs text-ink/50">
+                    Updated {formatDateTime(customer.updatedAt)}
+                  </p>
+                </div>
+              ))}
+              {customersQuery.isLoading && (
+                <p className="text-sm text-ink/60">Loading customers...</p>
+              )}
+              {customersQuery.isError && (
+                <p className="text-sm text-ink/60">Unable to load customers.</p>
+              )}
+              {!customersQuery.isLoading &&
+              !customersQuery.isError &&
+              customersItems.length === 0 ? (
+                <p className="text-sm text-ink/60">No customers yet.</p>
               ) : null}
             </div>
           </Card>

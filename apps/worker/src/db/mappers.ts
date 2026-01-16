@@ -1,4 +1,5 @@
 import type {
+  CustomerCache,
   ServiceAppointment,
   Ticket,
   TicketEvent,
@@ -61,6 +62,15 @@ export type AppointmentRow = {
   rescheduled_from_id: string | null;
   rescheduled_to_id: string | null;
   created_at: string;
+  updated_at: string;
+};
+
+export type CustomerCacheRow = {
+  id: string;
+  phone_e164: string;
+  crm_customer_id: string;
+  display_name: string;
+  address_summary: string | null;
   updated_at: string;
 };
 
@@ -140,6 +150,17 @@ export const mapAppointmentRow = (row: AppointmentRow): ServiceAppointment => {
     rescheduledFromId: row.rescheduled_from_id ?? undefined,
     rescheduledToId: row.rescheduled_to_id ?? undefined,
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+};
+
+export const mapCustomerCacheRow = (row: CustomerCacheRow): CustomerCache => {
+  return {
+    id: row.id,
+    crmCustomerId: row.crm_customer_id,
+    displayName: row.display_name,
+    phoneE164: row.phone_e164,
+    addressSummary: row.address_summary ?? null,
     updatedAt: row.updated_at,
   };
 };

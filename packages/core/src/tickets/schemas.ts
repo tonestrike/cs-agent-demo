@@ -46,6 +46,8 @@ export const ticketEventSchema = z.object({
 export const ticketListInputSchema = z.object({
   status: ticketStatusSchema.optional(),
   q: z.string().optional(),
+  customerCacheId: z.string().optional(),
+  phoneE164: z.string().optional(),
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().optional(),
 });

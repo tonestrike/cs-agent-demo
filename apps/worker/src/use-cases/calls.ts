@@ -2,7 +2,12 @@ import type { createCallRepository } from "../repositories";
 
 export const listCalls = (
   repo: ReturnType<typeof createCallRepository>,
-  params: { limit?: number; cursor?: string },
+  params: {
+    limit?: number;
+    cursor?: string;
+    phoneE164?: string;
+    customerCacheId?: string;
+  },
 ) => repo.list(params);
 
 export const getCallDetail = (

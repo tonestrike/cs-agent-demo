@@ -24,6 +24,8 @@ export const listTickets = (
   params: {
     status?: "open" | "in_progress" | "resolved";
     q?: string;
+    customerCacheId?: string;
+    phoneE164?: string;
     limit?: number;
     cursor?: string;
   },

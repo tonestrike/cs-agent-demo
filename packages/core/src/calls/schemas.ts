@@ -3,6 +3,8 @@ import { z } from "zod";
 export const callListInputSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().optional(),
+  phoneE164: z.string().optional(),
+  customerCacheId: z.string().optional(),
 });
 
 export const callSessionSchema = z.object({
