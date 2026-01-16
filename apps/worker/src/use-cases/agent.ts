@@ -1006,13 +1006,13 @@ export const handleAgentMessage = async (
       case "agent.escalate": {
         const reason =
           getStringArg(args, "reason") ?? "Customer requested escalation";
-        const summary =
+        const summaryText =
           getStringArg(args, "summary") ??
           getStringArg(args, "message") ??
           input.text;
         const ticket = await createTicketUseCase(deps.tickets, {
           subject: reason,
-          description: summary,
+          description: summaryText,
           category: "general",
           source: "agent",
           phoneE164,

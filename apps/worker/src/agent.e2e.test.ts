@@ -376,4 +376,11 @@ describeIf("agent e2e tool calls", () => {
       true,
     );
   });
+
+  it("hydrates appointments when refresh is requested", async () => {
+    const response = await callRpc<{
+      items: Array<{ id: string }>;
+    }>("appointments/list", { refresh: true, limit: 10 });
+    expect(response.items.length).toBeGreaterThan(0);
+  });
 });

@@ -45,6 +45,7 @@ export default function AgentDashboardPage() {
   const [appointmentsCursor, setAppointmentsCursor] = useState<string | null>(
     null,
   );
+  const [appointmentsRefreshKey, setAppointmentsRefreshKey] = useState(0);
   const callsQuery = useQuery({
     queryKey: ["calls", callsCursor],
     queryFn: () =>
@@ -63,11 +64,13 @@ export default function AgentDashboardPage() {
   });
 
   const appointmentsQuery = useQuery({
-    queryKey: ["appointments", appointmentsCursor],
+    queryKey: ["appointments", appointmentsCursor, appointmentsRefreshKey],
     queryFn: () =>
       rpcClient.appointments.list({
         limit: 50,
         cursor: appointmentsCursor ?? undefined,
+        refresh:
+          appointmentsRefreshKey > 0 && !appointmentsCursor ? true : undefined,
       }),
   });
 
@@ -451,6 +454,7 @@ export default function AgentDashboardPage() {
                   onClick={() => {
                     setAppointmentsItems([]);
                     setAppointmentsCursor(null);
+                    setAppointmentsRefreshKey(Date.now());
                     appointmentsQuery.refetch();
                   }}
                 >
