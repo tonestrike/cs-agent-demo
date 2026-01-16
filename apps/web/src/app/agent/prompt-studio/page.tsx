@@ -95,7 +95,7 @@ export default function PromptStudioPage() {
       return { type: "array", items: schemaToSummary(schema._def.type) };
     }
     if (schema instanceof z.ZodObject) {
-      const shape = schema._def.shape();
+      const shape = schema._def.shape() as z.ZodRawShape;
       return Object.fromEntries(
         Object.entries(shape).map(([key, value]) => [
           key,
