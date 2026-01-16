@@ -39,9 +39,19 @@ const parseToolGuidance = (
   }
   if (row.tool_guidance) {
     return {
+      lookupCustomerByPhone: row.tool_guidance,
+      lookupCustomerByNameAndZip: row.tool_guidance,
+      lookupCustomerByEmail: row.tool_guidance,
+      verifyAccount: row.tool_guidance,
       getNextAppointment: row.tool_guidance,
+      listUpcomingAppointments: row.tool_guidance,
+      getAppointmentById: row.tool_guidance,
       getOpenInvoices: row.tool_guidance,
+      getAvailableSlots: row.tool_guidance,
       rescheduleAppointment: row.tool_guidance,
+      createAppointment: row.tool_guidance,
+      getServicePolicy: row.tool_guidance,
+      crmEscalate: row.tool_guidance,
       escalate: row.tool_guidance,
     };
   }

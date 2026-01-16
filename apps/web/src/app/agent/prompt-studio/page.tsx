@@ -389,6 +389,58 @@ export default function PromptStudioPage() {
                 />
               </label>
               <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                Tool Guidance: Lookup by Phone
+                <textarea
+                  className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  value={configDraft.toolGuidance.lookupCustomerByPhone}
+                  onChange={(event) =>
+                    handleToolGuidanceChange(
+                      "lookupCustomerByPhone",
+                      event.target.value,
+                    )
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                Tool Guidance: Lookup by Name + ZIP
+                <textarea
+                  className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  value={configDraft.toolGuidance.lookupCustomerByNameAndZip}
+                  onChange={(event) =>
+                    handleToolGuidanceChange(
+                      "lookupCustomerByNameAndZip",
+                      event.target.value,
+                    )
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                Tool Guidance: Lookup by Email
+                <textarea
+                  className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  value={configDraft.toolGuidance.lookupCustomerByEmail}
+                  onChange={(event) =>
+                    handleToolGuidanceChange(
+                      "lookupCustomerByEmail",
+                      event.target.value,
+                    )
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                Tool Guidance: Verify Account
+                <textarea
+                  className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  value={configDraft.toolGuidance.verifyAccount}
+                  onChange={(event) =>
+                    handleToolGuidanceChange(
+                      "verifyAccount",
+                      event.target.value,
+                    )
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
                 Tool Guidance: Next Appointment
                 <textarea
                   className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
@@ -396,6 +448,32 @@ export default function PromptStudioPage() {
                   onChange={(event) =>
                     handleToolGuidanceChange(
                       "getNextAppointment",
+                      event.target.value,
+                    )
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                Tool Guidance: List Upcoming Appointments
+                <textarea
+                  className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  value={configDraft.toolGuidance.listUpcomingAppointments}
+                  onChange={(event) =>
+                    handleToolGuidanceChange(
+                      "listUpcomingAppointments",
+                      event.target.value,
+                    )
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                Tool Guidance: Get Appointment by ID
+                <textarea
+                  className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  value={configDraft.toolGuidance.getAppointmentById}
+                  onChange={(event) =>
+                    handleToolGuidanceChange(
+                      "getAppointmentById",
                       event.target.value,
                     )
                   }
@@ -415,6 +493,19 @@ export default function PromptStudioPage() {
                 />
               </label>
               <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                Tool Guidance: Available Slots
+                <textarea
+                  className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  value={configDraft.toolGuidance.getAvailableSlots}
+                  onChange={(event) =>
+                    handleToolGuidanceChange(
+                      "getAvailableSlots",
+                      event.target.value,
+                    )
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
                 Tool Guidance: Reschedule
                 <textarea
                   className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
@@ -424,6 +515,42 @@ export default function PromptStudioPage() {
                       "rescheduleAppointment",
                       event.target.value,
                     )
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                Tool Guidance: Create Appointment
+                <textarea
+                  className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  value={configDraft.toolGuidance.createAppointment}
+                  onChange={(event) =>
+                    handleToolGuidanceChange(
+                      "createAppointment",
+                      event.target.value,
+                    )
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                Tool Guidance: Service Policy
+                <textarea
+                  className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  value={configDraft.toolGuidance.getServicePolicy}
+                  onChange={(event) =>
+                    handleToolGuidanceChange(
+                      "getServicePolicy",
+                      event.target.value,
+                    )
+                  }
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                Tool Guidance: Escalate (CRM)
+                <textarea
+                  className="min-h-[90px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  value={configDraft.toolGuidance.crmEscalate}
+                  onChange={(event) =>
+                    handleToolGuidanceChange("crmEscalate", event.target.value)
                   }
                 />
               </label>

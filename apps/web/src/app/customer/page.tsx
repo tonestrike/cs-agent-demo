@@ -14,9 +14,27 @@ type ChatMessage = {
 
 export default function CustomerPage() {
   const phoneOptions = [
-    { label: "Alex Rivera", value: "+14155552671" },
-    { label: "Morgan Lee", value: "+14155550987" },
-    { label: "Pat Quinn", value: "+14155551234" },
+    {
+      label: "Alex Rivera",
+      value: "+14155552671",
+      zipCode: "94107",
+      email: "alex.rivera@example.com",
+      addresses: ["742 Evergreen Terrace"],
+    },
+    {
+      label: "Morgan Lee",
+      value: "+14155550987",
+      zipCode: "98109",
+      email: "morgan.lee@example.com",
+      addresses: ["123 Harbor Drive"],
+    },
+    {
+      label: "Pat Quinn",
+      value: "+14155551234",
+      zipCode: "60601",
+      email: "pat.quinn@example.com",
+      addresses: ["88 Market Street", "55 Pine Avenue"],
+    },
   ];
   const [phoneNumber, setPhoneNumber] = useState(phoneOptions[0]?.value ?? "");
   const [input, setInput] = useState("");
@@ -165,6 +183,10 @@ export default function CustomerPage() {
     return status;
   }, [status]);
 
+  const selectedCustomer = useMemo(() => {
+    return phoneOptions.find((option) => option.value === phoneNumber) ?? null;
+  }, [phoneNumber, phoneOptions]);
+
   const copyConversation = async () => {
     const payload = {
       callSessionId,
@@ -290,6 +312,59 @@ export default function CustomerPage() {
           </div>
         </Card>
 
+        <Card className="flex flex-col gap-5 animate-rise">
+          <Badge className="w-fit">Customer Details</Badge>
+          {selectedCustomer ? (
+            <div className="space-y-4 text-sm text-ink/70">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-ink/50">
+                  Name
+                </p>
+                <p className="mt-1 text-sm font-semibold text-ink">
+                  {selectedCustomer.label}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-ink/50">
+                  Phone
+                </p>
+                <p className="mt-1 text-sm text-ink">
+                  {selectedCustomer.value}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-ink/50">
+                  Email
+                </p>
+                <p className="mt-1 text-sm text-ink">
+                  {selectedCustomer.email}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-ink/50">
+                  ZIP Code
+                </p>
+                <p className="mt-1 text-sm text-ink">
+                  {selectedCustomer.zipCode}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-ink/50">
+                  Addresses
+                </p>
+                <div className="mt-1 space-y-2">
+                  {selectedCustomer.addresses.map((address) => (
+                    <p key={address} className="text-sm text-ink">
+                      {address}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-ink/60">Select a customer.</p>
+          )}
+        </Card>
         <Card className="flex flex-col gap-5 animate-rise">
           <Badge className="w-fit">Tips</Badge>
           <div className="space-y-4 text-sm text-ink/70">
