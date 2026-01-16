@@ -52,6 +52,12 @@ export default function RootLayout({
                   >
                     Agent
                   </Link>
+                  <Link
+                    href="/agent/prompt-studio"
+                    className="rounded-full border border-ink/10 bg-white/70 px-4 py-2 transition hover:border-ink/30 hover:text-ink"
+                  >
+                    Prompt Studio
+                  </Link>
                 </nav>
               </div>
             </header>

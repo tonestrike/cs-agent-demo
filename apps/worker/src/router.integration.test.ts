@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { getPlatformProxy } from "wrangler";
@@ -6,6 +6,7 @@ import { getPlatformProxy } from "wrangler";
 import { RPCHandler } from "@orpc/server/fetch";
 import { createContext } from "./context";
 import type { Env } from "./env";
+import { createAppointmentRepository } from "./repositories/appointments";
 import { router } from "./router";
 
 type RpcResponse<T> = {
@@ -23,18 +24,22 @@ const handler = new RPCHandler(router);
  * @see https://developers.cloudflare.com/d1/reference/migrations/
  */
 async function applyMigrations(db: D1Database): Promise<void> {
-  const migrationPath = resolve(
-    process.cwd(),
-    "apps/worker/migrations/0001_init.sql",
-  );
-  const sql = readFileSync(migrationPath, "utf8");
-  const statements = sql
-    .split(";")
-    .map((s: string) => s.trim())
-    .filter(Boolean);
+  const migrationsDir = resolve(process.cwd(), "apps/worker/migrations");
+  const migrations = readdirSync(migrationsDir)
+    .filter((file) => file.endsWith(".sql"))
+    .sort()
+    .map((file) => resolve(migrationsDir, file));
 
-  for (const statement of statements) {
-    await db.prepare(`${statement};`).run();
+  for (const migrationPath of migrations) {
+    const sql = readFileSync(migrationPath, "utf8");
+    const statements = sql
+      .split(";")
+      .map((s: string) => s.trim())
+      .filter(Boolean);
+
+    for (const statement of statements) {
+      await db.prepare(`${statement};`).run();
+    }
   }
 }
 
@@ -205,6 +210,20 @@ describe("agent RPC", () => {
   it("creates a call session and replies with appointment info", async () => {
     const platform = await createTestEnv();
     try {
+      const appointments = createAppointmentRepository(platform.env.DB);
+      const now = new Date().toISOString();
+      await appointments.insert({
+        id: "appt_001",
+        customerId: "cust_001",
+        phoneE164: "+14155552671",
+        addressSummary: "742 Evergreen Terrace",
+        date: "2025-02-10",
+        timeWindow: "10:00-12:00",
+        status: "scheduled",
+        createdAt: now,
+        updatedAt: now,
+      });
+
       const response = await callRpc<{
         callSessionId: string;
         replyText: string;

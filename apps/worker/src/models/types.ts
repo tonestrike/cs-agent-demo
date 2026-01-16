@@ -3,6 +3,7 @@ import { z } from "zod";
 export const agentToolNameSchema = z.enum([
   "crm.getNextAppointment",
   "crm.getOpenInvoices",
+  "crm.rescheduleAppointment",
   "agent.escalate",
   "agent.fallback",
 ]);

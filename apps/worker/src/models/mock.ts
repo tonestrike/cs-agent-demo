@@ -5,8 +5,28 @@ import type {
   ModelAdapter,
 } from "./types";
 
+const normalizeConversationText = (text: string) => {
+  return text
+    .split("\n")
+    .map((line) => line.replace(/^(agent|caller):\s*/i, ""))
+    .join(" ");
+};
+
 const detectTool = (text: string) => {
-  const lowered = text.toLowerCase();
+  const lowered = normalizeConversationText(text).toLowerCase();
+  const wantsConfirm =
+    lowered.includes("yes") ||
+    lowered.includes("sure") ||
+    lowered.includes("ok") ||
+    lowered.includes("okay");
+  if (
+    wantsConfirm &&
+    (lowered.includes("reschedule") ||
+      lowered.includes("available") ||
+      lowered.includes("slot"))
+  ) {
+    return "crm.rescheduleAppointment" as const;
+  }
   if (
     lowered.includes("agent") ||
     lowered.includes("human") ||

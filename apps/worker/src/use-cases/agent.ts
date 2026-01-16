@@ -73,30 +73,6 @@ const agentIntents = {
   rescheduleOffer: "reschedule_offer",
 } as const;
 
-const isAffirmative = (text: string) => {
-  const trimmed = text.trim().toLowerCase();
-  if (!trimmed) {
-    return false;
-  }
-  const tokens = new Set([
-    "yes",
-    "yep",
-    "yeah",
-    "yup",
-    "sure",
-    "ok",
-    "okay",
-    "please",
-    "sounds good",
-    "go ahead",
-    "do it",
-  ]);
-  if (tokens.has(trimmed)) {
-    return true;
-  }
-  return tokens.has(trimmed.replace(/[!.?]/g, ""));
-};
-
 type ToolCall = {
   toolName: string;
   latencyMs: number;
@@ -238,6 +214,11 @@ export const handleAgentMessage = async (
   let contextTurns = 0;
   let lastAgentIntent: string | null = null;
   let lastAgentText: string | null = null;
+  let lastSuggestedSlot: {
+    id?: string;
+    date: string;
+    timeWindow: string;
+  } | null = null;
   if (!callSessionId) {
     callSessionId = crypto.randomUUID();
     await deps.calls.createSession({
@@ -255,9 +236,15 @@ export const handleAgentMessage = async (
     contextTurns = recentTurns.length;
     for (const turn of [...recentTurns].reverse()) {
       if (turn.speaker === "agent") {
-        const meta = turn.meta as { intent?: string };
+        const meta = turn.meta as {
+          intent?: string;
+          suggestedSlot?: { id?: string; date: string; timeWindow: string };
+        };
         lastAgentIntent = meta.intent ?? null;
         lastAgentText = turn.text ?? null;
+        if (!lastSuggestedSlot && meta.suggestedSlot) {
+          lastSuggestedSlot = meta.suggestedSlot;
+        }
         break;
       }
     }
@@ -402,162 +389,6 @@ export const handleAgentMessage = async (
       text: replyText,
       meta: {
         intent: "greeting",
-        tools,
-        modelCalls,
-        customerId: customer.id,
-        contextUsed: Boolean(recentContext),
-        contextTurns,
-      },
-    });
-
-    return {
-      callSessionId,
-      replyText,
-      actions,
-    };
-  }
-
-  const shouldConfirmReschedule =
-    isAffirmative(input.text) &&
-    (lastAgentIntent === agentIntents.rescheduleOffer ||
-      (lastAgentIntent === "crm.getNextAppointment" &&
-        Boolean(
-          lastAgentText?.toLowerCase().match(/resched|update|move|change/),
-        )));
-
-  if (shouldConfirmReschedule) {
-    const appointmentCall = await recordToolCall(
-      "appointments.getNextAppointment",
-      () => getNextAppointment(deps.appointments, customer.id),
-    );
-    tools.push(appointmentCall.record);
-
-    const appointment = appointmentCall.result as ServiceAppointment | null;
-    if (!appointment) {
-      const replyText = await generateReply(
-        model,
-        input,
-        customer,
-        {
-          toolName: "agent.message",
-          result: {
-            kind: agentMessageKinds.noAppointment,
-            details: "No scheduled appointment was found for this customer.",
-          },
-        },
-        agentConfig.scopeMessage,
-        recentContext,
-        modelCalls,
-      );
-
-      await deps.calls.addTurn({
-        id: crypto.randomUUID(),
-        callSessionId,
-        ts: new Date().toISOString(),
-        speaker: "agent",
-        text: replyText,
-        meta: {
-          intent: "crm.getNextAppointment",
-          tools,
-          modelCalls,
-          customerId: customer.id,
-          contextUsed: Boolean(recentContext),
-          contextTurns,
-        },
-      });
-
-      return {
-        callSessionId,
-        replyText,
-        actions,
-      };
-    }
-
-    const slotsCall = await recordToolCall("crm.getAvailableSlots", () =>
-      deps.crm.getAvailableSlots(customer.id, {
-        from: appointment.date,
-        to: appointment.date,
-      }),
-    );
-    tools.push(slotsCall.record);
-
-    const slots = Array.isArray(slotsCall.result) ? slotsCall.result : [];
-    const slot = slots[0];
-    if (!slot) {
-      const replyText = await generateReply(
-        model,
-        input,
-        customer,
-        {
-          toolName: "agent.message",
-          result: {
-            kind: agentMessageKinds.noSlots,
-            details: "No alternate time slots are available for rescheduling.",
-          },
-        },
-        agentConfig.scopeMessage,
-        recentContext,
-        modelCalls,
-      );
-
-      await deps.calls.addTurn({
-        id: crypto.randomUUID(),
-        callSessionId,
-        ts: new Date().toISOString(),
-        speaker: "agent",
-        text: replyText,
-        meta: {
-          intent: "crm.getNextAppointment",
-          tools,
-          modelCalls,
-          customerId: customer.id,
-          contextUsed: Boolean(recentContext),
-          contextTurns,
-        },
-      });
-
-      return {
-        callSessionId,
-        replyText,
-        actions,
-      };
-    }
-
-    const rescheduled = await recordToolCall("appointments.reschedule", () =>
-      rescheduleAppointment(deps.appointments, {
-        appointment,
-        slot: {
-          date: slot.date,
-          timeWindow: slot.timeWindow,
-        },
-      }),
-    );
-    tools.push(rescheduled.record);
-
-    const replyText = await generateReply(
-      model,
-      input,
-      customer,
-      {
-        toolName: "crm.rescheduleAppointment",
-        result: {
-          date: (rescheduled.result as { date: string }).date,
-          timeWindow: (rescheduled.result as { timeWindow: string }).timeWindow,
-        },
-      },
-      agentConfig.scopeMessage,
-      recentContext,
-      modelCalls,
-    );
-
-    await deps.calls.addTurn({
-      id: crypto.randomUUID(),
-      callSessionId,
-      ts: new Date().toISOString(),
-      speaker: "agent",
-      text: replyText,
-      meta: {
-        intent: "crm.getNextAppointment",
         tools,
         modelCalls,
         customerId: customer.id,
@@ -750,6 +581,164 @@ export const handleAgentMessage = async (
       text: replyText,
       meta: {
         intent,
+        tools,
+        modelCalls,
+        customerId: customer.id,
+        contextUsed: Boolean(recentContext),
+        contextTurns,
+      },
+    });
+
+    return {
+      callSessionId,
+      replyText,
+      actions,
+    };
+  }
+
+  if (modelOutput.toolName === "crm.rescheduleAppointment") {
+    const appointmentCall = await recordToolCall(
+      "appointments.getNextAppointment",
+      () => getNextAppointment(deps.appointments, customer.id),
+    );
+    tools.push(appointmentCall.record);
+
+    const appointment = appointmentCall.result as ServiceAppointment | null;
+    if (!appointment) {
+      const replyText = await generateReply(
+        model,
+        input,
+        customer,
+        {
+          toolName: "agent.message",
+          result: {
+            kind: agentMessageKinds.noAppointment,
+            details: "No scheduled appointment was found for this customer.",
+          },
+        },
+        agentConfig.scopeMessage,
+        recentContext,
+        modelCalls,
+      );
+
+      await deps.calls.addTurn({
+        id: crypto.randomUUID(),
+        callSessionId,
+        ts: new Date().toISOString(),
+        speaker: "agent",
+        text: replyText,
+        meta: {
+          intent: "crm.rescheduleAppointment",
+          tools,
+          modelCalls,
+          customerId: customer.id,
+          contextUsed: Boolean(recentContext),
+          contextTurns,
+        },
+      });
+
+      return {
+        callSessionId,
+        replyText,
+        actions,
+      };
+    }
+
+    let slot = lastSuggestedSlot;
+    if (!slot) {
+      const slotsCall = await recordToolCall("crm.getAvailableSlots", () =>
+        deps.crm.getAvailableSlots(customer.id, {
+          from: appointment.date,
+          to: appointment.date,
+        }),
+      );
+      tools.push(slotsCall.record);
+
+      const slots = Array.isArray(slotsCall.result) ? slotsCall.result : [];
+      slot = slots[0]
+        ? {
+            id: slots[0].id,
+            date: slots[0].date,
+            timeWindow: slots[0].timeWindow,
+          }
+        : null;
+    }
+
+    if (!slot) {
+      const replyText = await generateReply(
+        model,
+        input,
+        customer,
+        {
+          toolName: "agent.message",
+          result: {
+            kind: agentMessageKinds.noSlots,
+            details: "No alternate time slots are available for rescheduling.",
+          },
+        },
+        agentConfig.scopeMessage,
+        recentContext,
+        modelCalls,
+      );
+
+      await deps.calls.addTurn({
+        id: crypto.randomUUID(),
+        callSessionId,
+        ts: new Date().toISOString(),
+        speaker: "agent",
+        text: replyText,
+        meta: {
+          intent: "crm.rescheduleAppointment",
+          tools,
+          modelCalls,
+          customerId: customer.id,
+          contextUsed: Boolean(recentContext),
+          contextTurns,
+        },
+      });
+
+      return {
+        callSessionId,
+        replyText,
+        actions,
+      };
+    }
+
+    const rescheduled = await recordToolCall("appointments.reschedule", () =>
+      rescheduleAppointment(deps.appointments, {
+        appointment,
+        slot: {
+          date: slot.date,
+          timeWindow: slot.timeWindow,
+        },
+      }),
+    );
+    tools.push(rescheduled.record);
+
+    const replyText = await generateReply(
+      model,
+      input,
+      customer,
+      {
+        toolName: "crm.rescheduleAppointment",
+        result: {
+          date: (rescheduled.result as { date: string }).date,
+          timeWindow: (rescheduled.result as { timeWindow: string }).timeWindow,
+        },
+      },
+      agentConfig.scopeMessage,
+      recentContext,
+      modelCalls,
+    );
+
+    await deps.calls.addTurn({
+      id: crypto.randomUUID(),
+      callSessionId,
+      ts: new Date().toISOString(),
+      speaker: "agent",
+      text: replyText,
+      meta: {
+        intent: "crm.rescheduleAppointment",
         tools,
         modelCalls,
         customerId: customer.id,

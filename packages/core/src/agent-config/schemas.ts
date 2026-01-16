@@ -29,6 +29,8 @@ export const agentToolGuidanceSchema = z.object({
     ),
 });
 
+const defaultToolGuidance = agentToolGuidanceSchema.parse({});
+
 export const agentPromptConfigSchema = z.object({
   tone: agentToneSchema.default("warm"),
   greeting: z
@@ -48,7 +50,7 @@ export const agentPromptConfigSchema = z.object({
     .default(
       "You are a friendly, capable pest control support agent who speaks clearly and stays concise.",
     ),
-  toolGuidance: agentToolGuidanceSchema,
+  toolGuidance: agentToolGuidanceSchema.default(defaultToolGuidance),
   modelId: z.string().min(1).default("@cf/meta/llama-3.1-8b-instruct"),
 });
 

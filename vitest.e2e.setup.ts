@@ -71,6 +71,61 @@ export default async function setup() {
   if (migrateExit !== 0) {
     throw new Error("Failed to apply local D1 migrations for e2e.");
   }
+
+  const reset = spawn(
+    "npx",
+    [
+      "wrangler",
+      "d1",
+      "execute",
+      "pestcall_local",
+      "--local",
+      "--config",
+      "apps/worker/wrangler.test.toml",
+      "--command",
+      [
+        "DELETE FROM ticket_events;",
+        "DELETE FROM tickets;",
+        "DELETE FROM call_turns;",
+        "DELETE FROM call_sessions;",
+        "DELETE FROM appointments;",
+        "DELETE FROM customers_cache;",
+      ].join(" "),
+    ],
+    {
+      stdio: "inherit",
+    },
+  );
+  const resetExit = await new Promise<number>((resolve) => {
+    reset.on("close", (code) => resolve(code ?? 1));
+  });
+  if (resetExit !== 0) {
+    throw new Error("Failed to reset local D1 tables for e2e.");
+  }
+
+  const seed = spawn(
+    "npx",
+    [
+      "wrangler",
+      "d1",
+      "execute",
+      "pestcall_local",
+      "--local",
+      "--config",
+      "apps/worker/wrangler.test.toml",
+      "--file",
+      "apps/worker/seeds/20250201120000_seed.sql",
+    ],
+    {
+      stdio: "inherit",
+    },
+  );
+  const seedExit = await new Promise<number>((resolve) => {
+    seed.on("close", (code) => resolve(code ?? 1));
+  });
+  if (seedExit !== 0) {
+    throw new Error("Failed to seed local D1 data for e2e.");
+  }
   process.env.E2E_BASE_URL = BASE_URL;
 
   return async () => {
