@@ -5,12 +5,15 @@ import { routeAgentRequest } from "agents";
 
 import { createContext } from "./context";
 import type { Env } from "./env";
+import { createLogger } from "./logger";
 import { router } from "./router";
 export { PestCallAgent } from "./agents/pestcall";
 export { CancelWorkflow } from "./workflows/cancel";
 export { ConversationHub } from "./durable-objects/conversation-hub";
 export { RescheduleWorkflow } from "./workflows/reschedule";
 export { VerificationWorkflow } from "./workflows/verification";
+
+const fallbackLogger = createLogger({});
 
 const handler = new RPCHandler(router, {
   plugins: [
@@ -22,7 +25,10 @@ const handler = new RPCHandler(router, {
   ],
   interceptors: [
     onError((error) => {
-      console.error(error);
+      fallbackLogger.error(
+        { error: error instanceof Error ? error.message : error },
+        "rpc.handler.error",
+      );
     }),
   ],
 });

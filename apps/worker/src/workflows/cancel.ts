@@ -14,7 +14,7 @@ import {
 
 import { createDependencies } from "../context";
 import type { Env } from "../env";
-import { defaultLogger } from "../logging";
+import type { Logger } from "../logger";
 import { cancelAppointment as cancelAppointmentInStore } from "../use-cases/appointments";
 import {
   cancelAppointment as cancelAppointmentInCrm,
@@ -25,14 +25,14 @@ import {
   CANCEL_WORKFLOW_EVENT_SELECT_APPOINTMENT,
 } from "./constants";
 
-const parseSummary = (summary: string | null) => {
+const parseSummary = (summary: string | null, logger: Logger) => {
   if (!summary) {
     return {};
   }
   try {
     return JSON.parse(summary) as Record<string, unknown>;
   } catch (error) {
-    defaultLogger.warn(
+    logger.error(
       { error: error instanceof Error ? error.message : "unknown" },
       "workflow.cancel.summary.parse_failed",
     );
@@ -51,23 +51,31 @@ export class CancelWorkflow extends WorkflowEntrypoint<
     event: WorkflowEvent<CancelWorkflowInput>,
     step: WorkflowStep,
   ): Promise<CancelWorkflowOutput> {
+    const deps = createDependencies(this.env);
+    const logger = deps.logger;
     const payload = (
       "params" in event ? event.params : event.payload
     ) as CancelWorkflowInput;
     const input = cancelWorkflowInputSchema.safeParse(payload);
     if (!input.success) {
+      logger.error(
+        {
+          instanceId: event.instanceId,
+          payload,
+          issues: input.error.issues,
+        },
+        "workflow.cancel.invalid_input",
+      );
       throw new Error("Invalid cancel workflow input.");
     }
     const params = input.data;
-    const deps = createDependencies(this.env);
-    const logger = deps.logger;
 
     const updateSummary = async (
       workflowStep: string,
       details: Record<string, unknown> = {},
     ) => {
       const session = await deps.calls.getSession(params.callSessionId);
-      const existing = parseSummary(session?.summary ?? null);
+      const existing = parseSummary(session?.summary ?? null, logger);
       const detailValues = details as {
         appointmentOptions?: unknown;
       };

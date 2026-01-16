@@ -6,7 +6,7 @@ import type {
   TicketEventTypeValue,
   TicketStatus,
 } from "@pestcall/core";
-import { defaultLogger } from "../logging";
+import type { Logger } from "../logger";
 
 type JoinedCustomerRow = {
   customer_id?: string | null;
@@ -87,14 +87,17 @@ export type CustomerCacheRow = {
   updated_at: string;
 };
 
-const safeJsonParse = (value: string): Record<string, unknown> => {
+const safeJsonParse = (
+  value: string,
+  logger?: Logger,
+): Record<string, unknown> => {
   try {
     const parsed = JSON.parse(value);
     if (parsed && typeof parsed === "object") {
       return parsed as Record<string, unknown>;
     }
   } catch (error) {
-    defaultLogger.warn(
+    logger?.error(
       { error: error instanceof Error ? error.message : "unknown" },
       "db.safeJsonParse.failed",
     );
@@ -125,11 +128,11 @@ const mapJoinedCustomer = (
   };
 };
 
-const extractCallSummary = (summary: string | null) => {
+const extractCallSummary = (summary: string | null, logger?: Logger) => {
   if (!summary) {
     return null;
   }
-  const parsed = safeJsonParse(summary) as { callSummary?: unknown };
+  const parsed = safeJsonParse(summary, logger) as { callSummary?: unknown };
   const value = parsed.callSummary;
   return typeof value === "string" ? value : null;
 };
@@ -153,17 +156,20 @@ export const mapTicketRow = (row: TicketRow): Ticket => {
   };
 };
 
-export const mapTicketEventRow = (row: TicketEventRow): TicketEvent => {
+export const mapTicketEventRow = (
+  row: TicketEventRow,
+  logger?: Logger,
+): TicketEvent => {
   return {
     id: row.id,
     ticketId: row.ticket_id,
     ts: row.ts,
     type: row.type,
-    payload: safeJsonParse(row.payload_json),
+    payload: safeJsonParse(row.payload_json, logger),
   };
 };
 
-export const mapCallSessionRow = (row: CallSessionRow) => {
+export const mapCallSessionRow = (row: CallSessionRow, logger?: Logger) => {
   return {
     id: row.id,
     startedAt: row.started_at,
@@ -173,19 +179,19 @@ export const mapCallSessionRow = (row: CallSessionRow) => {
     status: row.status,
     transport: row.transport,
     summary: row.summary ?? null,
-    callSummary: extractCallSummary(row.summary ?? null),
+    callSummary: extractCallSummary(row.summary ?? null, logger),
     customer: mapJoinedCustomer(row),
   };
 };
 
-export const mapCallTurnRow = (row: CallTurnRow) => {
+export const mapCallTurnRow = (row: CallTurnRow, logger?: Logger) => {
   return {
     id: row.id,
     callSessionId: row.call_session_id,
     ts: row.ts,
     speaker: row.speaker,
     text: row.text,
-    meta: safeJsonParse(row.meta_json),
+    meta: safeJsonParse(row.meta_json, logger),
   };
 };
 

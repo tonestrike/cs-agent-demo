@@ -4,7 +4,6 @@ import { AppError } from "@pestcall/core";
 import type { AgentPromptConfig } from "@pestcall/core";
 import { z } from "zod";
 import type { Logger } from "../logger";
-import { defaultLogger } from "../logging";
 import { toolDefinitions } from "./tool-definitions";
 import {
   type AgentModelInput,
@@ -317,7 +316,10 @@ const ensureJsonModeModel = (modelId: string) => {
   }
 };
 
-const responseToJsonObject = <T>(response: unknown): T | null => {
+const responseToJsonObject = <T>(
+  response: unknown,
+  logger: Logger,
+): T | null => {
   if (
     response &&
     typeof response === "object" &&
@@ -329,8 +331,11 @@ const responseToJsonObject = <T>(response: unknown): T | null => {
       try {
         return JSON.parse(value) as T;
       } catch (error) {
-        defaultLogger.warn(
-          { error: error instanceof Error ? error.message : "unknown" },
+        logger.error(
+          {
+            error: error instanceof Error ? error.message : "unknown",
+            payload: value.slice(0, 240),
+          },
           "workers-ai.response.parse_failed",
         );
         return null;
@@ -428,7 +433,7 @@ export const createWorkersAiAdapter = (
             "I could not interpret the request. Can you rephrase?",
         };
       } catch (error) {
-        logger.warn(
+        logger.error(
           {
             error: error instanceof Error ? error.message : "unknown",
           },
@@ -523,8 +528,10 @@ export const createWorkersAiAdapter = (
         max_new_tokens: MAX_NEW_TOKENS,
         max_tokens: MAX_NEW_TOKENS,
       });
-      const parsed =
-        responseToJsonObject<z.infer<typeof agentRouteSchema>>(response);
+      const parsed = responseToJsonObject<z.infer<typeof agentRouteSchema>>(
+        response,
+        logger,
+      );
       const validated = agentRouteSchema.safeParse(parsed);
       if (!validated.success) {
         throw new AppError("Invalid JSON routing response", {
@@ -572,8 +579,10 @@ export const createWorkersAiAdapter = (
         max_new_tokens: MAX_NEW_TOKENS,
         max_tokens: MAX_NEW_TOKENS,
       });
-      const parsed =
-        responseToJsonObject<z.infer<typeof selectionSchema>>(response);
+      const parsed = responseToJsonObject<z.infer<typeof selectionSchema>>(
+        response,
+        logger,
+      );
       const validated = selectionSchema.safeParse(parsed);
       if (!validated.success) {
         throw new AppError("Invalid JSON selection response", {
@@ -625,8 +634,10 @@ export const createWorkersAiAdapter = (
         max_new_tokens: MAX_NEW_TOKENS,
         max_tokens: MAX_NEW_TOKENS,
       });
-      const parsed =
-        responseToJsonObject<z.infer<typeof statusSchema>>(response);
+      const parsed = responseToJsonObject<z.infer<typeof statusSchema>>(
+        response,
+        logger,
+      );
       const validated = statusSchema.safeParse(parsed);
       if (!validated.success) {
         throw new AppError("Invalid JSON status response", {

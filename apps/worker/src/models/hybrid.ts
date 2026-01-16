@@ -23,7 +23,7 @@ export const createHybridModelAdapter = (
           }
           return;
         } catch (error) {
-          logger.warn(
+          logger.error(
             {
               error: error instanceof Error ? error.message : "unknown",
               openrouterModelId: openrouterAdapter.modelId ?? null,
@@ -42,7 +42,7 @@ export const createHybridModelAdapter = (
       try {
         return await openrouterAdapter.respond(input);
       } catch (error) {
-        logger.warn(
+        logger.error(
           {
             error: error instanceof Error ? error.message : "unknown",
             openrouterModelId: openrouterAdapter.modelId ?? null,

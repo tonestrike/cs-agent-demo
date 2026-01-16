@@ -2,7 +2,6 @@ import { Agent, type StreamingResponse, callable } from "agents";
 
 import { createDependencies } from "../context";
 import type { Env } from "../env";
-import { defaultLogger } from "../logging";
 import {
   type AgentMessageInput,
   agentMessageInputSchema,
@@ -213,12 +212,13 @@ export class PestCallAgent extends Agent<Env, AgentState> {
     message: unknown,
   ) {
     const rawText = coerceMessageText(message);
+    const deps = createDependencies(this.env);
     const parsed = rawText
       ? (() => {
           try {
             return JSON.parse(rawText) as unknown;
           } catch (error) {
-            defaultLogger.warn(
+            deps.logger.error(
               { error: error instanceof Error ? error.message : "unknown" },
               "agent.message.parse_failed",
             );
@@ -254,7 +254,6 @@ export class PestCallAgent extends Agent<Env, AgentState> {
       return;
     }
 
-    const deps = createDependencies(this.env);
     const publish = (sessionId: string, event: AgentEvent) => {
       if (!this.env.CONVERSATION_HUB) {
         return;

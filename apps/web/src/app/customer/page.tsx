@@ -14,6 +14,13 @@ type ChatMessage = {
   text: string;
 };
 
+type ClientLog = {
+  id: string;
+  ts: string;
+  message: string;
+  data?: Record<string, unknown>;
+};
+
 export default function CustomerPage() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [input, setInput] = useState("");
@@ -30,17 +37,29 @@ export default function CustomerPage() {
   ]);
   const [status, setStatus] = useState("New session");
   const [copied, setCopied] = useState(false);
+  const [logs, setLogs] = useState<ClientLog[]>([]);
   const listRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScroll = useRef(true);
   const socketRef = useRef<WebSocket | null>(null);
   const responseIdRef = useRef<string | null>(null);
   const sessionRef = useRef<string | null>(null);
+  const hasDeltaRef = useRef(false);
 
   useEffect(() => {
     return () => {
       socketRef.current?.close();
     };
   }, []);
+
+  const logEvent = (message: string, data?: Record<string, unknown>) => {
+    const entry: ClientLog = {
+      id: crypto.randomUUID(),
+      ts: new Date().toISOString(),
+      message,
+      data,
+    };
+    setLogs((prev) => [entry, ...prev].slice(0, 200));
+  };
 
   const customersQuery = useQuery(
     orpc.customers.list.queryOptions({
@@ -76,8 +95,13 @@ export default function CustomerPage() {
   const ensureSocket = (sessionId: string) => {
     if (socketRef.current && sessionRef.current === sessionId) {
       if (socketRef.current.readyState === WebSocket.OPEN) {
+        logEvent("ws.reuse.open", { sessionId });
         return Promise.resolve(socketRef.current);
       }
+      logEvent("ws.reuse.wait", {
+        sessionId,
+        state: socketRef.current.readyState,
+      });
       return new Promise<WebSocket>((resolve, reject) => {
         const socket = socketRef.current;
         if (!socket) {
@@ -89,16 +113,19 @@ export default function CustomerPage() {
         }, 3000);
         socket.addEventListener("open", () => {
           window.clearTimeout(timeoutId);
+          logEvent("ws.reuse.opened", { sessionId });
           resolve(socket);
         });
         socket.addEventListener("error", () => {
           window.clearTimeout(timeoutId);
+          logEvent("ws.reuse.error", { sessionId });
           reject(new Error("Socket error"));
         });
       });
     }
     socketRef.current?.close();
     const socket = new WebSocket(buildWsUrl(sessionId));
+    logEvent("ws.connect.start", { sessionId });
     socket.onmessage = (event) => {
       try {
         const payload = JSON.parse(String(event.data)) as {
@@ -106,6 +133,12 @@ export default function CustomerPage() {
           text?: string;
           data?: { callSessionId?: string; replyText?: string };
         };
+        logEvent("ws.message", {
+          sessionId,
+          type: payload.type ?? "unknown",
+          textLength: payload.text?.length ?? 0,
+          hasData: Boolean(payload.data),
+        });
         if (payload.type === "status") {
           const text = payload.text ?? "";
           if (text.trim()) {
@@ -119,6 +152,7 @@ export default function CustomerPage() {
           if (!responseId || !text) {
             return;
           }
+          hasDeltaRef.current = true;
           setMessages((prev) =>
             prev.map((message) =>
               message.id === responseId
@@ -149,6 +183,7 @@ export default function CustomerPage() {
         }
       } catch {
         setStatus("Received malformed message.");
+        logEvent("ws.message.parse_failed", { sessionId });
       }
       requestAnimationFrame(() => {
         if (shouldAutoScroll.current && listRef.current) {
@@ -158,24 +193,29 @@ export default function CustomerPage() {
     };
     socket.onerror = () => {
       setStatus("Connection issue. Try again.");
+      logEvent("ws.error", { sessionId });
     };
     socket.onclose = () => {
       if (sessionRef.current === sessionId) {
         socketRef.current = null;
       }
+      logEvent("ws.close", { sessionId });
     };
     socketRef.current = socket;
     sessionRef.current = sessionId;
     return new Promise<WebSocket>((resolve, reject) => {
       const timeoutId = window.setTimeout(() => {
+        logEvent("ws.connect.timeout", { sessionId });
         reject(new Error("Socket timeout"));
       }, 3000);
       socket.addEventListener("open", () => {
         window.clearTimeout(timeoutId);
+        logEvent("ws.connect.open", { sessionId });
         resolve(socket);
       });
       socket.addEventListener("error", () => {
         window.clearTimeout(timeoutId);
+        logEvent("ws.connect.error", { sessionId });
         reject(new Error("Socket error"));
       });
     });
@@ -186,6 +226,7 @@ export default function CustomerPage() {
     setPhoneNumber(selected);
     setCallSessionId(null);
     setConfirmedSessionId(null);
+    hasDeltaRef.current = false;
     setMessages([
       {
         id: "intro",
@@ -197,6 +238,7 @@ export default function CustomerPage() {
     socketRef.current?.close();
     socketRef.current = null;
     sessionRef.current = null;
+    logEvent("session.reset", { phoneNumber: selected });
   };
 
   const sendMessage = async (message: string) => {
@@ -208,6 +250,7 @@ export default function CustomerPage() {
     if (!callSessionId) {
       setCallSessionId(sessionId);
     }
+    logEvent("message.send.start", { sessionId, length: trimmed.length });
     setMessages((prev) => [
       ...prev,
       { id: crypto.randomUUID(), role: "customer", text: trimmed },
@@ -217,6 +260,7 @@ export default function CustomerPage() {
 
     const responseId = crypto.randomUUID();
     responseIdRef.current = responseId;
+    hasDeltaRef.current = false;
     setMessages((prev) => [
       ...prev,
       { id: responseId, role: "agent", text: "" },
@@ -224,11 +268,14 @@ export default function CustomerPage() {
 
     try {
       await ensureSocket(sessionId);
+      logEvent("ws.ready", { sessionId });
     } catch {
       setStatus("Connection issue. Try again.");
+      logEvent("ws.unavailable", { sessionId });
     }
     const base = apiBaseUrl || window.location.origin;
     try {
+      logEvent("rpc.agent.message.start", { sessionId });
       const response = await fetch(new URL("/rpc/agent/message", base), {
         method: "POST",
         headers: {
@@ -244,6 +291,10 @@ export default function CustomerPage() {
           meta: [],
         }),
       });
+      logEvent("rpc.agent.message.response", {
+        sessionId,
+        status: response.status,
+      });
       if (!response.ok) {
         throw new Error("Request failed");
       }
@@ -251,7 +302,7 @@ export default function CustomerPage() {
         json?: { callSessionId?: string; replyText?: string };
       };
       const replyText = data.json?.replyText ?? "";
-      if (replyText) {
+      if (replyText && !hasDeltaRef.current) {
         const responseId = responseIdRef.current;
         if (responseId) {
           setMessages((prev) =>
@@ -267,8 +318,14 @@ export default function CustomerPage() {
         setCallSessionId(data.json.callSessionId);
         setConfirmedSessionId(data.json.callSessionId);
       }
+      logEvent("rpc.agent.message.done", {
+        sessionId,
+        replyLength: replyText.length,
+        usedFallback: !hasDeltaRef.current && Boolean(replyText),
+      });
     } catch {
       setStatus("Connection issue. Try again.");
+      logEvent("rpc.agent.message.failed", { sessionId });
     }
   };
 
@@ -473,6 +530,27 @@ export default function CustomerPage() {
               Use the same session to continue the conversation and test
               follow-ups like “reschedule it.”
             </p>
+          </div>
+        </Card>
+        <Card className="flex flex-col gap-5 animate-rise">
+          <Badge className="w-fit">Client Log</Badge>
+          <div className="max-h-72 space-y-3 overflow-auto rounded-2xl border border-ink/10 bg-white/70 p-4 text-xs text-ink/70">
+            {logs.length === 0 ? (
+              <p className="text-ink/50">No client events yet.</p>
+            ) : (
+              logs.map((entry) => (
+                <div key={entry.id} className="space-y-1">
+                  <p className="font-semibold text-ink">
+                    {entry.ts} — {entry.message}
+                  </p>
+                  {entry.data ? (
+                    <pre className="whitespace-pre-wrap text-[11px] text-ink/70">
+                      {JSON.stringify(entry.data, null, 2)}
+                    </pre>
+                  ) : null}
+                </div>
+              ))
+            )}
           </div>
         </Card>
       </div>

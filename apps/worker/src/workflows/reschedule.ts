@@ -15,7 +15,7 @@ import {
 
 import { createDependencies } from "../context";
 import type { Env } from "../env";
-import { defaultLogger } from "../logging";
+import type { Logger } from "../logger";
 import { rescheduleAppointment as rescheduleAppointmentInStore } from "../use-cases/appointments";
 import {
   getAvailableSlots,
@@ -28,14 +28,14 @@ import {
   RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
 } from "./constants";
 
-const parseSummary = (summary: string | null) => {
+const parseSummary = (summary: string | null, logger: Logger) => {
   if (!summary) {
     return {};
   }
   try {
     return JSON.parse(summary) as Record<string, unknown>;
   } catch (error) {
-    defaultLogger.warn(
+    logger.error(
       { error: error instanceof Error ? error.message : "unknown" },
       "workflow.reschedule.summary.parse_failed",
     );
@@ -54,23 +54,31 @@ export class RescheduleWorkflow extends WorkflowEntrypoint<
     event: WorkflowEvent<RescheduleWorkflowInput>,
     step: WorkflowStep,
   ): Promise<RescheduleWorkflowOutput> {
+    const deps = createDependencies(this.env);
+    const logger = deps.logger;
     const payload = (
       "params" in event ? event.params : event.payload
     ) as RescheduleWorkflowInput;
     const input = rescheduleWorkflowInputSchema.safeParse(payload);
     if (!input.success) {
+      logger.error(
+        {
+          instanceId: event.instanceId,
+          payload,
+          issues: input.error.issues,
+        },
+        "workflow.reschedule.invalid_input",
+      );
       throw new Error("Invalid reschedule workflow input.");
     }
     const params = input.data;
-    const deps = createDependencies(this.env);
-    const logger = deps.logger;
 
     const updateSummary = async (
       workflowStep: string,
       details: Record<string, unknown> = {},
     ) => {
       const session = await deps.calls.getSession(params.callSessionId);
-      const existing = parseSummary(session?.summary ?? null);
+      const existing = parseSummary(session?.summary ?? null, logger);
       const detailValues = details as {
         appointmentOptions?: unknown;
         slotOptions?: unknown;

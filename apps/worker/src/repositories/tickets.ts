@@ -6,6 +6,7 @@ import {
   mapTicketEventRow,
   mapTicketRow,
 } from "../db/mappers";
+import type { Logger } from "../logger";
 
 type TicketRowResult = TicketRow & { status: TicketStatus };
 
@@ -16,7 +17,7 @@ type TicketEventInput = {
   timestamp: string;
 };
 
-export const createTicketRepository = (db: D1Database) => {
+export const createTicketRepository = (db: D1Database, logger: Logger) => {
   return {
     async list(params: {
       status?: TicketStatus;
@@ -162,7 +163,7 @@ export const createTicketRepository = (db: D1Database) => {
         payload_json: JSON.stringify(input.payload),
       };
 
-      return mapTicketEventRow(row);
+      return mapTicketEventRow(row, logger);
     },
     async updateStatus(input: {
       ticketId: string;

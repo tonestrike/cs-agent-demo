@@ -3,7 +3,6 @@ import { AppError } from "@pestcall/core";
 import { z } from "zod";
 import type { Env } from "../env";
 import type { Logger } from "../logger";
-import { defaultLogger } from "../logging";
 import { toolDefinitions } from "./tool-definitions";
 import {
   type AgentModelInput,
@@ -340,7 +339,7 @@ const streamOpenRouterResponse = async function* (
           yield delta;
         }
       } catch (error) {
-        logger.warn(
+        logger.error(
           {
             error: error instanceof Error ? error.message : "unknown",
             payload: truncate(payload, 240),
@@ -352,7 +351,10 @@ const streamOpenRouterResponse = async function* (
   }
 };
 
-const responseToJsonObject = <T>(response: unknown): T | null => {
+const responseToJsonObject = <T>(
+  response: unknown,
+  logger: Logger,
+): T | null => {
   const text = responseToText(response);
   if (!text) {
     return null;
@@ -360,8 +362,11 @@ const responseToJsonObject = <T>(response: unknown): T | null => {
   try {
     return JSON.parse(text) as T;
   } catch (error) {
-    defaultLogger.warn(
-      { error: error instanceof Error ? error.message : "unknown" },
+    logger.error(
+      {
+        error: error instanceof Error ? error.message : "unknown",
+        payload: truncate(text, 240),
+      },
       "openrouter.response.parse_failed",
     );
     return null;
@@ -446,7 +451,7 @@ const requestOpenRouter = async (
   });
   if (!response.ok) {
     const errorBody = await response.text();
-    logger.warn(
+    logger.error(
       {
         tag,
         status: response.status,
@@ -516,7 +521,7 @@ export const createOpenRouterAdapter = (
             try {
               parsedArgs = JSON.parse(rawArgs) as Record<string, unknown>;
             } catch (error) {
-              logger.warn(
+              logger.error(
                 {
                   error: error instanceof Error ? error.message : "unknown",
                   rawArgs: truncate(rawArgs, 240),
@@ -616,8 +621,10 @@ export const createOpenRouterAdapter = (
         logger,
         "route",
       );
-      const parsed =
-        responseToJsonObject<z.infer<typeof agentRouteSchema>>(response);
+      const parsed = responseToJsonObject<z.infer<typeof agentRouteSchema>>(
+        response,
+        logger,
+      );
       const validated = agentRouteSchema.safeParse(parsed);
       if (!validated.success) {
         throw new AppError("Invalid JSON routing response", {
@@ -656,8 +663,10 @@ export const createOpenRouterAdapter = (
         logger,
         "select",
       );
-      const parsed =
-        responseToJsonObject<z.infer<typeof selectionSchema>>(response);
+      const parsed = responseToJsonObject<z.infer<typeof selectionSchema>>(
+        response,
+        logger,
+      );
       const validated = selectionSchema.safeParse(parsed);
       if (!validated.success) {
         throw new AppError("Invalid JSON selection response", {
@@ -702,8 +711,10 @@ export const createOpenRouterAdapter = (
         logger,
         "status",
       );
-      const parsed =
-        responseToJsonObject<z.infer<typeof statusSchema>>(response);
+      const parsed = responseToJsonObject<z.infer<typeof statusSchema>>(
+        response,
+        logger,
+      );
       const validated = statusSchema.safeParse(parsed);
       if (!validated.success) {
         throw new AppError("Invalid JSON status response", {

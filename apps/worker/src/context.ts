@@ -42,8 +42,8 @@ export const createDependencies = (env: Env): Dependencies => {
   const logger = createLogger(env);
   return {
     crm: getCrmAdapter(env),
-    tickets: createTicketRepository(env.DB),
-    calls: createCallRepository(env.DB),
+    tickets: createTicketRepository(env.DB, logger),
+    calls: createCallRepository(env.DB, logger),
     customers: createCustomerRepository(env.DB),
     appointments: createAppointmentRepository(env.DB),
     workflows: {
@@ -53,7 +53,7 @@ export const createDependencies = (env: Env): Dependencies => {
     },
     modelFactory: (config) => getModelAdapter(env, config, logger),
     agentConfigDefaults: getAgentConfig(env),
-    agentConfig: createAgentConfigRepository(env.DB),
+    agentConfig: createAgentConfigRepository(env.DB, logger),
     logger,
   };
 };

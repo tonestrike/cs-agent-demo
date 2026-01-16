@@ -12,18 +12,18 @@ import {
 
 import { createDependencies } from "../context";
 import type { Env } from "../env";
-import { defaultLogger } from "../logging";
+import type { Logger } from "../logger";
 import { lookupCustomerByPhone, verifyAccount } from "../use-cases/crm";
 import { VERIFY_WORKFLOW_EVENT_ZIP } from "./constants";
 
-const parseSummary = (summary: string | null) => {
+const parseSummary = (summary: string | null, logger: Logger) => {
   if (!summary) {
     return {};
   }
   try {
     return JSON.parse(summary) as Record<string, unknown>;
   } catch (error) {
-    defaultLogger.warn(
+    logger.error(
       { error: error instanceof Error ? error.message : "unknown" },
       "workflow.verify.summary.parse_failed",
     );
@@ -115,7 +115,7 @@ export class VerificationWorkflow extends WorkflowEntrypoint<
         try {
           await deps.crm.escalate({ reason, summary });
         } catch (error) {
-          logger.warn(
+          logger.error(
             {
               callSessionId: params.callSessionId,
               instanceId: event.instanceId,
@@ -131,7 +131,7 @@ export class VerificationWorkflow extends WorkflowEntrypoint<
         details: Record<string, unknown> = {},
       ) => {
         const session = await deps.calls.getSession(params.callSessionId);
-        const existing = parseSummary(session?.summary ?? null);
+        const existing = parseSummary(session?.summary ?? null, logger);
         const detailValues = details as {
           zipAttempts?: number;
           identityStatus?: string;
@@ -293,7 +293,7 @@ export class VerificationWorkflow extends WorkflowEntrypoint<
         );
         const parsedZip = verifyZipEventSchema.safeParse(zipEvent.payload);
         if (!parsedZip.success) {
-          logger.warn(
+          logger.error(
             {
               callSessionId: params.callSessionId,
               instanceId: event.instanceId,

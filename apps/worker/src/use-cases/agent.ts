@@ -244,7 +244,7 @@ type CallSessionSummary = {
   callSummary?: string | null;
 };
 
-const parseSummary = (summary: string | null) => {
+const parseSummary = (summary: string | null, logger: Logger) => {
   if (!summary) {
     return { identityStatus: "unknown" } satisfies CallSessionSummary;
   }
@@ -297,7 +297,13 @@ const parseSummary = (summary: string | null) => {
       callSummary: parsed.callSummary ?? null,
     };
   } catch (error) {
-    console.warn("agent.summary.parse_failed", error);
+    logger.error(
+      {
+        error: error instanceof Error ? error.message : "unknown",
+        summary: summary.slice(0, 240),
+      },
+      "agent.summary.parse_failed",
+    );
     return { identityStatus: "unknown" } satisfies CallSessionSummary;
   }
 };
@@ -323,12 +329,15 @@ const trimSummaryText = (text: string) => {
   return trimmed.length > 140 ? `${trimmed.slice(0, 137)}...` : trimmed;
 };
 
-const stringifyToolResult = (result: ToolResult) => {
+const stringifyToolResult = (result: ToolResult, logger: Logger) => {
   try {
     const text = JSON.stringify(result);
     return text.length > 800 ? `${text.slice(0, 800)}…` : text;
   } catch (error) {
-    console.warn("agent.tool.result.stringify_failed", error);
+    logger.error(
+      { error: error instanceof Error ? error.message : "unknown" },
+      "agent.tool.result.stringify_failed",
+    );
     return null;
   }
 };
@@ -687,7 +696,7 @@ export const handleAgentMessage = async (
         summary: buildSummary(summary),
       });
     } else {
-      summary = parseSummary(session.summary ?? null);
+      summary = parseSummary(session.summary ?? null, deps.logger);
       recentTurns = await deps.calls.getRecentTurns({ callSessionId });
       contextTurns = recentTurns.length;
     }
@@ -699,7 +708,10 @@ export const handleAgentMessage = async (
 
   const updateCallSummary = async (callSummaryText: string) => {
     const latestSession = await deps.calls.getSession(callSessionId);
-    const latestSummary = parseSummary(latestSession?.summary ?? null);
+    const latestSummary = parseSummary(
+      latestSession?.summary ?? null,
+      deps.logger,
+    );
     summary = {
       ...latestSummary,
       callSummary: trimSummaryText(callSummaryText),
@@ -1079,7 +1091,10 @@ export const handleAgentMessage = async (
         const waitForVerification = async () => {
           for (let i = 0; i < 6; i += 1) {
             const latest = await deps.calls.getSession(callSessionId);
-            const latestSummary = parseSummary(latest?.summary ?? null);
+            const latestSummary = parseSummary(
+              latest?.summary ?? null,
+              deps.logger,
+            );
             if (
               latestSummary.identityStatus === "verified" ||
               latestSummary.workflowState?.step === "escalate"
@@ -2692,7 +2707,7 @@ export const handleAgentMessage = async (
         (toolResult as { result?: unknown }).result,
       );
       if (!validation.ok) {
-        logger.warn(
+        logger.error(
           {
             callSessionId,
             toolName: toolResult.toolName,
@@ -2814,7 +2829,7 @@ export const handleAgentMessage = async (
       {
         callSessionId,
         toolName: toolResult.toolName,
-        toolResult: stringifyToolResult(redactedToolResult),
+        toolResult: stringifyToolResult(redactedToolResult, deps.logger),
       },
       "agent.tool.result",
     );
@@ -2826,7 +2841,7 @@ export const handleAgentMessage = async (
       workflowState: summary.workflowState ?? null,
       zipAttempts: summary.zipAttempts ?? 0,
       lastToolName: toolResult.toolName,
-      lastToolResult: stringifyToolResult(redactedToolResult),
+      lastToolResult: stringifyToolResult(redactedToolResult, deps.logger),
       lastAppointmentId,
       lastAppointmentOptions,
       lastAvailableSlots,

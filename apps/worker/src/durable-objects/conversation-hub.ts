@@ -1,5 +1,6 @@
 import type { Env } from "../env";
-import { defaultLogger } from "../logging";
+import type { Logger } from "../logger";
+import { createLogger } from "../logger";
 
 type HubEvent = {
   type: "status" | "delta" | "final";
@@ -9,11 +10,14 @@ type HubEvent = {
 
 export class ConversationHub {
   private connections = new Set<WebSocket>();
+  private logger: Logger;
 
   constructor(
     private state: DurableObjectState,
     private env: Env,
-  ) {}
+  ) {
+    this.logger = createLogger(env);
+  }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -42,7 +46,7 @@ export class ConversationHub {
         try {
           socket.send(payload);
         } catch (error) {
-          defaultLogger.error(
+          this.logger.error(
             { error: error instanceof Error ? error.message : "unknown" },
             "conversation-hub.send_failed",
           );

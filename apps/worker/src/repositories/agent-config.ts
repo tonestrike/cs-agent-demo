@@ -3,7 +3,7 @@ import type {
   AgentPromptConfigRecord,
   AgentPromptConfigUpdate,
 } from "@pestcall/core";
-import { defaultLogger } from "../logging";
+import type { Logger } from "../logger";
 
 type AgentConfigRow = {
   id: string;
@@ -27,6 +27,7 @@ let cachedAt = 0;
 
 const parseToolGuidance = (
   row: AgentConfigRow,
+  logger: Logger,
 ): AgentPromptConfigRecord["toolGuidance"] | undefined => {
   if (row.tool_guidance_json) {
     try {
@@ -35,8 +36,11 @@ const parseToolGuidance = (
         return parsed as AgentPromptConfigRecord["toolGuidance"];
       }
     } catch (error) {
-      defaultLogger.warn(
-        { error: error instanceof Error ? error.message : "unknown" },
+      logger.error(
+        {
+          error: error instanceof Error ? error.message : "unknown",
+          payload: row.tool_guidance_json,
+        },
         "agent-config.tool-guidance.parse_failed",
       );
       return undefined;
@@ -64,20 +68,23 @@ const parseToolGuidance = (
   return undefined;
 };
 
-const mapRow = (row: AgentConfigRow): Partial<AgentPromptConfigRecord> => ({
+const mapRow = (
+  row: AgentConfigRow,
+  logger: Logger,
+): Partial<AgentPromptConfigRecord> => ({
   tone: row.tone as AgentPromptConfig["tone"],
   greeting: row.greeting,
   scopeMessage: row.scope_message ?? row.off_topic_message,
   companyName: row.company_name,
   personaSummary: row.persona_summary,
-  toolGuidance: parseToolGuidance(row),
+  toolGuidance: parseToolGuidance(row, logger),
   modelId: row.model_id ?? "@cf/meta/llama-3.1-8b-instruct",
   updatedAt: row.updated_at,
 });
 
 const isCacheFresh = () => cachedConfig && Date.now() - cachedAt < CACHE_TTL_MS;
 
-export const createAgentConfigRepository = (db: D1Database) => {
+export const createAgentConfigRepository = (db: D1Database, logger: Logger) => {
   return {
     async get(defaults: AgentPromptConfig): Promise<AgentPromptConfigRecord> {
       if (isCacheFresh()) {
@@ -90,7 +97,7 @@ export const createAgentConfigRepository = (db: D1Database) => {
         .first<AgentConfigRow>();
 
       const config = row
-        ? ({ ...defaults, ...mapRow(row) } as AgentPromptConfigRecord)
+        ? ({ ...defaults, ...mapRow(row, logger) } as AgentPromptConfigRecord)
         : { ...defaults };
 
       cachedConfig = config;
