@@ -155,6 +155,7 @@ export default function PromptStudioPage() {
   const [copied, setCopied] = useState(false);
   const [jsonDraft, setJsonDraft] = useState("");
   const [jsonError, setJsonError] = useState("");
+  const [editMode, setEditMode] = useState<"form" | "json">("form");
   const queryClient = useQueryClient();
   const modelOptions = configDraft?.modelId
     ? Array.from(new Set([configDraft.modelId, ...WORKERS_AI_MODELS]))
@@ -302,37 +303,55 @@ export default function PromptStudioPage() {
               </Button>
             </div>
           </div>
-          <div className="space-y-3">
-            <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
-              Update by JSON
-              <textarea
-                className="min-h-[140px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
-                placeholder='Paste JSON config or {"config": {...}}'
-                value={jsonDraft}
-                onChange={(event) => setJsonDraft(event.target.value)}
-              />
-            </label>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                className="bg-slate hover:bg-ink"
-                type="button"
-                onClick={applyJsonConfig}
-              >
-                Apply JSON
-              </Button>
-              {jsonError ? (
-                <p className="text-xs font-semibold uppercase tracking-wide text-clay">
-                  {jsonError}
-                </p>
-              ) : null}
-            </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              className={editMode === "form" ? "bg-ink" : "bg-white/80"}
+              type="button"
+              onClick={() => setEditMode("form")}
+            >
+              Form Editor
+            </Button>
+            <Button
+              className={editMode === "json" ? "bg-ink" : "bg-white/80"}
+              type="button"
+              onClick={() => setEditMode("json")}
+            >
+              JSON Editor
+            </Button>
           </div>
+          {editMode === "json" ? (
+            <div className="space-y-3">
+              <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                Update by JSON
+                <textarea
+                  className="min-h-[220px] rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  placeholder='Paste JSON config or {"config": {...}}'
+                  value={jsonDraft}
+                  onChange={(event) => setJsonDraft(event.target.value)}
+                />
+              </label>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  className="bg-slate hover:bg-ink"
+                  type="button"
+                  onClick={applyJsonConfig}
+                >
+                  Apply JSON
+                </Button>
+                {jsonError ? (
+                  <p className="text-xs font-semibold uppercase tracking-wide text-clay">
+                    {jsonError}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           {saved ? (
             <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">
               Saved
             </p>
           ) : null}
-          {configDraft ? (
+          {editMode === "form" && configDraft ? (
             <div className="space-y-4 text-sm">
               <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
                 Tone
