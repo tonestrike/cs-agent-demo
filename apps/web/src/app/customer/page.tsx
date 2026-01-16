@@ -39,6 +39,9 @@ export default function CustomerPage() {
   const [phoneNumber, setPhoneNumber] = useState(phoneOptions[0]?.value ?? "");
   const [input, setInput] = useState("");
   const [callSessionId, setCallSessionId] = useState<string | null>(null);
+  const [confirmedSessionId, setConfirmedSessionId] = useState<string | null>(
+    null,
+  );
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "intro",
@@ -74,6 +77,7 @@ export default function CustomerPage() {
     const selected = nextPhone ?? phoneNumber;
     setPhoneNumber(selected);
     setCallSessionId(null);
+    setConfirmedSessionId(null);
     setMessages([
       {
         id: "intro",
@@ -158,6 +162,7 @@ export default function CustomerPage() {
               ).data;
               if (data?.callSessionId) {
                 setCallSessionId(data.callSessionId);
+                setConfirmedSessionId(data.callSessionId);
               }
             }
             requestAnimationFrame(() => {
@@ -216,9 +221,9 @@ export default function CustomerPage() {
               <span className="rounded-full border border-ink/10 bg-white/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">
                 {statusLabel}
               </span>
-              {callSessionId ? (
+              {confirmedSessionId ? (
                 <Link
-                  href={`/agent/calls/${callSessionId}`}
+                  href={`/agent/calls/${confirmedSessionId}`}
                   className="text-xs font-semibold uppercase tracking-wide text-ink/60 hover:text-ink"
                 >
                   View in agent mode

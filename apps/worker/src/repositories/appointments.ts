@@ -91,6 +91,26 @@ export const createAppointmentRepository = (db: D1Database) => {
         )
         .run();
     },
+    async upsert(appointment: ServiceAppointment) {
+      await db
+        .prepare(
+          "INSERT INTO appointments (id, customer_id, phone_e164, address_summary, date, time_window, status, rescheduled_from_id, rescheduled_to_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET customer_id = excluded.customer_id, phone_e164 = excluded.phone_e164, address_summary = excluded.address_summary, date = excluded.date, time_window = excluded.time_window, status = excluded.status, rescheduled_from_id = excluded.rescheduled_from_id, rescheduled_to_id = excluded.rescheduled_to_id, updated_at = excluded.updated_at",
+        )
+        .bind(
+          appointment.id,
+          appointment.customerId,
+          appointment.phoneE164,
+          appointment.addressSummary,
+          appointment.date,
+          appointment.timeWindow,
+          appointment.status,
+          appointment.rescheduledFromId ?? null,
+          appointment.rescheduledToId ?? null,
+          appointment.createdAt,
+          appointment.updatedAt,
+        )
+        .run();
+    },
     async markRescheduled(input: {
       appointmentId: string;
       rescheduledToId: string;

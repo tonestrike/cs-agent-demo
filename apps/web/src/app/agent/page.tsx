@@ -349,7 +349,11 @@ export default function AgentDashboardPage() {
               {ticketsQuery.isLoading && (
                 <p className="text-sm text-ink/60">Loading tickets...</p>
               )}
+              {ticketsQuery.isError && (
+                <p className="text-sm text-ink/60">Unable to load tickets.</p>
+              )}
               {!ticketsQuery.isLoading &&
+              !ticketsQuery.isError &&
               (ticketsQuery.data?.items ?? []).length === 0 ? (
                 <p className="text-sm text-ink/60">No open tickets.</p>
               ) : null}

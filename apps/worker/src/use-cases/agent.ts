@@ -1,4 +1,4 @@
-import { normalizePhoneE164 } from "@pestcall/core";
+import { type ServiceAppointment, normalizePhoneE164 } from "@pestcall/core";
 import type { Dependencies } from "../context";
 import {
   type ModelAdapter,
@@ -96,6 +96,35 @@ const buildCustomerContext = (customer: {
   phoneE164: customer.phoneE164,
   addressSummary: customer.addressSummary,
 });
+
+const upsertAppointmentSnapshot = async (
+  deps: Dependencies,
+  phoneE164: string,
+  appointment: {
+    id: string;
+    customerId: string;
+    addressSummary: string;
+    date: string;
+    timeWindow: string;
+  } | null,
+  status: ServiceAppointment["status"] = "scheduled",
+) => {
+  if (!appointment) {
+    return;
+  }
+  const nowIso = new Date().toISOString();
+  await deps.appointments.upsert({
+    id: appointment.id,
+    customerId: appointment.customerId,
+    phoneE164,
+    addressSummary: appointment.addressSummary,
+    date: appointment.date,
+    timeWindow: appointment.timeWindow,
+    status,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  });
+};
 
 type CallSessionSummary = {
   identityStatus?: "unknown" | "pending" | "verified";
@@ -538,6 +567,17 @@ export const handleAgentMessage = async (
           deps.crm.getNextAppointment(customerId),
         );
         tools.push(call.record);
+        await upsertAppointmentSnapshot(
+          deps,
+          phoneE164,
+          (call.result ?? null) as {
+            id: string;
+            customerId: string;
+            addressSummary: string;
+            date: string;
+            timeWindow: string;
+          } | null,
+        );
         toolResult = {
           toolName: "crm.getNextAppointment",
           result: call.result ?? null,
@@ -572,9 +612,23 @@ export const handleAgentMessage = async (
           deps.crm.listUpcomingAppointments(customerId, limit),
         );
         tools.push(call.record);
+        const result = Array.isArray(call.result) ? call.result : [];
+        for (const appointment of result) {
+          await upsertAppointmentSnapshot(
+            deps,
+            phoneE164,
+            appointment as {
+              id: string;
+              customerId: string;
+              addressSummary: string;
+              date: string;
+              timeWindow: string;
+            },
+          );
+        }
         toolResult = {
           toolName: "crm.listUpcomingAppointments",
-          result: Array.isArray(call.result) ? call.result : [],
+          result,
         };
         break;
       }
@@ -604,6 +658,17 @@ export const handleAgentMessage = async (
           deps.crm.getAppointmentById(appointmentId),
         );
         tools.push(call.record);
+        await upsertAppointmentSnapshot(
+          deps,
+          phoneE164,
+          (call.result ?? null) as {
+            id: string;
+            customerId: string;
+            addressSummary: string;
+            date: string;
+            timeWindow: string;
+          } | null,
+        );
         toolResult = {
           toolName: "crm.getAppointmentById",
           result: call.result ?? null,
@@ -744,6 +809,19 @@ export const handleAgentMessage = async (
             }
           ).appointment;
           if (updated) {
+            await upsertAppointmentSnapshot(
+              deps,
+              phoneE164,
+              (call.result as { appointment?: unknown })?.appointment
+                ? ((call.result as { appointment: unknown }).appointment as {
+                    id: string;
+                    customerId: string;
+                    addressSummary: string;
+                    date: string;
+                    timeWindow: string;
+                  })
+                : null,
+            );
             toolResult = {
               toolName: "crm.rescheduleAppointment",
               result: {
