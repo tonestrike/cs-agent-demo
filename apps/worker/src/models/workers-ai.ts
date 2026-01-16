@@ -1,21 +1,20 @@
 import type { Ai, AiModels } from "@cloudflare/workers-types";
 import { AppError } from "@pestcall/core";
-import { generateObject } from "ai";
+import { generateText } from "ai";
 
 import type { AgentPromptConfig } from "@pestcall/core";
 import { z } from "zod";
-import { toolDefinitions } from "./tool-definitions";
-import {
-  createWorkersAiLanguageModel,
-  responseToText,
-} from "./workers-ai-language-model";
+import { aiTools, toolDefinitions } from "./tool-definitions";
 import {
   type AgentModelInput,
   type AgentResponseInput,
   type ModelAdapter,
-  agentModelOutputSchema,
   agentToolCallSchema,
 } from "./types";
+import {
+  createWorkersAiLanguageModel,
+  responseToText,
+} from "./workers-ai-language-model";
 
 const isToolCallJson = (text: string) => {
   if (!text.startsWith("{") || !text.endsWith("}")) {
@@ -268,15 +267,30 @@ export const createWorkersAiAdapter = (
         .join("\n");
       try {
         const sdkModel = createWorkersAiLanguageModel(ai, model);
-        const result = await generateObject({
+        const result = await generateText({
           model: sdkModel,
-          schema: agentModelOutputSchema,
+          tools: aiTools,
           system: systemPrompt,
           messages: input.messages,
-          mode: "json",
+          maxSteps: 1,
         });
-        return result.object;
-      } catch (error) {
+        const toolCall = result.toolCalls[0];
+        if (toolCall) {
+          const validated = agentToolCallSchema.safeParse({
+            type: "tool_call",
+            toolName: toolCall.toolName,
+            arguments: toolCall.args,
+          });
+          if (validated.success) {
+            return validated.data;
+          }
+        }
+        const text = result.text.trim();
+        return {
+          type: "final",
+          text: text || "I could not interpret the request. Can you rephrase?",
+        };
+      } catch (_error) {
         const fallbackResponse = await ai.run(model as keyof AiModels, {
           messages: buildMessages(instructions, input.context, input.messages),
         });

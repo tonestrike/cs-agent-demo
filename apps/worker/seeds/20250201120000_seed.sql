@@ -61,3 +61,44 @@ VALUES
     '2025-02-01T11:00:00Z',
     '2025-02-01T11:00:00Z'
   );
+
+INSERT OR REPLACE INTO appointments (
+  id,
+  customer_id,
+  phone_e164,
+  address_summary,
+  date,
+  time_window,
+  status,
+  rescheduled_from_id,
+  rescheduled_to_id,
+  created_at,
+  updated_at
+)
+VALUES
+  (
+    'appt_seed_001',
+    'cust_001',
+    '+14155552671',
+    '742 Evergreen Terrace',
+    '2025-02-10',
+    '10:00-12:00',
+    'scheduled',
+    NULL,
+    NULL,
+    '2025-02-01T10:00:00Z',
+    '2025-02-01T10:00:00Z'
+  ),
+  (
+    'appt_seed_002',
+    'cust_002',
+    '+14155550987',
+    '123 Harbor Drive',
+    '2025-02-12',
+    '14:00-16:00',
+    'scheduled',
+    NULL,
+    NULL,
+    '2025-02-01T11:00:00Z',
+    '2025-02-01T11:00:00Z'
+  );
