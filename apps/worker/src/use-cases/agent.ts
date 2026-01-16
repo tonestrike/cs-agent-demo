@@ -622,6 +622,7 @@ export const handleAgentMessage = async (
     | "forced_verify"
     | "forced_lookup"
     | "forced_selection"
+    | "forced_router"
     | "follow_up"
     | null = null;
 
@@ -1583,6 +1584,44 @@ export const handleAgentMessage = async (
       toolCall = followUp;
       followUpDecisionSnapshot = summarizeModelOutput(followUp);
       toolCallSource = "follow_up";
+    }
+  }
+
+  if (
+    !toolCall &&
+    summary.identityStatus === "verified" &&
+    shouldForceToolDecision(input.text)
+  ) {
+    const normalized = input.text.toLowerCase();
+    const customerId =
+      verifiedCustomerId ??
+      summary.verifiedCustomerId ??
+      resolvedCustomer?.id ??
+      session?.customerCacheId ??
+      null;
+    if (customerId) {
+      if (normalized.includes("appointment")) {
+        toolCall = {
+          type: "tool_call",
+          toolName: "crm.getNextAppointment",
+          arguments: { customerId },
+        };
+        toolCallSource = "forced_router";
+      } else if (/\b(invoice|balance|bill|owe|payment)\b/.test(normalized)) {
+        toolCall = {
+          type: "tool_call",
+          toolName: "crm.getOpenInvoices",
+          arguments: { customerId },
+        };
+        toolCallSource = "forced_router";
+      } else if (normalized.includes("policy")) {
+        toolCall = {
+          type: "tool_call",
+          toolName: "crm.getServicePolicy",
+          arguments: { topic: normalized },
+        };
+        toolCallSource = "forced_router";
+      }
     }
   }
 
