@@ -1,4 +1,10 @@
-import { type ServiceAppointment, normalizePhoneE164 } from "@pestcall/core";
+import {
+  type ServiceAppointment,
+  ServiceAppointmentStatus,
+  TicketCategory,
+  TicketSource,
+  normalizePhoneE164,
+} from "@pestcall/core";
 import { z } from "zod";
 import type { Dependencies } from "../context";
 import type { Logger } from "../logger";
@@ -46,57 +52,41 @@ type AgentMessageOptions = {
   onStatus?: (status: AgentStatusUpdate) => void;
 };
 
-const statusMessageForTool = (toolName: AgentToolName) => {
-  switch (toolName) {
-    case "crm.verifyAccount":
-      return "Checking that ZIP code now.";
-    case "crm.getNextAppointment":
-      return "Let me check your next appointment.";
-    case "crm.listUpcomingAppointments":
-      return "Looking up your upcoming appointments.";
-    case "crm.getAppointmentById":
-      return "Looking up that appointment.";
-    case "crm.getOpenInvoices":
-      return "Checking your balance now.";
-    case "crm.getAvailableSlots":
-      return "Checking available time slots.";
-    case "crm.rescheduleAppointment":
-      return "Rescheduling your appointment now.";
-    case "crm.cancelAppointment":
-      return "Cancelling your appointment now.";
-    case "crm.createAppointment":
-      return "Scheduling that appointment now.";
-    case "crm.getServicePolicy":
-      return "Looking up the policy now.";
-    case "crm.escalate":
-    case "agent.escalate":
-      return "Connecting you with a specialist.";
-    default:
-      return "Let me check that for you.";
-  }
+const DEFAULT_TOOL_STATUS_MESSAGE = "Let me check that for you.";
+
+const TOOL_STATUS_MESSAGES: Partial<Record<AgentToolName, string>> = {
+  "crm.verifyAccount": "Checking that ZIP code now.",
+  "crm.getNextAppointment": "Let me check your next appointment.",
+  "crm.listUpcomingAppointments": "Looking up your upcoming appointments.",
+  "crm.getAppointmentById": "Looking up that appointment.",
+  "crm.getOpenInvoices": "Checking your balance now.",
+  "crm.getAvailableSlots": "Checking available time slots.",
+  "crm.rescheduleAppointment": "Rescheduling your appointment now.",
+  "crm.cancelAppointment": "Cancelling your appointment now.",
+  "crm.createAppointment": "Scheduling that appointment now.",
+  "crm.getServicePolicy": "Looking up the policy now.",
+  "crm.escalate": "Connecting you with a specialist.",
+  "agent.escalate": "Connecting you with a specialist.",
 };
 
-const statusHintForTool = (toolName: AgentToolName) => {
-  switch (toolName) {
-    case "crm.getNextAppointment":
-    case "crm.listUpcomingAppointments":
-      return "next appointment";
-    case "crm.getAvailableSlots":
-      return "available time slots";
-    case "crm.rescheduleAppointment":
-      return "rescheduling your appointment";
-    case "crm.cancelAppointment":
-      return "cancelling your appointment";
-    case "crm.getOpenInvoices":
-      return "your balance";
-    case "crm.getServicePolicy":
-      return "service policy";
-    case "crm.verifyAccount":
-      return "verification";
-    default:
-      return "your request";
-  }
+const statusMessageForTool = (toolName: AgentToolName) =>
+  TOOL_STATUS_MESSAGES[toolName] ?? DEFAULT_TOOL_STATUS_MESSAGE;
+
+const DEFAULT_TOOL_STATUS_HINT = "your request";
+
+const TOOL_STATUS_HINTS: Partial<Record<AgentToolName, string>> = {
+  "crm.getNextAppointment": "next appointment",
+  "crm.listUpcomingAppointments": "next appointment",
+  "crm.getAvailableSlots": "available time slots",
+  "crm.rescheduleAppointment": "rescheduling your appointment",
+  "crm.cancelAppointment": "cancelling your appointment",
+  "crm.getOpenInvoices": "your balance",
+  "crm.getServicePolicy": "service policy",
+  "crm.verifyAccount": "verification",
 };
+
+const statusHintForTool = (toolName: AgentToolName) =>
+  TOOL_STATUS_HINTS[toolName] ?? DEFAULT_TOOL_STATUS_HINT;
 
 const logModelCall = (logger: Logger, record: ModelCall) => {
   logger.debug({ modelCall: record }, "agent.model_call");
@@ -189,7 +179,7 @@ const upsertAppointmentSnapshot = async (
     date: string;
     timeWindow: string;
   } | null,
-  status: ServiceAppointment["status"] = "scheduled",
+  status: ServiceAppointment["status"] = ServiceAppointmentStatus.Scheduled,
 ) => {
   if (!appointment) {
     return;
@@ -1881,7 +1871,7 @@ export const handleAgentMessage = async (
                       date: appointmentSnapshot?.date ?? updated.date,
                       timeWindow:
                         appointmentSnapshot?.timeWindow ?? updated.timeWindow,
-                      status: "scheduled",
+                      status: ServiceAppointmentStatus.Scheduled,
                       createdAt: new Date().toISOString(),
                       updatedAt: new Date().toISOString(),
                     },
@@ -1964,7 +1954,7 @@ export const handleAgentMessage = async (
                   deps,
                   phoneE164,
                   appointmentSnapshot,
-                  "cancelled",
+                  ServiceAppointmentStatus.Cancelled,
                 );
               }
               toolResult = {
@@ -2065,8 +2055,8 @@ export const handleAgentMessage = async (
             const ticket = await createTicketUseCase(deps.tickets, {
               subject: reason,
               description: summaryText,
-              category: "general",
-              source: "agent",
+              category: TicketCategory.General,
+              source: TicketSource.Agent,
               phoneE164,
               customerCacheId,
             });
@@ -2378,6 +2368,8 @@ export const handleAgentMessage = async (
   let ticketId: string | undefined;
   let toolCustomer = customer;
   let selectedAppointmentId: string | null = summary.lastAppointmentId ?? null;
+  const failureMessage =
+    "Something went wrong on my end. Please try again, or I can have someone reach out to you.";
   const maxToolPasses = 10;
   let iterations = 0;
 
@@ -2460,7 +2452,7 @@ export const handleAgentMessage = async (
       input,
       toolCustomer,
       exec.toolResult,
-      agentConfig.scopeMessage,
+      failureMessage,
       context,
       modelCalls,
       messageHistory,

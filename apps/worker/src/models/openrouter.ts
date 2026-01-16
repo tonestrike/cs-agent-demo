@@ -374,9 +374,14 @@ const jsonResponseFormat = (schema: Record<string, unknown>) => ({
   },
 });
 
+const truncate = (value: string, limit = 800) =>
+  value.length > limit ? `${value.slice(0, limit)}…` : value;
+
 const requestOpenRouter = async (
   env: Env,
   payload: Record<string, unknown>,
+  logger: Logger,
+  tag: string,
 ) => {
   const baseUrl = buildGatewayBaseUrl(env);
   const token = env.OPENROUTER_TOKEN;
@@ -395,6 +400,15 @@ const requestOpenRouter = async (
   });
   if (!response.ok) {
     const errorBody = await response.text();
+    logger.warn(
+      {
+        tag,
+        status: response.status,
+        statusText: response.statusText,
+        errorBody: truncate(errorBody),
+      },
+      "openrouter.request.failed",
+    );
     throw new AppError("OpenRouter request failed.", {
       code: "OPENROUTER_REQUEST_FAILED",
       meta: { errorBody },
@@ -430,7 +444,7 @@ export const createOpenRouterAdapter = (
         },
         "openrouter.tool_call.payload",
       );
-      const response = await requestOpenRouter(env, payload);
+      const response = await requestOpenRouter(env, payload, logger, "generate");
       const toolCalls = (
         response as {
           choices?: Array<{
@@ -482,12 +496,17 @@ export const createOpenRouterAdapter = (
         },
         "openrouter.respond.payload",
       );
-      const response = await requestOpenRouter(env, {
-        model,
-        messages: buildMessages(instructions, input.context, input.messages),
-        response_format: jsonResponseFormat(responseJsonSchema),
-        max_tokens: MAX_NEW_TOKENS,
-      });
+      const response = await requestOpenRouter(
+        env,
+        {
+          model,
+          messages: buildMessages(instructions, input.context, input.messages),
+          response_format: jsonResponseFormat(responseJsonSchema),
+          max_tokens: MAX_NEW_TOKENS,
+        },
+        logger,
+        "respond",
+      );
       const parsed =
         responseToJsonObject<z.infer<typeof responseSchema>>(response);
       const validated = responseSchema.safeParse(parsed);
@@ -506,12 +525,17 @@ export const createOpenRouterAdapter = (
         },
         "openrouter.route.payload",
       );
-      const response = await requestOpenRouter(env, {
-        model,
-        messages: [{ role: "system", content: buildRouteInstructions(input) }],
-        response_format: jsonResponseFormat(routeJsonSchema),
-        max_tokens: MAX_NEW_TOKENS,
-      });
+      const response = await requestOpenRouter(
+        env,
+        {
+          model,
+          messages: [{ role: "system", content: buildRouteInstructions(input) }],
+          response_format: jsonResponseFormat(routeJsonSchema),
+          max_tokens: MAX_NEW_TOKENS,
+        },
+        logger,
+        "route",
+      );
       const parsed =
         responseToJsonObject<z.infer<typeof agentRouteSchema>>(response);
       const validated = agentRouteSchema.safeParse(parsed);
@@ -532,21 +556,26 @@ export const createOpenRouterAdapter = (
         },
         "openrouter.select.payload",
       );
-      const response = await requestOpenRouter(env, {
-        model,
-        messages: [
-          {
-            role: "system",
-            content: buildSelectionInstructions(kind, options),
-          },
-          {
-            role: "user",
-            content: text,
-          },
-        ],
-        response_format: jsonResponseFormat(selectionJsonSchema),
-        max_tokens: MAX_NEW_TOKENS,
-      });
+      const response = await requestOpenRouter(
+        env,
+        {
+          model,
+          messages: [
+            {
+              role: "system",
+              content: buildSelectionInstructions(kind, options),
+            },
+            {
+              role: "user",
+              content: text,
+            },
+          ],
+          response_format: jsonResponseFormat(selectionJsonSchema),
+          max_tokens: MAX_NEW_TOKENS,
+        },
+        logger,
+        "select",
+      );
       const parsed =
         responseToJsonObject<z.infer<typeof selectionSchema>>(response);
       const validated = selectionSchema.safeParse(parsed);
@@ -573,21 +602,26 @@ export const createOpenRouterAdapter = (
         },
         "openrouter.status.payload",
       );
-      const response = await requestOpenRouter(env, {
-        model,
-        messages: [
-          {
-            role: "system",
-            content: buildStatusInstructions(contextHint),
-          },
-          {
-            role: "user",
-            content: text,
-          },
-        ],
-        response_format: jsonResponseFormat(statusJsonSchema),
-        max_tokens: MAX_NEW_TOKENS,
-      });
+      const response = await requestOpenRouter(
+        env,
+        {
+          model,
+          messages: [
+            {
+              role: "system",
+              content: buildStatusInstructions(contextHint),
+            },
+            {
+              role: "user",
+              content: text,
+            },
+          ],
+          response_format: jsonResponseFormat(statusJsonSchema),
+          max_tokens: MAX_NEW_TOKENS,
+        },
+        logger,
+        "status",
+      );
       const parsed =
         responseToJsonObject<z.infer<typeof statusSchema>>(response);
       const validated = statusSchema.safeParse(parsed);

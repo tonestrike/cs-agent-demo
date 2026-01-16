@@ -24,6 +24,7 @@ export {
   serviceAppointmentListOutputSchema,
   serviceAppointmentSchema,
   serviceAppointmentStatusSchema,
+  ServiceAppointmentStatus,
   type ServiceAppointment,
   type ServiceAppointmentIdInput,
   type ServiceAppointmentListInput,

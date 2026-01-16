@@ -6,6 +6,8 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 CRM_PROVIDER = "mock"
 AGENT_MODEL = "workers-ai"
+AI_GATEWAY_ACCOUNT_ID = "197ac8ab6d5079d3faab60cea42eaa7e"
+AI_GATEWAY_ID = "cs-bot"
 
 [ai]
 binding = "AI"

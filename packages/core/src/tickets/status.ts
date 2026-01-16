@@ -1,9 +1,9 @@
-import type { Ticket, TicketStatus } from "./types";
+import { type Ticket, TicketStatus } from "./types";
 
 const allowedTransitions: Record<TicketStatus, TicketStatus[]> = {
-  open: ["in_progress", "resolved"],
-  in_progress: ["open", "resolved"],
-  resolved: ["open"],
+  [TicketStatus.Open]: [TicketStatus.InProgress, TicketStatus.Resolved],
+  [TicketStatus.InProgress]: [TicketStatus.Open, TicketStatus.Resolved],
+  [TicketStatus.Resolved]: [TicketStatus.Open],
 };
 
 export type TicketStatusTransitionResult =

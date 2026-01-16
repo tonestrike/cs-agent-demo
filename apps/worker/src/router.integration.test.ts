@@ -4,6 +4,11 @@ import { describe, expect, it } from "vitest";
 import { getPlatformProxy } from "wrangler";
 
 import { RPCHandler } from "@orpc/server/fetch";
+import {
+  ServiceAppointmentStatus,
+  TicketSource,
+  TicketStatus,
+} from "@pestcall/core";
 import { createContext } from "./context";
 import type { Env } from "./env";
 import { createAppointmentRepository } from "./repositories/appointments";
@@ -104,11 +109,11 @@ describe("tickets RPC", () => {
       }>(platform, "tickets/create", {
         subject: "Ants in the kitchen",
         description: "Customer reports ants near the sink.",
-        source: "internal",
+        source: TicketSource.Internal,
       });
 
       expect(created.subject).toBe("Ants in the kitchen");
-      expect(created.status).toBe("open");
+      expect(created.status).toBe(TicketStatus.Open);
 
       const fetched = await callRpc<{ id: string; status: string }>(
         platform,
@@ -135,11 +140,11 @@ describe("tickets RPC", () => {
         "tickets/setStatus",
         {
           ticketId: created.id,
-          status: "resolved",
+          status: TicketStatus.Resolved,
         },
       );
 
-      expect(updated.status).toBe("resolved");
+      expect(updated.status).toBe(TicketStatus.Resolved);
     } finally {
       await platform.dispose();
     }
@@ -219,7 +224,7 @@ describe("agent RPC", () => {
         addressSummary: "742 Evergreen Terrace",
         date: "2025-02-10",
         timeWindow: "10:00-12:00",
-        status: "scheduled",
+        status: ServiceAppointmentStatus.Scheduled,
         createdAt: now,
         updatedAt: now,
       });
