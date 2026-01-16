@@ -672,6 +672,19 @@ export const handleAgentMessage = async (
     callSessionId,
   });
 
+  const updateCallSummary = async (callSummaryText: string) => {
+    const latestSession = await deps.calls.getSession(callSessionId);
+    const latestSummary = parseSummary(latestSession?.summary ?? null);
+    summary = {
+      ...latestSummary,
+      callSummary: trimSummaryText(callSummaryText),
+    };
+    await deps.calls.updateSessionSummary({
+      callSessionId,
+      summary: buildSummary(summary),
+    });
+  };
+
   await deps.calls.addTurn({
     id: crypto.randomUUID(),
     callSessionId,
@@ -833,11 +846,7 @@ export const handleAgentMessage = async (
     if (existingVerifyState?.step === "escalate") {
       const replyText =
         "I'm going to connect you with a specialist to verify your account.";
-      summary = { ...summary, callSummary: trimSummaryText(replyText) };
-      await deps.calls.updateSessionSummary({
-        callSessionId,
-        summary: buildSummary(summary),
-      });
+      await updateCallSummary(replyText);
       await deps.calls.addTurn({
         id: crypto.randomUUID(),
         callSessionId,
@@ -878,7 +887,8 @@ export const handleAgentMessage = async (
       resolvedCustomer?.id ??
       null;
 
-    if (!deps.workflows.verify) {
+    const verifyWorkflow = deps.workflows.verify;
+    if (!verifyWorkflow) {
       if (isZipInput && pendingVerificationId) {
         toolCall = {
           type: "tool_call",
@@ -902,11 +912,7 @@ export const handleAgentMessage = async (
         actions.push("created_ticket");
         const replyText =
           "I'm having trouble verifying the account. I'll connect you with a specialist.";
-        summary = { ...summary, callSummary: trimSummaryText(replyText) };
-        await deps.calls.updateSessionSummary({
-          callSessionId,
-          summary: buildSummary(summary),
-        });
+        await updateCallSummary(replyText);
         await deps.calls.addTurn({
           id: crypto.randomUUID(),
           callSessionId,
@@ -952,11 +958,7 @@ export const handleAgentMessage = async (
             invalidZip: hasNumericInput && !isZipInput,
           },
         );
-        summary = { ...summary, callSummary: trimSummaryText(replyText) };
-        await deps.calls.updateSessionSummary({
-          callSessionId,
-          summary: buildSummary(summary),
-        });
+        await updateCallSummary(replyText);
         await deps.calls.addTurn({
           id: crypto.randomUUID(),
           callSessionId,
@@ -992,148 +994,186 @@ export const handleAgentMessage = async (
       }
     }
 
-    if (!existingVerifyState?.instanceId) {
-      const instance = await deps.workflows.verify.create({
-        params: {
+    if (verifyWorkflow) {
+      if (!existingVerifyState?.instanceId) {
+        const instance = await verifyWorkflow.create({
+          params: {
+            callSessionId,
+            phoneE164,
+            intent: "verify",
+          },
+        });
+        workflowState = {
+          kind: "verify",
+          step: "start",
+          instanceId: instance.id,
+        };
+        summary = { ...summary, workflowState };
+        await deps.calls.updateSessionSummary({
           callSessionId,
-          phoneE164,
-          intent: "verify",
-        },
-      });
-      workflowState = {
-        kind: "verify",
-        step: "start",
-        instanceId: instance.id,
-      };
-      summary = { ...summary, workflowState };
-      await deps.calls.updateSessionSummary({
-        callSessionId,
-        summary: buildSummary(summary),
-      });
-    }
-
-    if (isZipInput) {
-      if (workflowState?.kind === "verify" && workflowState.instanceId) {
-        const instance = await deps.workflows.verify.get(
-          workflowState.instanceId,
-        );
-        await instance.sendEvent({
-          type: VERIFY_WORKFLOW_EVENT_ZIP,
-          payload: { zipCode: trimmedInput },
+          summary: buildSummary(summary),
         });
       }
-      const waitForVerification = async () => {
-        for (let i = 0; i < 6; i += 1) {
-          const latest = await deps.calls.getSession(callSessionId);
-          const latestSummary = parseSummary(latest?.summary ?? null);
-          if (
-            latestSummary.identityStatus === "verified" ||
-            latestSummary.workflowState?.step === "escalate"
-          ) {
-            return latestSummary;
-          }
-          await sleep(250);
+
+      if (isZipInput) {
+        if (workflowState?.kind === "verify" && workflowState.instanceId) {
+          const instance = await verifyWorkflow.get(workflowState.instanceId);
+          await instance.sendEvent({
+            type: VERIFY_WORKFLOW_EVENT_ZIP,
+            payload: { zipCode: trimmedInput },
+          });
         }
-        return null;
-      };
-
-      const latestSummary = await waitForVerification();
-      if (latestSummary?.identityStatus === "verified") {
-        const verifiedId =
-          latestSummary.verifiedCustomerId ??
-          summary.verifiedCustomerId ??
-          resolvedCustomer?.id ??
-          null;
-        const verifiedProfile = verifiedId
-          ? await deps.customers.get(verifiedId)
-          : null;
-        const verifiedCustomerForReply =
-          verifiedProfile ??
-          (resolvedCustomer?.id === verifiedId ? resolvedCustomer : null);
-        const verifiedCustomerContext = verifiedCustomerForReply
-          ? {
-              id: verifiedCustomerForReply.id,
-              displayName: verifiedCustomerForReply.displayName,
-              phoneE164: verifiedCustomerForReply.phoneE164 ?? phoneE164,
-              addressSummary:
-                verifiedCustomerForReply.addressSummary ?? "Unknown",
+        const waitForVerification = async () => {
+          for (let i = 0; i < 6; i += 1) {
+            const latest = await deps.calls.getSession(callSessionId);
+            const latestSummary = parseSummary(latest?.summary ?? null);
+            if (
+              latestSummary.identityStatus === "verified" ||
+              latestSummary.workflowState?.step === "escalate"
+            ) {
+              return latestSummary;
             }
-          : customer;
-        const replyText = await generateReply(
-          model,
-          input,
-          verifiedCustomerContext,
-          {
-            toolName: "crm.verifyAccount",
-            result: { ok: true },
-          },
-          agentConfig.scopeMessage,
-          context,
-          modelCalls,
-          messageHistory,
-          logger,
-          callSessionId,
-        );
-        summary = { ...latestSummary, callSummary: trimSummaryText(replyText) };
-        await deps.calls.updateSessionSummary({
-          callSessionId,
-          summary: buildSummary(summary),
-        });
-        await deps.calls.addTurn({
-          id: crypto.randomUUID(),
-          callSessionId,
-          ts: new Date().toISOString(),
-          speaker: "agent",
-          text: replyText,
-          meta: {
-            intent: "final",
-            tools,
-            modelCalls,
-            customerId: verifiedId ?? customer.id,
-            contextUsed: Boolean(context),
-            contextTurns,
-            decisionSnapshot,
-            toolCallSource,
-            replyTextLength: replyText.length,
-            replyTextWasEmpty: !replyText.trim(),
-          },
-        });
-        logger.info(
-          {
-            callSessionId,
-            intent: "final",
-            toolCallSource,
-            toolCount: tools.length,
-            modelCallCount: modelCalls.length,
-            replyTextLength: replyText.length,
-            replyPreview: replyText.slice(0, 160),
-          },
-          "agent.message.complete",
-        );
-        return { callSessionId, replyText, actions };
-      }
+            await sleep(250);
+          }
+          return null;
+        };
 
-      if (latestSummary?.workflowState?.step === "escalate") {
-        const replyText = await generateReply(
-          model,
-          input,
-          customer,
-          {
-            toolName: "agent.escalate",
-            result: { escalated: true },
-          },
-          agentConfig.scopeMessage,
-          context,
-          modelCalls,
-          messageHistory,
-          logger,
-          callSessionId,
+        const latestSummary = await waitForVerification();
+        if (latestSummary?.identityStatus === "verified") {
+          const verifiedId =
+            latestSummary.verifiedCustomerId ??
+            summary.verifiedCustomerId ??
+            resolvedCustomer?.id ??
+            null;
+          const verifiedProfile = verifiedId
+            ? await deps.customers.get(verifiedId)
+            : null;
+          const verifiedCustomerForReply =
+            verifiedProfile ??
+            (resolvedCustomer?.id === verifiedId ? resolvedCustomer : null);
+          const verifiedCustomerContext = verifiedCustomerForReply
+            ? {
+                id: verifiedCustomerForReply.id,
+                displayName: verifiedCustomerForReply.displayName,
+                phoneE164: verifiedCustomerForReply.phoneE164 ?? phoneE164,
+                addressSummary:
+                  verifiedCustomerForReply.addressSummary ?? "Unknown",
+              }
+            : customer;
+          const replyText = await generateReply(
+            model,
+            input,
+            verifiedCustomerContext,
+            {
+              toolName: "crm.verifyAccount",
+              result: { ok: true },
+            },
+            agentConfig.scopeMessage,
+            context,
+            modelCalls,
+            messageHistory,
+            logger,
+            callSessionId,
+          );
+          await updateCallSummary(replyText);
+          await deps.calls.addTurn({
+            id: crypto.randomUUID(),
+            callSessionId,
+            ts: new Date().toISOString(),
+            speaker: "agent",
+            text: replyText,
+            meta: {
+              intent: "final",
+              tools,
+              modelCalls,
+              customerId: verifiedId ?? customer.id,
+              contextUsed: Boolean(context),
+              contextTurns,
+              decisionSnapshot,
+              toolCallSource,
+              replyTextLength: replyText.length,
+              replyTextWasEmpty: !replyText.trim(),
+            },
+          });
+          logger.info(
+            {
+              callSessionId,
+              intent: "final",
+              toolCallSource,
+              toolCount: tools.length,
+              modelCallCount: modelCalls.length,
+              replyTextLength: replyText.length,
+              replyPreview: replyText.slice(0, 160),
+            },
+            "agent.message.complete",
+          );
+          return { callSessionId, replyText, actions };
+        }
+
+        if (latestSummary?.workflowState?.step === "escalate") {
+          const replyText = await generateReply(
+            model,
+            input,
+            customer,
+            {
+              toolName: "agent.escalate",
+              result: { escalated: true },
+            },
+            agentConfig.scopeMessage,
+            context,
+            modelCalls,
+            messageHistory,
+            logger,
+            callSessionId,
+          );
+          await updateCallSummary(replyText);
+          await deps.calls.addTurn({
+            id: crypto.randomUUID(),
+            callSessionId,
+            ts: new Date().toISOString(),
+            speaker: "agent",
+            text: replyText,
+            meta: {
+              intent: "final",
+              tools,
+              modelCalls,
+              customerId: resolvedCustomer?.id ?? customer.id,
+              contextUsed: Boolean(context),
+              contextTurns,
+              decisionSnapshot,
+              toolCallSource,
+              replyTextLength: replyText.length,
+              replyTextWasEmpty: !replyText.trim(),
+            },
+          });
+          logger.info(
+            {
+              callSessionId,
+              intent: "final",
+              toolCallSource,
+              toolCount: tools.length,
+              modelCallCount: modelCalls.length,
+              replyTextLength: replyText.length,
+              replyPreview: replyText.slice(0, 160),
+            },
+            "agent.message.complete",
+          );
+          return { callSessionId, replyText, actions };
+        }
+
+        const statusCall = await recordModelCall(model, "status", () =>
+          model.status({
+            text: input.text,
+            contextHint: "verification",
+          }),
         );
-        summary = { ...latestSummary, callSummary: trimSummaryText(replyText) };
-        await deps.calls.updateSessionSummary({
-          callSessionId,
-          summary: buildSummary(summary),
-        });
+        modelCalls.push(statusCall.record);
+        logModelCall(logger, statusCall.record);
+        const replyText =
+          statusCall.record.success && typeof statusCall.result === "string"
+            ? statusCall.result.trim()
+            : "I'm checking that now.";
+        await updateCallSummary(replyText);
         await deps.calls.addTurn({
           id: crypto.randomUUID(),
           callSessionId,
@@ -1167,56 +1207,6 @@ export const handleAgentMessage = async (
         );
         return { callSessionId, replyText, actions };
       }
-
-      const statusCall = await recordModelCall(model, "status", () =>
-        model.status({
-          text: input.text,
-          contextHint: "verification",
-        }),
-      );
-      modelCalls.push(statusCall.record);
-      logModelCall(logger, statusCall.record);
-      const replyText =
-        statusCall.record.success && typeof statusCall.result === "string"
-          ? statusCall.result.trim()
-          : "I'm checking that now.";
-      summary = { ...summary, callSummary: trimSummaryText(replyText) };
-      await deps.calls.updateSessionSummary({
-        callSessionId,
-        summary: buildSummary(summary),
-      });
-      await deps.calls.addTurn({
-        id: crypto.randomUUID(),
-        callSessionId,
-        ts: new Date().toISOString(),
-        speaker: "agent",
-        text: replyText,
-        meta: {
-          intent: "final",
-          tools,
-          modelCalls,
-          customerId: resolvedCustomer?.id ?? customer.id,
-          contextUsed: Boolean(context),
-          contextTurns,
-          decisionSnapshot,
-          toolCallSource,
-          replyTextLength: replyText.length,
-          replyTextWasEmpty: !replyText.trim(),
-        },
-      });
-      logger.info(
-        {
-          callSessionId,
-          intent: "final",
-          toolCallSource,
-          toolCount: tools.length,
-          modelCallCount: modelCalls.length,
-          replyTextLength: replyText.length,
-          replyPreview: replyText.slice(0, 160),
-        },
-        "agent.message.complete",
-      );
-      return { callSessionId, replyText, actions };
     }
 
     const replyText = buildVerificationPrompt(
@@ -1230,11 +1220,7 @@ export const handleAgentMessage = async (
         invalidZip: hasNumericInput && !isZipInput,
       },
     );
-    summary = { ...summary, callSummary: trimSummaryText(replyText) };
-    await deps.calls.updateSessionSummary({
-      callSessionId,
-      summary: buildSummary(summary),
-    });
+    await updateCallSummary(replyText);
     await deps.calls.addTurn({
       id: crypto.randomUUID(),
       callSessionId,

@@ -18,7 +18,11 @@ export class ConversationHub {
     const url = new URL(request.url);
     if (request.headers.get("Upgrade") === "websocket") {
       const pair = new WebSocketPair();
-      const [client, server] = Object.values(pair);
+      const client = pair[0];
+      const server = pair[1];
+      if (!client || !server) {
+        return new Response("WebSocket unavailable", { status: 500 });
+      }
       server.accept();
       this.connections.add(server);
       server.addEventListener("close", () => {
