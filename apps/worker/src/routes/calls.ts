@@ -3,6 +3,8 @@ import {
   callIdInputSchema,
   callListInputSchema,
   callListOutputSchema,
+  callTicketLookupInputSchema,
+  callTicketLookupOutputSchema,
 } from "@pestcall/core";
 
 import { authedProcedure } from "../middleware/auth";
@@ -24,5 +26,14 @@ export const callProcedures = {
         input.callSessionId,
       );
       return detail ?? { session: null, turns: [] };
+    }),
+  findByTicketId: authedProcedure
+    .input(callTicketLookupInputSchema)
+    .output(callTicketLookupOutputSchema)
+    .handler(async ({ input, context }) => {
+      const callSessionId = await context.deps.calls.findSessionByTicketId(
+        input.ticketId,
+      );
+      return { callSessionId };
     }),
 };

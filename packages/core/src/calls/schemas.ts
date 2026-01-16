@@ -39,9 +39,21 @@ export const callIdInputSchema = z.object({
   callSessionId: z.string().min(1),
 });
 
+export const callTicketLookupInputSchema = z.object({
+  ticketId: z.string().min(1),
+});
+
+export const callTicketLookupOutputSchema = z.object({
+  callSessionId: z.string().nullable(),
+});
+
 export type CallListInput = z.infer<typeof callListInputSchema>;
 export type CallListOutput = z.infer<typeof callListOutputSchema>;
 export type CallSession = z.infer<typeof callSessionSchema>;
 export type CallTurn = z.infer<typeof callTurnSchema>;
 export type CallDetail = z.infer<typeof callDetailSchema>;
 export type CallIdInput = z.infer<typeof callIdInputSchema>;
+export type CallTicketLookupInput = z.infer<typeof callTicketLookupInputSchema>;
+export type CallTicketLookupOutput = z.infer<
+  typeof callTicketLookupOutputSchema
+>;

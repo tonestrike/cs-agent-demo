@@ -8,6 +8,8 @@ import type {
   CallIdInput,
   CallListInput,
   CallListOutput,
+  CallTicketLookupInput,
+  CallTicketLookupOutput,
   ServiceAppointment,
   ServiceAppointmentIdInput,
   ServiceAppointmentListInput,
@@ -26,6 +28,12 @@ type RpcClient = {
   calls: {
     list: Client<RpcContext, CallListInput, CallListOutput, unknown>;
     get: Client<RpcContext, CallIdInput, CallDetail, unknown>;
+    findByTicketId: Client<
+      RpcContext,
+      CallTicketLookupInput,
+      CallTicketLookupOutput,
+      unknown
+    >;
   };
   tickets: {
     list: Client<RpcContext, TicketListInput, TicketListOutput, unknown>;

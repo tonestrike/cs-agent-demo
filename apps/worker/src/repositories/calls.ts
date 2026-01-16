@@ -104,6 +104,16 @@ export const createCallRepository = (db: D1Database) => {
 
       return session ? mapCallSessionRow(session) : null;
     },
+    async findSessionByTicketId(ticketId: string) {
+      const row = await db
+        .prepare(
+          "SELECT call_session_id FROM call_turns WHERE json_extract(meta_json, '$.ticketId') = ? ORDER BY ts DESC LIMIT 1",
+        )
+        .bind(ticketId)
+        .first<{ call_session_id: string }>();
+
+      return row?.call_session_id ?? null;
+    },
     async addTurn(input: {
       id: string;
       callSessionId: string;

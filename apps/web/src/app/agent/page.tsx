@@ -1,9 +1,9 @@
 "use client";
 
 import type { ServiceAppointment, Ticket } from "@pestcall/core";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import type { CallSession } from "@pestcall/core";
 
@@ -24,9 +24,12 @@ const formatDateTime = (iso: string) =>
   });
 
 export default function AgentDashboardPage() {
+  const [activeTab, setActiveTab] = useState<
+    "calls" | "tickets" | "appointments"
+  >("calls");
   const callsQuery = useQuery({
     queryKey: ["calls"],
-    queryFn: () => rpcClient.calls.list({ limit: 20 }),
+    queryFn: () => rpcClient.calls.list({ limit: 200 }),
     refetchInterval: 4000,
   });
 
@@ -39,6 +42,22 @@ export default function AgentDashboardPage() {
     queryKey: ["appointments"],
     queryFn: () => rpcClient.appointments.list({ limit: 10 }),
   });
+
+  const ticketCallLookups = useQueries({
+    queries: (ticketsQuery.data?.items ?? []).map((ticket: Ticket) => ({
+      queryKey: ["call-by-ticket", ticket.id],
+      queryFn: () => rpcClient.calls.findByTicketId({ ticketId: ticket.id }),
+      enabled: Boolean(ticket.id),
+    })),
+  });
+
+  const ticketCallMap = useMemo(() => {
+    const entries = (ticketsQuery.data?.items ?? []).map((ticket, index) => {
+      const data = ticketCallLookups[index]?.data;
+      return [ticket.id, data?.callSessionId ?? null] as const;
+    });
+    return new Map(entries);
+  }, [ticketCallLookups, ticketsQuery.data?.items]);
 
   const groupedCalls = useMemo(() => {
     const map = new Map<
@@ -64,7 +83,7 @@ export default function AgentDashboardPage() {
         });
       }
     }
-    return Array.from(map.values()).map((entry) => {
+    const grouped = Array.from(map.values()).map((entry) => {
       const sorted = entry.sessions.sort((a, b) =>
         a.startedAt < b.startedAt ? 1 : -1,
       );
@@ -72,8 +91,12 @@ export default function AgentDashboardPage() {
         ...entry,
         sessions: sorted,
         count: sorted.length,
+        latestStartedAt: sorted[0]?.startedAt ?? entry.sessions[0]?.startedAt,
       };
     });
+    return grouped.sort((a, b) =>
+      (a.latestStartedAt ?? "") < (b.latestStartedAt ?? "") ? 1 : -1,
+    );
   }, [callsQuery.data?.items]);
 
   return (
@@ -90,7 +113,28 @@ export default function AgentDashboardPage() {
           </p>
         </header>
 
-        <div className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
+        <Card className="flex flex-wrap items-center gap-3">
+          <Button
+            className={activeTab === "calls" ? "bg-ink" : "bg-white/80"}
+            onClick={() => setActiveTab("calls")}
+          >
+            Calls
+          </Button>
+          <Button
+            className={activeTab === "tickets" ? "bg-ink" : "bg-white/80"}
+            onClick={() => setActiveTab("tickets")}
+          >
+            Tickets
+          </Button>
+          <Button
+            className={activeTab === "appointments" ? "bg-ink" : "bg-white/80"}
+            onClick={() => setActiveTab("appointments")}
+          >
+            Appointments
+          </Button>
+        </Card>
+
+        {activeTab === "calls" ? (
           <Card className="flex flex-col gap-5 animate-rise">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold">Calls by Customer</h2>
@@ -149,26 +193,31 @@ export default function AgentDashboardPage() {
               {callsQuery.isLoading && (
                 <p className="text-sm text-ink/60">Loading calls...</p>
               )}
+              {!callsQuery.isLoading && groupedCalls.length === 0 ? (
+                <p className="text-sm text-ink/60">No calls yet.</p>
+              ) : null}
             </div>
           </Card>
+        ) : null}
 
-          <div className="flex flex-col gap-6">
-            <Card className="flex flex-col gap-5 animate-rise">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold">Open Tickets</h2>
-                <Button
-                  className="bg-clay hover:bg-ink"
-                  onClick={() => ticketsQuery.refetch()}
-                >
-                  Refresh
-                </Button>
-              </div>
-              <div className="space-y-3">
-                {(ticketsQuery.data?.items ?? []).map((ticket: Ticket) => (
-                  <Link
+        {activeTab === "tickets" ? (
+          <Card className="flex flex-col gap-5 animate-rise">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold">Open Tickets</h2>
+              <Button
+                className="bg-clay hover:bg-ink"
+                onClick={() => ticketsQuery.refetch()}
+              >
+                Refresh
+              </Button>
+            </div>
+            <div className="space-y-3">
+              {(ticketsQuery.data?.items ?? []).map((ticket: Ticket) => {
+                const callSessionId = ticketCallMap.get(ticket.id);
+                return (
+                  <div
                     key={ticket.id}
-                    href={`/agent/tickets/${ticket.id}`}
-                    className="block rounded-2xl border border-ink/10 bg-white/70 p-4 transition hover:border-ink/30"
+                    className="rounded-2xl border border-ink/10 bg-white/70 p-4"
                   >
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-semibold text-ink">
@@ -181,57 +230,89 @@ export default function AgentDashboardPage() {
                     <p className="mt-2 text-xs text-ink/60">
                       {ticket.category} • {ticket.priority}
                     </p>
-                  </Link>
-                ))}
-                {ticketsQuery.isLoading && (
-                  <p className="text-sm text-ink/60">Loading tickets...</p>
-                )}
-              </div>
-            </Card>
-
-            <Card className="flex flex-col gap-5 animate-rise">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold">Appointments</h2>
-                <Button
-                  className="bg-moss hover:bg-ink"
-                  onClick={() => appointmentsQuery.refetch()}
-                >
-                  Refresh
-                </Button>
-              </div>
-              <div className="space-y-3">
-                {(appointmentsQuery.data?.items ?? []).map(
-                  (appointment: ServiceAppointment) => (
-                    <div
-                      key={appointment.id}
-                      className="rounded-2xl border border-ink/10 bg-white/70 p-4"
-                    >
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-ink">
-                          {maskPhone(appointment.phoneE164)}
-                        </p>
-                        <span className="text-xs uppercase text-ink/50">
-                          {appointment.status}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-xs text-ink/60">
-                        {appointment.date} • {appointment.timeWindow}
-                      </p>
-                      {appointment.rescheduledFromId ? (
-                        <p className="mt-2 text-xs text-ink/50">
-                          Rescheduled from {appointment.rescheduledFromId}
-                        </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Link
+                        href={`/agent/tickets/${ticket.id}`}
+                        className="rounded-full border border-ink/20 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-ink/70 transition hover:border-ink/40 hover:text-ink"
+                      >
+                        Ticket
+                      </Link>
+                      {callSessionId ? (
+                        <Link
+                          href={`/agent/calls/${callSessionId}`}
+                          className="rounded-full border border-ink/20 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-ink/70 transition hover:border-ink/40 hover:text-ink"
+                        >
+                          Conversation
+                        </Link>
                       ) : null}
                     </div>
-                  ),
-                )}
-                {appointmentsQuery.isLoading && (
-                  <p className="text-sm text-ink/60">Loading appointments...</p>
-                )}
-              </div>
-            </Card>
-          </div>
-        </div>
+                  </div>
+                );
+              })}
+              {ticketsQuery.isLoading && (
+                <p className="text-sm text-ink/60">Loading tickets...</p>
+              )}
+              {!ticketsQuery.isLoading &&
+              (ticketsQuery.data?.items ?? []).length === 0 ? (
+                <p className="text-sm text-ink/60">No open tickets.</p>
+              ) : null}
+            </div>
+          </Card>
+        ) : null}
+
+        {activeTab === "appointments" ? (
+          <Card className="flex flex-col gap-5 animate-rise">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold">Appointments</h2>
+              <Button
+                className="bg-moss hover:bg-ink"
+                onClick={() => appointmentsQuery.refetch()}
+              >
+                Refresh
+              </Button>
+            </div>
+            <div className="space-y-3">
+              {(appointmentsQuery.data?.items ?? []).map(
+                (appointment: ServiceAppointment) => (
+                  <div
+                    key={appointment.id}
+                    className="rounded-2xl border border-ink/10 bg-white/70 p-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-ink">
+                        {maskPhone(appointment.phoneE164)}
+                      </p>
+                      <span className="text-xs uppercase text-ink/50">
+                        {appointment.status}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-ink/60">
+                      {appointment.date} • {appointment.timeWindow}
+                    </p>
+                    {appointment.rescheduledFromId ? (
+                      <p className="mt-2 text-xs text-ink/50">
+                        Rescheduled from {appointment.rescheduledFromId}
+                      </p>
+                    ) : null}
+                  </div>
+                ),
+              )}
+              {appointmentsQuery.isLoading && (
+                <p className="text-sm text-ink/60">Loading appointments...</p>
+              )}
+              {appointmentsQuery.isError && (
+                <p className="text-sm text-ink/60">
+                  Unable to load appointments.
+                </p>
+              )}
+              {!appointmentsQuery.isLoading &&
+              !appointmentsQuery.isError &&
+              (appointmentsQuery.data?.items ?? []).length === 0 ? (
+                <p className="text-sm text-ink/60">No appointments yet.</p>
+              ) : null}
+            </div>
+          </Card>
+        ) : null}
       </div>
     </main>
   );
