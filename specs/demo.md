@@ -87,6 +87,7 @@ Broaden model selection to the full Cloudflare Workers AI catalog so prompt tuni
 - [Using AI Models](https://developers.cloudflare.com/agents/api-reference/using-ai-models/)
 - [WebSockets](https://developers.cloudflare.com/agents/api-reference/websockets/)
 - [Store and Sync State](https://developers.cloudflare.com/agents/api-reference/store-and-sync-state/)
+- [oRPC contracts](../docs/orpc.md)
 
 ## Best-Practice Notes (From Docs)
 - Centralize tool definitions with Zod input schemas; use structured tool calls instead of parsing tools from free-form text.
@@ -96,6 +97,7 @@ Broaden model selection to the full Cloudflare Workers AI catalog so prompt tuni
 - Keep session state close to the Agent instance when possible to reduce round trips.
 - Stream long-running model output over WebSockets when latency matters.
 - Persist short-lived state for follow-up actions (last appointment, last available slots) so confirmations resolve deterministically.
+- Use oRPC contracts from `@pestcall/core` in UI queries so inputs/outputs stay aligned with worker routes.
 
 ## Tasks (Next Pass)
 1) Simplify orchestration to a two-step model decision with fallback decision on action commitments.
