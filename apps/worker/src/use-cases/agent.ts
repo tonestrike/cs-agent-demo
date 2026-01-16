@@ -381,6 +381,43 @@ const generateReply = async (
       );
     }
   }
+  if (toolResult.toolName === "crm.verifyAccount") {
+    const result = toolResult.result as { ok?: boolean };
+    return result.ok
+      ? "Verification succeeded. How can I help you today?"
+      : "That ZIP does not match our records. Do you have another ZIP code on file?";
+  }
+  if (toolResult.toolName === "crm.getNextAppointment") {
+    const appointment = toolResult.result as {
+      date: string;
+      timeWindow: string;
+      addressSummary: string;
+    } | null;
+    if (!appointment) {
+      return "I couldn't find a scheduled appointment.";
+    }
+    return `Your next appointment is ${appointment.date} ${appointment.timeWindow} at ${appointment.addressSummary}.`;
+  }
+  if (toolResult.toolName === "crm.getOpenInvoices") {
+    const invoice = toolResult.result as { balanceCents?: number };
+    const balanceCents = invoice.balanceCents ?? 0;
+    return balanceCents === 0
+      ? "You have no outstanding balance."
+      : `Your current balance is $${(balanceCents / 100).toFixed(2)}.`;
+  }
+  if (toolResult.toolName === "crm.getServicePolicy") {
+    const policy = toolResult.result as { text?: string };
+    if (policy.text?.trim()) {
+      return policy.text.trim();
+    }
+  }
+  if (toolResult.toolName === "crm.rescheduleAppointment") {
+    const rescheduled = toolResult.result as {
+      date: string;
+      timeWindow: string;
+    };
+    return `Your appointment has been rescheduled to ${rescheduled.date} ${rescheduled.timeWindow}.`;
+  }
   const responseCall = await recordModelCall(model, "respond", () =>
     model.respond({
       text: input.text,
@@ -426,6 +463,15 @@ export const handleAgentMessage = async (
   const agentConfig = await deps.agentConfig.get(deps.agentConfigDefaults);
   const model = deps.modelFactory(agentConfig);
   const logger = deps.logger;
+
+  logger.info(
+    {
+      callSessionId: input.callSessionId ?? "new",
+      modelId: agentConfig.modelId,
+      configUpdatedAt: agentConfig.updatedAt ?? null,
+    },
+    "agent.config.loaded",
+  );
 
   let callSessionId = input.callSessionId;
   let contextTurns = 0;

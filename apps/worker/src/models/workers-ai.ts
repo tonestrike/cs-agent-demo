@@ -1,10 +1,9 @@
 import type { Ai, AiModels } from "@cloudflare/workers-types";
 import { AppError } from "@pestcall/core";
-import { generateText } from "ai";
 
 import type { AgentPromptConfig } from "@pestcall/core";
 import { z } from "zod";
-import { aiTools, toolDefinitions } from "./tool-definitions";
+import { toolDefinitions } from "./tool-definitions";
 import {
   type AgentModelInput,
   type AgentResponseInput,
@@ -12,10 +11,63 @@ import {
   agentRouteSchema,
   agentToolCallSchema,
 } from "./types";
-import {
-  createWorkersAiLanguageModel,
-  responseToText,
-} from "./workers-ai-language-model";
+import { responseToText } from "./workers-ai-language-model";
+
+const FUNCTION_CALL_MODEL = "@hf/nousresearch/hermes-2-pro-mistral-7b";
+
+const zodToJsonSchema = (schema: z.ZodTypeAny): Record<string, unknown> => {
+  if (schema instanceof z.ZodString) {
+    return { type: "string" };
+  }
+  if (schema instanceof z.ZodNumber) {
+    return { type: "number" };
+  }
+  if (schema instanceof z.ZodBoolean) {
+    return { type: "boolean" };
+  }
+  if (schema instanceof z.ZodEnum) {
+    return { type: "string", enum: schema._def.values };
+  }
+  if (schema instanceof z.ZodArray) {
+    return { type: "array", items: zodToJsonSchema(schema._def.type) };
+  }
+  if (schema instanceof z.ZodOptional) {
+    return zodToJsonSchema(schema._def.innerType);
+  }
+  if (schema instanceof z.ZodNullable) {
+    const inner = zodToJsonSchema(schema._def.innerType);
+    return { anyOf: [inner, { type: "null" }] };
+  }
+  if (schema instanceof z.ZodObject) {
+    const shape = schema._def.shape() as z.ZodRawShape;
+    const properties: Record<string, unknown> = {};
+    const required: string[] = [];
+    for (const [key, value] of Object.entries(shape)) {
+      properties[key] = zodToJsonSchema(value);
+      if (!value.isOptional()) {
+        required.push(key);
+      }
+    }
+    const result: {
+      type: "object";
+      properties: Record<string, unknown>;
+      required?: string[];
+    } = { type: "object", properties };
+    if (required.length) {
+      result.required = required;
+    }
+    return result;
+  }
+  return { type: "object" };
+};
+
+const workersAiTools = Object.entries(toolDefinitions).map(
+  ([name, definition]) => ({
+    name,
+    description: definition.description,
+    parameters: zodToJsonSchema(definition.inputSchema),
+  }),
+);
 
 const buildToolGuidanceLines = (
   config: AgentPromptConfig,
@@ -185,6 +237,26 @@ const routeJsonSchema = {
   additionalProperties: false,
 };
 
+const JSON_MODE_MODELS = new Set<string>([
+  "@cf/meta/llama-3.1-8b-instruct-fast",
+  "@cf/meta/llama-3.1-70b-instruct",
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "@cf/meta/llama-3-8b-instruct",
+  "@cf/meta/llama-3.1-8b-instruct",
+  "@cf/meta/llama-3.2-11b-vision-instruct",
+  "@hf/nousresearch/hermes-2-pro-mistral-7b",
+  "@hf/thebloke/deepseek-coder-6.7b-instruct-awq",
+  "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+]);
+
+const ensureJsonModeModel = (modelId: string) => {
+  if (!JSON_MODE_MODELS.has(modelId)) {
+    throw new AppError("JSON Mode model required for structured outputs.", {
+      code: "JSON_MODE_UNSUPPORTED",
+    });
+  }
+};
+
 const responseToJsonObject = <T>(response: unknown): T | null => {
   if (
     response &&
@@ -245,43 +317,44 @@ export const createWorkersAiAdapter = (
       }
 
       const instructions = buildDecisionInstructions(input, config);
-      const systemPrompt = [instructions, input.context]
-        .filter(Boolean)
-        .join("\n");
       try {
-        const sdkModel = createWorkersAiLanguageModel(ai, model);
-        const result = await generateText({
-          model: sdkModel,
-          tools: aiTools,
-          system: systemPrompt,
-          messages: input.messages,
-          maxSteps: 1,
+        const response = await ai.run(FUNCTION_CALL_MODEL as keyof AiModels, {
+          messages: buildMessages(instructions, input.context, input.messages),
+          tools: workersAiTools,
         });
-        const toolCall = result.toolCalls[0];
-        if (toolCall) {
+        const responseWithTools = response as {
+          tool_calls?: Array<{ name: string; arguments?: unknown }>;
+        };
+        const toolCalls = responseWithTools.tool_calls ?? [];
+        const toolCall = toolCalls[0];
+        if (toolCall?.name) {
           const validated = agentToolCallSchema.safeParse({
             type: "tool_call",
-            toolName: toolCall.toolName,
-            arguments: toolCall.args,
+            toolName: toolCall.name,
+            arguments: toolCall.arguments ?? {},
           });
           if (validated.success) {
             return validated.data;
           }
         }
-        const text = result.text.trim();
+        const text = responseToText(response);
         return {
           type: "final",
-          text: text || "I could not interpret the request. Can you rephrase?",
+          text:
+            text?.trim() ||
+            "I could not interpret the request. Can you rephrase?",
         };
-      } catch (_error) {
-        const fallbackInstructions = buildDecisionInstructions(input, config);
-        const fallbackResponse = await ai.run(model as keyof AiModels, {
-          messages: buildMessages(
-            fallbackInstructions,
-            input.context,
-            input.messages,
-          ),
-        });
+      } catch {
+        const fallbackResponse = await ai.run(
+          FUNCTION_CALL_MODEL as keyof AiModels,
+          {
+            messages: buildMessages(
+              instructions,
+              input.context,
+              input.messages,
+            ),
+          },
+        );
         const text = responseToText(fallbackResponse);
         return {
           type: "final",
@@ -298,6 +371,7 @@ export const createWorkersAiAdapter = (
         });
       }
 
+      ensureJsonModeModel(model);
       const instructions = buildRespondInstructions(input, config);
       const response = await ai.run(model as keyof AiModels, {
         messages: buildMessages(instructions, input.context, input.messages),
@@ -323,6 +397,7 @@ export const createWorkersAiAdapter = (
         });
       }
 
+      ensureJsonModeModel(model);
       const response = await ai.run(model as keyof AiModels, {
         messages: [
           {

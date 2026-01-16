@@ -160,6 +160,7 @@ export default function PromptStudioPage() {
   const [jsonError, setJsonError] = useState("");
   const [editMode, setEditMode] = useState<"form" | "json">("form");
   const [modelSearch, setModelSearch] = useState("");
+  const [jsonOnly, setJsonOnly] = useState(true);
   const queryClient = useQueryClient();
   const modelOptions = configDraft?.modelId
     ? Array.from(new Set([configDraft.modelId, ...WORKERS_AI_MODELS]))
@@ -167,6 +168,9 @@ export default function PromptStudioPage() {
   const filteredModelOptions = modelOptions.filter((option) =>
     option.toLowerCase().includes(modelSearch.trim().toLowerCase()),
   );
+  const visibleModelOptions = jsonOnly
+    ? filteredModelOptions.filter((option) => isJsonModeModel(option))
+    : filteredModelOptions;
 
   const agentConfigQuery = useQuery(orpc.agentConfig.get.queryOptions());
 
@@ -368,6 +372,42 @@ export default function PromptStudioPage() {
           ) : null}
           {editMode === "form" && configDraft ? (
             <div className="space-y-4 text-sm">
+              <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
+                Model ID
+                <input
+                  className="rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  placeholder="Search models..."
+                  value={modelSearch}
+                  onChange={(event) => setModelSearch(event.target.value)}
+                />
+                <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-ink/60">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 rounded border border-ink/30"
+                    checked={jsonOnly}
+                    onChange={(event) => setJsonOnly(event.target.checked)}
+                  />
+                  JSON-only
+                </label>
+                <select
+                  className="rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  value={configDraft.modelId}
+                  onChange={(event) =>
+                    handleConfigChange("modelId", event.target.value)
+                  }
+                >
+                  {visibleModelOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                      {isJsonModeModel(option) ? " (JSON)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-ink/50 normal-case">
+                  JSON Mode models are required for strict routing and response
+                  schemas.
+                </span>
+              </label>
               <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
                 Tone
                 <select
@@ -597,33 +637,6 @@ export default function PromptStudioPage() {
                     handleToolGuidanceChange("escalate", event.target.value)
                   }
                 />
-              </label>
-              <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
-                Model ID
-                <input
-                  className="rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
-                  placeholder="Search models..."
-                  value={modelSearch}
-                  onChange={(event) => setModelSearch(event.target.value)}
-                />
-                <select
-                  className="rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
-                  value={configDraft.modelId}
-                  onChange={(event) =>
-                    handleConfigChange("modelId", event.target.value)
-                  }
-                >
-                  {filteredModelOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                      {isJsonModeModel(option) ? " (JSON)" : ""}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-xs text-ink/50 normal-case">
-                  JSON Mode models are required for strict routing and response
-                  schemas.
-                </span>
               </label>
             </div>
           ) : (

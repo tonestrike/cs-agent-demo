@@ -90,6 +90,8 @@ Broaden model selection to the full Cloudflare Workers AI catalog so prompt tuni
 - [What are Agents?](https://developers.cloudflare.com/agents/concepts/what-are-agents/)
 - [Workflows](https://developers.cloudflare.com/agents/concepts/workflows/)
 - [Tools](https://developers.cloudflare.com/agents/concepts/tools/)
+- [Agent class internals](https://developers.cloudflare.com/agents/concepts/agent-class/)
+- [Calling LLMs](https://developers.cloudflare.com/agents/concepts/calling-llms/)
 - [Testing your Agent](https://developers.cloudflare.com/agents/getting-started/testing-your-agent/)
 - [Workers AI JSON Mode](https://developers.cloudflare.com/workers-ai/features/json-mode/)
 - [oRPC contracts](../docs/orpc.md)
@@ -104,6 +106,7 @@ Broaden model selection to the full Cloudflare Workers AI catalog so prompt tuni
 - Persist short-lived state for follow-up actions (last appointment, last available slots) so confirmations resolve deterministically.
 - Use oRPC contracts from `@pestcall/core` in UI queries so inputs/outputs stay aligned with worker routes.
 - Use Workers AI JSON Mode for routing + response schemas to avoid free-form replies.
+- Prefer instruction models for routing/classification; reserve reasoning models for complex, multi-step decisions.
 
 ## Pattern Alignment (What Matches the Docs)
 - **Prompt chaining** (“sequence of steps, where each LLM call processes the output of the previous one”): decision → tool execution → structured response.
@@ -117,6 +120,7 @@ Broaden model selection to the full Cloudflare Workers AI catalog so prompt tuni
 - **Determinism vs. agent behavior**: relying on model decisions keeps alignment with docs but increases non-deterministic failure cases.
 - **“Totally fucked” cases**: if the model refuses to call tools in critical flows (verification, appointments) we have no deterministic fallback besides human escalation or repeated prompts.
 - **Routing JSON compliance**: some Workers AI models ignore JSON-only routing prompts, which breaks the routing step and leads to generic replies.
+- **JSON Mode requirement**: structured routing/response now require JSON Mode models (see docs list); non-compliant models will fail fast.
 
 ## Notable Docs Quotes
 > “Prompt Chaining decomposes tasks into a sequence of steps, where each LLM call processes the output of the previous one.”  
@@ -124,6 +128,9 @@ Broaden model selection to the full Cloudflare Workers AI catalog so prompt tuni
 
 > “Routing classifies input and directs it to specialized followup tasks, allowing for separation of concerns.”  
 > — [Agents Patterns](https://developers.cloudflare.com/agents/patterns/)
+
+> “Agents operate in a continuous loop of: Observing, Planning, Executing, Learning.”  
+> — [What are Agents?](https://developers.cloudflare.com/agents/concepts/what-are-agents/)
 
 ## Tasks (Next Pass)
 1) Simplify orchestration to a two-step model decision with fallback decision on action commitments.
