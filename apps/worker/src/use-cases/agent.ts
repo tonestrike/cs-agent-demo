@@ -504,8 +504,8 @@ export const handleAgentMessage = async (
     if (hasRescheduleRequest(input.text)) {
       const slotsCall = await recordToolCall("crm.getAvailableSlots", () =>
         deps.crm.getAvailableSlots(customer.id, {
-          from: appointment.date,
-          to: appointment.date,
+          fromDate: appointment.date,
+          toDate: appointment.date,
         }),
       );
       tools.push(slotsCall.record);
@@ -643,8 +643,8 @@ export const handleAgentMessage = async (
     if (!slot) {
       const slotsCall = await recordToolCall("crm.getAvailableSlots", () =>
         deps.crm.getAvailableSlots(customer.id, {
-          from: appointment.date,
-          to: appointment.date,
+          fromDate: appointment.date,
+          toDate: appointment.date,
         }),
       );
       tools.push(slotsCall.record);

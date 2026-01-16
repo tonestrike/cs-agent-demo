@@ -41,9 +41,19 @@ const responseToText = (response: unknown) => {
 const buildToolGuidanceLines = (config: AgentPromptConfig) => {
   return [
     "Tool guidance:",
+    "- crm.lookupCustomerByPhone: Use when a phone number is available.",
+    "- crm.lookupCustomerByNameAndZip: Use when phone lookup fails and you have name + ZIP.",
+    "- crm.lookupCustomerByEmail: Use when the caller provides email.",
+    "- crm.verifyAccount: Use to verify ZIP before sensitive actions.",
     `- crm.getNextAppointment: ${config.toolGuidance.getNextAppointment}`,
+    "- crm.listUpcomingAppointments: Use when multiple appointments may exist.",
+    "- crm.getAppointmentById: Use to retrieve a specific appointment.",
     `- crm.getOpenInvoices: ${config.toolGuidance.getOpenInvoices}`,
+    "- crm.getAvailableSlots: Use to find alternate times for rescheduling.",
     `- crm.rescheduleAppointment: ${config.toolGuidance.rescheduleAppointment}`,
+    "- crm.createAppointment: Use to request or book a new appointment.",
+    "- crm.getServicePolicy: Use for pricing, coverage, guarantee, cancellation, or prep info.",
+    "- crm.escalate: Use to create a ticket when needed.",
     `- agent.escalate: ${config.toolGuidance.escalate}`,
     "- agent.message: Use result.kind and result.details to craft a helpful response.",
   ];

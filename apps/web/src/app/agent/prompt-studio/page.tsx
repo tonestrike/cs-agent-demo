@@ -3,15 +3,26 @@
 import {
   type AgentPromptConfigRecord,
   agentPromptConfigRecordSchema,
+  appointmentByIdInputSchema,
   appointmentInputSchema,
   appointmentSchema,
   availableSlotSchema,
   availableSlotsInputSchema,
+  createAppointmentInputSchema,
   customerMatchSchema,
+  escalateInputSchema,
+  escalateResultSchema,
   invoiceSchema,
   invoicesInputSchema,
+  listUpcomingAppointmentsInputSchema,
+  lookupCustomerByEmailInputSchema,
+  lookupCustomerByNameAndZipInputSchema,
   lookupCustomerInputSchema,
   rescheduleInputSchema,
+  servicePolicyInputSchema,
+  servicePolicyResultSchema,
+  verifyAccountInputSchema,
+  verifyAccountResultSchema,
 } from "@pestcall/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -70,8 +81,33 @@ const TOOL_SCHEMA_CONTEXT = [
     output: z.array(customerMatchSchema),
   },
   {
+    tool: "crm.lookupCustomerByNameAndZip",
+    input: lookupCustomerByNameAndZipInputSchema,
+    output: z.array(customerMatchSchema),
+  },
+  {
+    tool: "crm.lookupCustomerByEmail",
+    input: lookupCustomerByEmailInputSchema,
+    output: z.array(customerMatchSchema),
+  },
+  {
+    tool: "crm.verifyAccount",
+    input: verifyAccountInputSchema,
+    output: verifyAccountResultSchema,
+  },
+  {
     tool: "crm.getNextAppointment",
     input: appointmentInputSchema,
+    output: appointmentSchema.nullable(),
+  },
+  {
+    tool: "crm.listUpcomingAppointments",
+    input: listUpcomingAppointmentsInputSchema,
+    output: z.array(appointmentSchema),
+  },
+  {
+    tool: "crm.getAppointmentById",
+    input: appointmentByIdInputSchema,
     output: appointmentSchema.nullable(),
   },
   {
@@ -91,6 +127,24 @@ const TOOL_SCHEMA_CONTEXT = [
       ok: z.boolean(),
       appointment: appointmentSchema.optional(),
     }),
+  },
+  {
+    tool: "crm.createAppointment",
+    input: createAppointmentInputSchema,
+    output: z.object({
+      ok: z.boolean(),
+      appointmentId: z.string().optional(),
+    }),
+  },
+  {
+    tool: "crm.getServicePolicy",
+    input: servicePolicyInputSchema,
+    output: servicePolicyResultSchema,
+  },
+  {
+    tool: "crm.escalate",
+    input: escalateInputSchema,
+    output: escalateResultSchema,
   },
 ];
 

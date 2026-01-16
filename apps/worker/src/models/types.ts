@@ -1,9 +1,19 @@
 import { z } from "zod";
 
 export const agentToolNameSchema = z.enum([
+  "crm.lookupCustomerByPhone",
+  "crm.lookupCustomerByNameAndZip",
+  "crm.lookupCustomerByEmail",
+  "crm.verifyAccount",
   "crm.getNextAppointment",
+  "crm.listUpcomingAppointments",
+  "crm.getAppointmentById",
   "crm.getOpenInvoices",
+  "crm.getAvailableSlots",
   "crm.rescheduleAppointment",
+  "crm.createAppointment",
+  "crm.getServicePolicy",
+  "crm.escalate",
   "agent.escalate",
   "agent.fallback",
 ]);
@@ -32,11 +42,28 @@ export const appointmentResultSchema = z
     date: z.string(),
     timeWindow: z.string(),
     addressSummary: z.string(),
+    addressId: z.string().optional(),
   })
   .nullable();
 
+export const appointmentListResultSchema = z.array(
+  z.object({
+    id: z.string(),
+    customerId: z.string(),
+    addressId: z.string().optional(),
+    date: z.string(),
+    timeWindow: z.string(),
+    addressSummary: z.string(),
+  }),
+);
+
 export const invoicesSummaryResultSchema = z.object({
   balanceCents: z.number().int().nonnegative(),
+  balance: z
+    .string()
+    .regex(/^\d+\.\d{2}$/)
+    .optional(),
+  currency: z.string().min(1).optional(),
   invoiceCount: z.number().int().nonnegative().optional(),
 });
 
@@ -50,8 +77,46 @@ export const availableSlotResultSchema = z.object({
   timeWindow: z.string(),
 });
 
+export const customerMatchResultSchema = z.array(
+  z.object({
+    id: z.string(),
+    displayName: z.string(),
+    phoneE164: z.string(),
+    addressSummary: z.string(),
+    zipCode: z.string().optional(),
+    email: z.string().optional(),
+    addresses: z
+      .array(
+        z.object({
+          addressId: z.string(),
+          addressSummary: z.string(),
+          zipCode: z.string(),
+        }),
+      )
+      .optional(),
+  }),
+);
+
+export const verifyAccountResultSchema = z.object({
+  ok: z.boolean(),
+});
+
+export const servicePolicyResultSchema = z.object({
+  text: z.string(),
+});
+
+export const createAppointmentResultSchema = z.object({
+  ok: z.boolean(),
+  appointmentId: z.string().optional(),
+});
+
 export const escalateResultSchema = z.object({
   escalated: z.literal(true),
+});
+
+export const crmEscalateResultSchema = z.object({
+  ok: z.boolean(),
+  ticketId: z.string().optional(),
 });
 
 export const agentMessageResultSchema = z.object({
@@ -62,7 +127,31 @@ export const agentMessageResultSchema = z.object({
 // Discriminated union for tool results
 export const toolResultSchema = z.discriminatedUnion("toolName", [
   z.object({
+    toolName: z.literal("crm.lookupCustomerByPhone"),
+    result: customerMatchResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("crm.lookupCustomerByNameAndZip"),
+    result: customerMatchResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("crm.lookupCustomerByEmail"),
+    result: customerMatchResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("crm.verifyAccount"),
+    result: verifyAccountResultSchema,
+  }),
+  z.object({
     toolName: z.literal("crm.getNextAppointment"),
+    result: appointmentResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("crm.listUpcomingAppointments"),
+    result: appointmentListResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("crm.getAppointmentById"),
     result: appointmentResultSchema,
   }),
   z.object({
@@ -76,6 +165,18 @@ export const toolResultSchema = z.discriminatedUnion("toolName", [
   z.object({
     toolName: z.literal("crm.rescheduleAppointment"),
     result: rescheduleResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("crm.createAppointment"),
+    result: createAppointmentResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("crm.getServicePolicy"),
+    result: servicePolicyResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("crm.escalate"),
+    result: crmEscalateResultSchema,
   }),
   z.object({
     toolName: z.literal("agent.escalate"),
