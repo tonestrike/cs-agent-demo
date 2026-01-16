@@ -28,6 +28,28 @@ const isToolCallJson = (text: string) => {
   }
 };
 
+const parseToolCallFromText = (text: string) => {
+  const trimmed = text.trim();
+  const candidates = trimmed.includes("\n")
+    ? trimmed.split("\n").map((line) => line.trim())
+    : [trimmed];
+  for (const candidate of candidates) {
+    if (!candidate.startsWith("{") || !candidate.endsWith("}")) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      const validated = agentToolCallSchema.safeParse(parsed);
+      if (validated.success) {
+        return validated.data;
+      }
+    } catch {
+      // Ignore invalid JSON snippets and keep scanning.
+    }
+  }
+  return null;
+};
+
 const stripToolCallJsonBlocks = (text: string) => {
   let output = "";
   let i = 0;
@@ -170,15 +192,24 @@ const NON_OVERRIDABLE_POLICY = [
 const buildDecisionInstructions = (
   input: AgentModelInput,
   config: AgentPromptConfig,
+  options?: { jsonOutput?: boolean },
 ) => {
   const hideVerification = input.context?.includes("Identity status: verified");
+  const jsonOutput = options?.jsonOutput ?? false;
   const lines = [
     config.personaSummary,
     `Company: ${config.companyName}.`,
     `Tone: ${config.tone}.`,
     `Use this greeting only for the first turn when the caller just says hello: ${config.greeting}`,
-    "Return JSON only, no prose.",
-    "Choose one tool call or a final response.",
+    ...(jsonOutput
+      ? [
+          "Return JSON only, no prose.",
+          "Choose one tool call or a final response.",
+        ]
+      : [
+          "Call tools when needed; otherwise respond with plain text.",
+          "Do not include JSON in responses.",
+        ]),
     ...NON_OVERRIDABLE_POLICY,
     ...buildToolGuidanceLines(config, { hideVerification }),
     `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
@@ -189,9 +220,13 @@ const buildDecisionInstructions = (
     "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
     `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
     `HasContext: ${input.hasContext ? "true" : "false"}`,
-    "JSON format:",
-    '{"type":"tool_call","toolName":"crm.getNextAppointment","arguments":{"customerId":"cust_001"}}',
-    '{"type":"final","text":"..."}',
+    ...(jsonOutput
+      ? [
+          "JSON format:",
+          '{"type":"tool_call","toolName":"crm.getNextAppointment","arguments":{"customerId":"cust_001"}}',
+          '{"type":"final","text":"..."}',
+        ]
+      : []),
   ];
 
   return lines.join("\n");
@@ -286,15 +321,30 @@ export const createWorkersAiAdapter = (
           }
         }
         const text = result.text.trim();
+        const parsedToolCall = text ? parseToolCallFromText(text) : null;
+        if (parsedToolCall) {
+          return parsedToolCall;
+        }
         return {
           type: "final",
           text: text || "I could not interpret the request. Can you rephrase?",
         };
       } catch (_error) {
+        const fallbackInstructions = buildDecisionInstructions(input, config, {
+          jsonOutput: true,
+        });
         const fallbackResponse = await ai.run(model as keyof AiModels, {
-          messages: buildMessages(instructions, input.context, input.messages),
+          messages: buildMessages(
+            fallbackInstructions,
+            input.context,
+            input.messages,
+          ),
         });
         const text = responseToText(fallbackResponse);
+        const parsedToolCall = text ? parseToolCallFromText(text) : null;
+        if (parsedToolCall) {
+          return parsedToolCall;
+        }
         return {
           type: "final",
           text: text?.trim()

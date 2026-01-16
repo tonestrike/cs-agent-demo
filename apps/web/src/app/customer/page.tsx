@@ -1,10 +1,12 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge, Button, Card } from "../../components/ui";
 import { createAgentClient } from "../../lib/agent-client";
+import { rpcClient } from "../../lib/orpc";
 
 type ChatMessage = {
   id: string;
@@ -13,30 +15,7 @@ type ChatMessage = {
 };
 
 export default function CustomerPage() {
-  const phoneOptions = [
-    {
-      label: "Alex Rivera",
-      value: "+14155552671",
-      zipCode: "94107",
-      email: "alex.rivera@example.com",
-      addresses: ["742 Evergreen Terrace"],
-    },
-    {
-      label: "Morgan Lee",
-      value: "+14155550987",
-      zipCode: "98109",
-      email: "morgan.lee@example.com",
-      addresses: ["123 Harbor Drive"],
-    },
-    {
-      label: "Pat Quinn",
-      value: "+14155551234",
-      zipCode: "60601",
-      email: "pat.quinn@example.com",
-      addresses: ["88 Market Street", "55 Pine Avenue"],
-    },
-  ];
-  const [phoneNumber, setPhoneNumber] = useState(phoneOptions[0]?.value ?? "");
+  const [phoneNumber, setPhoneNumber] = useState("");
   const [input, setInput] = useState("");
   const [callSessionId, setCallSessionId] = useState<string | null>(null);
   const [confirmedSessionId, setConfirmedSessionId] = useState<string | null>(
@@ -61,6 +40,19 @@ export default function CustomerPage() {
       clientRef.current?.close();
     };
   }, []);
+
+  const customersQuery = useQuery({
+    queryKey: ["customer-portal", "customers"],
+    queryFn: () => rpcClient.customers.list({ limit: 50 }),
+  });
+
+  useEffect(() => {
+    const items = customersQuery.data?.items ?? [];
+    if (items.length === 0) {
+      return;
+    }
+    setPhoneNumber((current) => current || items[0]?.phoneE164 || "");
+  }, [customersQuery.data]);
 
   useEffect(() => {
     if (shouldAutoScroll.current && listRef.current) {
@@ -194,9 +186,11 @@ export default function CustomerPage() {
     return status;
   }, [status]);
 
+  const customers = customersQuery.data?.items ?? [];
+
   const selectedCustomer = useMemo(() => {
-    return phoneOptions.find((option) => option.value === phoneNumber) ?? null;
-  }, [phoneNumber]);
+    return customers.find((option) => option.phoneE164 === phoneNumber) ?? null;
+  }, [customers, phoneNumber]);
 
   const copyConversation = async () => {
     const payload = {
@@ -286,9 +280,9 @@ export default function CustomerPage() {
                 value={phoneNumber}
                 onChange={(event) => resetSession(event.target.value)}
               >
-                {phoneOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label} ({option.value})
+                {customers.map((option) => (
+                  <option key={option.id} value={option.phoneE164}>
+                    {option.displayName} ({option.phoneE164})
                   </option>
                 ))}
               </select>
@@ -332,7 +326,7 @@ export default function CustomerPage() {
                   Name
                 </p>
                 <p className="mt-1 text-sm font-semibold text-ink">
-                  {selectedCustomer.label}
+                  {selectedCustomer.displayName}
                 </p>
               </div>
               <div>
@@ -340,40 +334,20 @@ export default function CustomerPage() {
                   Phone
                 </p>
                 <p className="mt-1 text-sm text-ink">
-                  {selectedCustomer.value}
+                  {selectedCustomer.phoneE164}
                 </p>
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-ink/50">
-                  Email
+                  Address
                 </p>
                 <p className="mt-1 text-sm text-ink">
-                  {selectedCustomer.email}
+                  {selectedCustomer.addressSummary ?? "Unknown"}
                 </p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-ink/50">
-                  ZIP Code
-                </p>
-                <p className="mt-1 text-sm text-ink">
-                  {selectedCustomer.zipCode}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-ink/50">
-                  Addresses
-                </p>
-                <div className="mt-1 space-y-2">
-                  {selectedCustomer.addresses.map((address) => (
-                    <p key={address} className="text-sm text-ink">
-                      {address}
-                    </p>
-                  ))}
-                </div>
               </div>
             </div>
           ) : (
-            <p className="text-sm text-ink/60">Select a customer.</p>
+            <p className="text-sm text-ink/60">No customers found yet.</p>
           )}
         </Card>
         <Card className="flex flex-col gap-5 animate-rise">
