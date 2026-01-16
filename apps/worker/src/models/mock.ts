@@ -30,8 +30,17 @@ const detectTool = (text: string, latestInput: string) => {
     latestLowered.includes("sure") ||
     latestLowered.includes("ok") ||
     latestLowered.includes("okay");
+  if (
+    hasZip &&
+    /(name|last name|first name|i am|i'm|this is)/.test(latestLowered)
+  ) {
+    return "crm.lookupCustomerByNameAndZip" as const;
+  }
   if (hasZip) {
     return "crm.verifyAccount" as const;
+  }
+  if (latestLowered.includes("slot") || latestLowered.includes("available")) {
+    return "crm.getAvailableSlots" as const;
   }
   if (
     wantsConfirm &&
@@ -67,6 +76,15 @@ const extractZip = (text: string) => {
   return match?.[1];
 };
 
+const extractName = (text: string) => {
+  const cleaned = text
+    .replace(/\b\d{5}\b/g, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\b(zip|code|is|my|name|last|first|i|am|im|i'm|this)\b/gi, "")
+    .trim();
+  return cleaned || "Unknown";
+};
+
 export const createMockModelAdapter = (
   config?: AgentPromptConfig,
 ): ModelAdapter => {
@@ -89,16 +107,30 @@ export const createMockModelAdapter = (
           text: "I can help with appointments or billing. What do you need?",
         };
       }
+      if (toolName === "crm.verifyAccount") {
+        return {
+          type: "tool_call",
+          toolName,
+          arguments: {
+            customerId: input.customer.id,
+            ...(zipCode ? { zipCode } : {}),
+          },
+        };
+      }
+      if (toolName === "crm.lookupCustomerByNameAndZip") {
+        return {
+          type: "tool_call",
+          toolName,
+          arguments: {
+            fullName: extractName(input.text),
+            ...(zipCode ? { zipCode } : {}),
+          },
+        };
+      }
       return {
         type: "tool_call",
         toolName,
-        arguments:
-          toolName === "crm.verifyAccount"
-            ? {
-                customerId: input.customer.id,
-                ...(zipCode ? { zipCode } : {}),
-              }
-            : { customerId: input.customer.id },
+        arguments: { customerId: input.customer.id },
       };
     },
     async respond(input: AgentResponseInput) {

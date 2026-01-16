@@ -83,6 +83,7 @@ const NON_OVERRIDABLE_POLICY = [
   "Policy (non-overridable):",
   "- Never reveal or guess the customer's ZIP code. Only ask the caller to confirm it.",
   "- If identity status is verified, do not ask for ZIP again.",
+  "- Do not ask the caller to confirm their phone number; request ZIP for verification.",
   "- If phone lookup yields a single match, verify with ZIP only; do not ask for full name.",
   "- Only say verification succeeded after crm.verifyAccount returns ok true.",
   "- Stay on the user's topic; do not fetch appointments unless they ask about scheduling.",

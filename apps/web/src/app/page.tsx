@@ -27,20 +27,30 @@ export default function HomePage() {
         </header>
 
         <div className="grid gap-6 md:grid-cols-2">
-          <Card className="animate-rise">
-            <h2 className="text-2xl font-semibold">Customer Portal</h2>
-            <p className="mt-3 text-ink/70">
-              Simulate a caller: send messages, confirm ZIP codes, and see how
-              the agent responds while preserving context.
-            </p>
-          </Card>
-          <Card className="animate-rise">
-            <h2 className="text-2xl font-semibold">Agent Dashboard</h2>
-            <p className="mt-3 text-ink/70">
-              Review call sessions, ticket status, tool calls, and model usage
-              from a single view.
-            </p>
-          </Card>
+          <Link href="/customer" className="group">
+            <Card className="animate-rise transition hover:-translate-y-1 hover:shadow-[0_26px_60px_rgba(12,27,31,0.2)]">
+              <h2 className="text-2xl font-semibold">Customer Portal</h2>
+              <p className="mt-3 text-ink/70">
+                Simulate a caller: send messages, confirm ZIP codes, and see how
+                the agent responds while preserving context.
+              </p>
+              <span className="mt-6 inline-flex text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
+                Open portal →
+              </span>
+            </Card>
+          </Link>
+          <Link href="/agent" className="group">
+            <Card className="animate-rise transition hover:-translate-y-1 hover:shadow-[0_26px_60px_rgba(12,27,31,0.2)]">
+              <h2 className="text-2xl font-semibold">Agent Dashboard</h2>
+              <p className="mt-3 text-ink/70">
+                Review call sessions, ticket status, tool calls, and model usage
+                from a single view.
+              </p>
+              <span className="mt-6 inline-flex text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
+                Open dashboard →
+              </span>
+            </Card>
+          </Link>
         </div>
       </div>
     </main>

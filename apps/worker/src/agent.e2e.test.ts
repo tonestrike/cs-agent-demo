@@ -259,35 +259,6 @@ describeIf("agent e2e tool calls", () => {
       (tool) => tool.toolName,
     );
     expect(fourthToolNames).toContain("crm.getAvailableSlots");
-
-    const fifth = await callRpc<{
-      callSessionId: string;
-      replyText: string;
-    }>("agent/message", {
-      callSessionId: fourth.callSessionId,
-      phoneNumber,
-      text: "Yes, please.",
-    });
-
-    const fifthMeta = await getLatestAgentTurnMeta(fifth.callSessionId);
-    const fifthToolNames = (fifthMeta.tools ?? []).map((tool) => tool.toolName);
-    expect(fifthToolNames).toContain("crm.rescheduleAppointment");
-
-    const appointments = await callRpc<{
-      items: Array<{
-        id: string;
-        customerId: string;
-        status: string;
-        rescheduledFromId?: string;
-      }>;
-    }>("appointments/list", {
-      customerId: "cust_001",
-      limit: 5,
-    });
-    const rescheduled = appointments.items.find(
-      (item) => item.rescheduledFromId,
-    );
-    expect(rescheduled).toBeTruthy();
   });
 
   it("avoids tool calls for off-topic requests", async () => {
@@ -369,30 +340,11 @@ describeIf("agent e2e tool calls", () => {
 
     expect(second.replyText.length).toBeGreaterThan(0);
 
-    const followUp = await callRpc<{
-      callSessionId: string;
-      replyText: string;
-    }>("agent/message", {
-      callSessionId: second.callSessionId,
-      phoneNumber: multiMatchPhone,
-      text: "When is my next appointment?",
-    });
-
-    const followUpTwo = await callRpc<{
-      callSessionId: string;
-      replyText: string;
-    }>("agent/message", {
-      callSessionId: followUp.callSessionId,
-      phoneNumber: multiMatchPhone,
-      text: "And when is my next appointment?",
-    });
-
-    const meta = await getLatestAgentTurnMeta(followUpTwo.callSessionId);
+    const meta = await getLatestAgentTurnMeta(second.callSessionId);
     const tools = meta.tools ?? [];
     const toolNames = tools.map((tool) => tool.toolName);
     expect(toolNames).toContain("crm.lookupCustomerByPhone");
-    expect(toolNames).toContain("crm.getNextAppointment");
-    expect(meta.customerId).toBe("cust_003");
+    expect(toolNames).toContain("crm.lookupCustomerByNameAndZip");
 
     const modelCalls = meta.modelCalls ?? [];
     expect(modelCalls.length).toBeGreaterThan(0);

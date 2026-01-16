@@ -25,12 +25,32 @@ export const createCustomerRepository = (db: D1Database) => {
       const whereClause = conditions.length
         ? `WHERE ${conditions.join(" AND ")}`
         : "";
-      const sql = `SELECT * FROM customers_cache ${whereClause} ORDER BY updated_at DESC LIMIT ?`;
+      const cursorClause = params.cursor ? "AND updated_at < ?" : "";
+      if (params.cursor) {
+        queryParams.push(params.cursor);
+      }
+      const sql = `
+        WITH ranked AS (
+          SELECT
+            *,
+            ROW_NUMBER() OVER (
+              PARTITION BY phone_e164
+              ORDER BY updated_at DESC, rowid DESC
+            ) AS rn
+          FROM customers_cache
+          ${whereClause}
+        )
+        SELECT *
+        FROM ranked
+        WHERE rn = 1 ${cursorClause}
+        ORDER BY updated_at DESC
+        LIMIT ?
+      `;
 
       const result = await db
         .prepare(sql)
         .bind(...queryParams, limit + 1)
-        .all<CustomerCacheRow>();
+        .all<CustomerCacheRow & { rn: number }>();
 
       const rows = result.results ?? [];
       const trimmed = rows.slice(0, limit);

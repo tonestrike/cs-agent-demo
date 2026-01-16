@@ -1014,13 +1014,15 @@ export const handleAgentMessage = async (
           getStringArg(args, "summary") ??
           getStringArg(args, "message") ??
           input.text;
+        const customerCacheId =
+          summary.verifiedCustomerId ?? summary.pendingCustomerId ?? undefined;
         const ticket = await createTicketUseCase(deps.tickets, {
           subject: reason,
           description: summaryText,
           category: "general",
           source: "agent",
           phoneE164,
-          customerCacheId: summary.verifiedCustomerId ?? undefined,
+          customerCacheId,
         });
         ticketId = ticket.id;
         actions.push("created_ticket");
@@ -1071,7 +1073,10 @@ export const handleAgentMessage = async (
       : parseToolCallFromText(modelOutput.text);
 
   if (!toolCall && modelOutput.type === "final") {
-    const replyText = modelOutput.text;
+    const replyText =
+      summary.identityStatus !== "verified" && !/zip/i.test(modelOutput.text)
+        ? "Please confirm your ZIP code to verify your account."
+        : modelOutput.text;
     await deps.calls.addTurn({
       id: crypto.randomUUID(),
       callSessionId,
