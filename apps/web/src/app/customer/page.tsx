@@ -32,6 +32,7 @@ export default function CustomerPage() {
   const [copied, setCopied] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScroll = useRef(true);
+  const statusShownRef = useRef<Set<string>>(new Set());
   const clientRef = useRef<ReturnType<typeof createAgentClient> | null>(null);
   const sessionRef = useRef<string | null>(null);
 
@@ -132,13 +133,37 @@ export default function CustomerPage() {
               (chunk as { type?: unknown }).type === "delta"
             ) {
               const text = String((chunk as { text?: unknown }).text ?? "");
+              const replace = statusShownRef.current.has(responseId);
+              if (replace) {
+                statusShownRef.current.delete(responseId);
+              }
               setMessages((prev) =>
                 prev.map((message) =>
                   message.id === responseId
-                    ? { ...message, text: `${message.text}${text}` }
+                    ? {
+                        ...message,
+                        text: replace ? text : `${message.text}${text}`,
+                      }
                     : message,
                 ),
               );
+            }
+            if (
+              chunk &&
+              typeof chunk === "object" &&
+              "type" in chunk &&
+              (chunk as { type?: unknown }).type === "status"
+            ) {
+              const text = String((chunk as { text?: unknown }).text ?? "");
+              if (text.trim()) {
+                setStatus(text);
+                statusShownRef.current.add(responseId);
+                setMessages((prev) =>
+                  prev.map((message) =>
+                    message.id === responseId ? { ...message, text } : message,
+                  ),
+                );
+              }
             }
             requestAnimationFrame(() => {
               if (shouldAutoScroll.current && listRef.current) {

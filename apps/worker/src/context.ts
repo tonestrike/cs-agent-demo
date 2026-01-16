@@ -34,16 +34,17 @@ export type RequestContext = {
 };
 
 export const createDependencies = (env: Env): Dependencies => {
+  const logger = createLogger(env);
   return {
     crm: getCrmAdapter(env),
     tickets: createTicketRepository(env.DB),
     calls: createCallRepository(env.DB),
     customers: createCustomerRepository(env.DB),
     appointments: createAppointmentRepository(env.DB),
-    modelFactory: (config) => getModelAdapter(env, config),
+    modelFactory: (config) => getModelAdapter(env, config, logger),
     agentConfigDefaults: getAgentConfig(env),
     agentConfig: createAgentConfigRepository(env.DB),
-    logger: createLogger(env),
+    logger,
   };
 };
 

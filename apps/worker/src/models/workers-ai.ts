@@ -3,6 +3,7 @@ import { AppError } from "@pestcall/core";
 
 import type { AgentPromptConfig } from "@pestcall/core";
 import { z } from "zod";
+import type { Logger } from "../logger";
 import { toolDefinitions } from "./tool-definitions";
 import {
   type AgentModelInput,
@@ -13,7 +14,7 @@ import {
 } from "./types";
 import { responseToText } from "./workers-ai-language-model";
 
-const FUNCTION_CALL_MODEL = "@hf/nousresearch/hermes-2-pro-mistral-7b";
+const MAX_NEW_TOKENS = 512;
 
 const zodToJsonSchema = (schema: z.ZodTypeAny): Record<string, unknown> => {
   if (schema instanceof z.ZodString) {
@@ -200,8 +201,9 @@ const buildRespondInstructions = (
 
 const buildRouteInstructions = (input: AgentModelInput) => {
   const lines = [
-    "Classify the customer's request into one of: appointments, billing, policy, general.",
-    'Return JSON only. No prose. Schema: {"intent":"appointments|billing|policy|general","topic"?:"string"}.',
+    "Classify the customer's request into one of: appointments, reschedule, billing, policy, general.",
+    'Return JSON only. No prose. Schema: {"intent":"appointments|reschedule|billing|policy|general","topic"?:"string"}.',
+    "Use reschedule when the caller wants to change or move an existing appointment.",
     "If the request is about service policy, include a short topic string.",
     `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
     `Message: ${input.text}`,
@@ -229,7 +231,7 @@ const routeJsonSchema = {
   properties: {
     intent: {
       type: "string",
-      enum: ["appointments", "billing", "policy", "general"],
+      enum: ["appointments", "reschedule", "billing", "policy", "general"],
     },
     topic: { type: "string" },
   },
@@ -301,6 +303,7 @@ export const createWorkersAiAdapter = (
   ai: Ai | undefined,
   model: string,
   config: AgentPromptConfig,
+  logger: Logger,
 ): ModelAdapter => {
   if (!ai) {
     throw new AppError("AI binding not configured", { code: "config_error" });
@@ -318,9 +321,27 @@ export const createWorkersAiAdapter = (
 
       const instructions = buildDecisionInstructions(input, config);
       try {
-        const response = await ai.run(FUNCTION_CALL_MODEL as keyof AiModels, {
+        const toolPayload = {
           messages: buildMessages(instructions, input.context, input.messages),
           tools: workersAiTools,
+          max_new_tokens: MAX_NEW_TOKENS,
+          max_tokens: MAX_NEW_TOKENS,
+        };
+        logger.debug(
+          {
+            model,
+            max_new_tokens: MAX_NEW_TOKENS,
+            max_tokens: MAX_NEW_TOKENS,
+            messageCount: toolPayload.messages.length,
+            toolCount: toolPayload.tools.length,
+          },
+          "workers_ai.tool_call.payload",
+        );
+        const response = await ai.run(model as keyof AiModels, {
+          messages: toolPayload.messages,
+          tools: toolPayload.tools,
+          max_new_tokens: toolPayload.max_new_tokens,
+          max_tokens: toolPayload.max_tokens,
         });
         const responseWithTools = response as {
           tool_calls?: Array<{ name: string; arguments?: unknown }>;
@@ -345,16 +366,25 @@ export const createWorkersAiAdapter = (
             "I could not interpret the request. Can you rephrase?",
         };
       } catch {
-        const fallbackResponse = await ai.run(
-          FUNCTION_CALL_MODEL as keyof AiModels,
+        const fallbackPayload = {
+          messages: buildMessages(instructions, input.context, input.messages),
+          max_new_tokens: MAX_NEW_TOKENS,
+          max_tokens: MAX_NEW_TOKENS,
+        };
+        logger.debug(
           {
-            messages: buildMessages(
-              instructions,
-              input.context,
-              input.messages,
-            ),
+            model,
+            max_new_tokens: MAX_NEW_TOKENS,
+            max_tokens: MAX_NEW_TOKENS,
+            messageCount: fallbackPayload.messages.length,
           },
+          "workers_ai.tool_call.fallback_payload",
         );
+        const fallbackResponse = await ai.run(model as keyof AiModels, {
+          messages: fallbackPayload.messages,
+          max_new_tokens: fallbackPayload.max_new_tokens,
+          max_tokens: fallbackPayload.max_tokens,
+        });
         const text = responseToText(fallbackResponse);
         return {
           type: "final",
@@ -373,12 +403,23 @@ export const createWorkersAiAdapter = (
 
       ensureJsonModeModel(model);
       const instructions = buildRespondInstructions(input, config);
+      logger.debug(
+        {
+          model,
+          max_new_tokens: MAX_NEW_TOKENS,
+          max_tokens: MAX_NEW_TOKENS,
+          messageCount: 1 + (input.messages?.length ?? 0),
+        },
+        "workers_ai.respond.payload",
+      );
       const response = await ai.run(model as keyof AiModels, {
         messages: buildMessages(instructions, input.context, input.messages),
         response_format: {
           type: "json_schema",
           json_schema: responseJsonSchema,
         },
+        max_new_tokens: MAX_NEW_TOKENS,
+        max_tokens: MAX_NEW_TOKENS,
       });
       const parsed =
         responseToJsonObject<z.infer<typeof responseSchema>>(response);
@@ -398,6 +439,14 @@ export const createWorkersAiAdapter = (
       }
 
       ensureJsonModeModel(model);
+      logger.debug(
+        {
+          model,
+          max_new_tokens: MAX_NEW_TOKENS,
+          max_tokens: MAX_NEW_TOKENS,
+        },
+        "workers_ai.route.payload",
+      );
       const response = await ai.run(model as keyof AiModels, {
         messages: [
           {
@@ -409,6 +458,8 @@ export const createWorkersAiAdapter = (
           type: "json_schema",
           json_schema: routeJsonSchema,
         },
+        max_new_tokens: MAX_NEW_TOKENS,
+        max_tokens: MAX_NEW_TOKENS,
       });
       const parsed =
         responseToJsonObject<z.infer<typeof agentRouteSchema>>(response);

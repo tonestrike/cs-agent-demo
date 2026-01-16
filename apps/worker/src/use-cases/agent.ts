@@ -33,6 +33,44 @@ type ModelCall = {
   errorCode?: string;
 };
 
+type AgentStatusUpdate = {
+  text: string;
+  toolName: AgentToolName;
+  source: "model" | "input_processing" | "routing";
+};
+
+type AgentMessageOptions = {
+  onStatus?: (status: AgentStatusUpdate) => void;
+};
+
+const statusMessageForTool = (toolName: AgentToolName) => {
+  switch (toolName) {
+    case "crm.verifyAccount":
+      return "Checking that ZIP code now.";
+    case "crm.getNextAppointment":
+      return "Let me check your next appointment.";
+    case "crm.listUpcomingAppointments":
+      return "Looking up your upcoming appointments.";
+    case "crm.getAppointmentById":
+      return "Looking up that appointment.";
+    case "crm.getOpenInvoices":
+      return "Checking your balance now.";
+    case "crm.getAvailableSlots":
+      return "Checking available time slots.";
+    case "crm.rescheduleAppointment":
+      return "Rescheduling your appointment now.";
+    case "crm.createAppointment":
+      return "Scheduling that appointment now.";
+    case "crm.getServicePolicy":
+      return "Looking up the policy now.";
+    case "crm.escalate":
+    case "agent.escalate":
+      return "Connecting you with a specialist.";
+    default:
+      return "Let me check that for you.";
+  }
+};
+
 const logModelCall = (
   logger: Logger,
   callSessionId: string,
@@ -165,6 +203,12 @@ type CallSessionSummary = {
   lastToolName?: string | null;
   lastToolResult?: string | null;
   lastAppointmentId?: string | null;
+  lastAppointmentOptions?: Array<{
+    id: string;
+    date: string;
+    timeWindow: string;
+    addressSummary: string;
+  }> | null;
   lastAvailableSlots?: Array<{
     id: string;
     date: string;
@@ -188,6 +232,14 @@ const parseSummary = (summary: string | null) => {
       lastToolName: parsed.lastToolName ?? null,
       lastToolResult: parsed.lastToolResult ?? null,
       lastAppointmentId: parsed.lastAppointmentId ?? null,
+      lastAppointmentOptions: Array.isArray(parsed.lastAppointmentOptions)
+        ? (parsed.lastAppointmentOptions as Array<{
+            id: string;
+            date: string;
+            timeWindow: string;
+            addressSummary: string;
+          }>)
+        : null,
       lastAvailableSlots: Array.isArray(parsed.lastAvailableSlots)
         ? (parsed.lastAvailableSlots as Array<{
             id: string;
@@ -212,6 +264,7 @@ const buildSummary = (summary: CallSessionSummary) =>
     lastToolName: summary.lastToolName ?? null,
     lastToolResult: summary.lastToolResult ?? null,
     lastAppointmentId: summary.lastAppointmentId ?? null,
+    lastAppointmentOptions: summary.lastAppointmentOptions ?? null,
     lastAvailableSlots: summary.lastAvailableSlots ?? null,
     zipAttempts: summary.zipAttempts ?? 0,
     callSummary: summary.callSummary ?? null,
@@ -329,6 +382,24 @@ const hasActionCommitment = (text: string) =>
     text,
   );
 
+const parseOrdinalSelection = (text: string, max: number) => {
+  const lower = text.toLowerCase();
+  const ordinalMap: Array<[RegExp, number]> = [
+    [/\b(first|1st|one|1)\b/, 1],
+    [/\b(second|2nd|two|2)\b/, 2],
+    [/\b(third|3rd|three|3)\b/, 3],
+  ];
+  for (const [pattern, value] of ordinalMap) {
+    if (pattern.test(lower) && value <= max) {
+      return value;
+    }
+  }
+  return null;
+};
+
+const wantsRescheduleOptions = (text: string) =>
+  /\b(reschedule|move|change|options|available)\b/i.test(text);
+
 const enforceVerificationLanguage = (
   text: string,
   identityStatus: CallSessionSummary["identityStatus"],
@@ -398,6 +469,20 @@ const generateReply = async (
     }
     return `Your next appointment is ${appointment.date} ${appointment.timeWindow} at ${appointment.addressSummary}.`;
   }
+  if (toolResult.toolName === "crm.listUpcomingAppointments") {
+    const list = toolResult.result as Array<{
+      date: string;
+      timeWindow: string;
+      addressSummary: string;
+    }>;
+    if (!Array.isArray(list) || list.length === 0) {
+      return "I couldn't find any upcoming appointments to reschedule.";
+    }
+    const lines = list.slice(0, 3).map((appointment, index) => {
+      return `${index + 1}) ${appointment.date} ${appointment.timeWindow} at ${appointment.addressSummary}`;
+    });
+    return `Here are your upcoming appointments:\n${lines.join("\n")}\nWhich one would you like to reschedule?`;
+  }
   if (toolResult.toolName === "crm.getOpenInvoices") {
     const invoice = toolResult.result as { balanceCents?: number };
     const balanceCents = invoice.balanceCents ?? 0;
@@ -456,6 +541,7 @@ export const handleAgentMessage = async (
   deps: Dependencies,
   input: AgentMessageInput,
   nowIso = new Date().toISOString(),
+  options?: AgentMessageOptions,
 ): Promise<AgentMessageOutput> => {
   const phoneE164 = normalizePhoneE164(input.phoneNumber);
   const tools: ToolCall[] = [];
@@ -662,6 +748,65 @@ export const handleAgentMessage = async (
     }
   }
 
+  if (!toolCall && summary.identityStatus === "verified") {
+    if (summary.lastAvailableSlots?.length && summary.lastAppointmentId) {
+      const slotOrdinal = parseOrdinalSelection(
+        input.text,
+        summary.lastAvailableSlots.length,
+      );
+      if (slotOrdinal) {
+        const slot = summary.lastAvailableSlots[slotOrdinal - 1];
+        if (slot) {
+          toolCall = {
+            type: "tool_call",
+            toolName: "crm.rescheduleAppointment",
+            arguments: {
+              appointmentId: summary.lastAppointmentId,
+              slotId: slot.id,
+            },
+          };
+          toolCallSource = "input_processing";
+          decisionSnapshot = summarizeModelOutput(toolCall);
+        }
+      }
+    }
+  }
+
+  if (!toolCall && summary.identityStatus === "verified") {
+    const appointmentOptions = summary.lastAppointmentOptions ?? [];
+    if (appointmentOptions.length > 0 && wantsRescheduleOptions(input.text)) {
+      const ordinal =
+        parseOrdinalSelection(input.text, appointmentOptions.length) ??
+        (appointmentOptions.length === 1 ? 1 : null);
+      if (ordinal) {
+        const appointment = appointmentOptions[ordinal - 1];
+        const customerId =
+          verifiedCustomerId ??
+          summary.verifiedCustomerId ??
+          resolvedCustomer?.id ??
+          session?.customerCacheId ??
+          null;
+        if (appointment && customerId) {
+          summary = {
+            ...summary,
+            lastAppointmentId: appointment.id,
+          };
+          await deps.calls.updateSessionSummary({
+            callSessionId,
+            summary: buildSummary(summary),
+          });
+          toolCall = {
+            type: "tool_call",
+            toolName: "crm.getAvailableSlots",
+            arguments: { customerId, daysAhead: 14, preference: "any" },
+          };
+          toolCallSource = "input_processing";
+          decisionSnapshot = summarizeModelOutput(toolCall);
+        }
+      }
+    }
+  }
+
   if (!toolCall) {
     const modelDecision = await recordModelCall(model, "decide", () =>
       model.generate({
@@ -723,6 +868,14 @@ export const handleAgentMessage = async (
               type: "tool_call",
               toolName: "crm.getNextAppointment",
               arguments: { customerId },
+            };
+            toolCallSource = "routing";
+            break;
+          case "reschedule":
+            toolCall = {
+              type: "tool_call",
+              toolName: "crm.listUpcomingAppointments",
+              arguments: { customerId, limit: 3 },
             };
             toolCallSource = "routing";
             break;
@@ -1547,27 +1700,85 @@ export const handleAgentMessage = async (
     }
 
     let lastAppointmentId = summary.lastAppointmentId ?? null;
+    let lastAppointmentOptions = summary.lastAppointmentOptions ?? null;
     let lastAvailableSlots = summary.lastAvailableSlots ?? null;
     if (toolResult.toolName === "crm.getNextAppointment") {
       const appointment = toolResult.result as {
         id?: string | null;
+        date?: string;
+        timeWindow?: string;
+        addressSummary?: string;
       } | null;
       if (appointment?.id) {
         lastAppointmentId = appointment.id;
+        if (
+          appointment.date &&
+          appointment.timeWindow &&
+          appointment.addressSummary
+        ) {
+          lastAppointmentOptions = [
+            {
+              id: appointment.id,
+              date: appointment.date,
+              timeWindow: appointment.timeWindow,
+              addressSummary: appointment.addressSummary,
+            },
+          ];
+        }
       }
     }
     if (toolResult.toolName === "crm.getAppointmentById") {
       const appointment = toolResult.result as {
         id?: string | null;
+        date?: string;
+        timeWindow?: string;
+        addressSummary?: string;
       } | null;
       if (appointment?.id) {
         lastAppointmentId = appointment.id;
+        if (
+          appointment.date &&
+          appointment.timeWindow &&
+          appointment.addressSummary
+        ) {
+          lastAppointmentOptions = [
+            {
+              id: appointment.id,
+              date: appointment.date,
+              timeWindow: appointment.timeWindow,
+              addressSummary: appointment.addressSummary,
+            },
+          ];
+        }
       }
     }
     if (toolResult.toolName === "crm.listUpcomingAppointments") {
-      const list = toolResult.result as Array<{ id?: string }> | null;
+      const list = toolResult.result as Array<{
+        id?: string;
+        date?: string;
+        timeWindow?: string;
+        addressSummary?: string;
+      }> | null;
       if (list?.length && list[0]?.id) {
         lastAppointmentId = list[0].id;
+      }
+      if (list?.length) {
+        lastAppointmentOptions = list
+          .filter(
+            (appointment): appointment is {
+              id: string;
+              date: string;
+              timeWindow: string;
+              addressSummary: string;
+            } =>
+              Boolean(
+                appointment.id &&
+                  appointment.date &&
+                  appointment.timeWindow &&
+                  appointment.addressSummary,
+              ),
+          )
+          .slice(0, 3);
       }
     }
     if (toolResult.toolName === "crm.getAvailableSlots") {
@@ -1600,6 +1811,7 @@ export const handleAgentMessage = async (
       lastToolName: toolResult.toolName,
       lastToolResult: stringifyToolResult(redactedToolResult),
       lastAppointmentId,
+      lastAppointmentOptions,
       lastAvailableSlots,
     };
     await deps.calls.updateSessionSummary({
@@ -1661,6 +1873,8 @@ export const handleAgentMessage = async (
         toolCallSource,
         toolCount: tools.length,
         modelCallCount: modelCalls.length,
+        replyTextLength: replyText.length,
+        replyPreview: replyText.slice(0, 160),
       },
       "agent.message.complete",
     );
@@ -1678,6 +1892,25 @@ export const handleAgentMessage = async (
   let toolCustomer = customer;
   const maxToolPasses = 10;
   let iterations = 0;
+
+  if (toolCall && toolCall.type === "tool_call" && options?.onStatus) {
+    const source = toolCallSource ?? "model";
+    const status: AgentStatusUpdate = {
+      text: statusMessageForTool(toolCall.toolName),
+      toolName: toolCall.toolName,
+      source,
+    };
+    logger.debug(
+      {
+        callSessionId,
+        toolName: status.toolName,
+        source: status.source,
+        statusText: status.text,
+      },
+      "agent.status.emit",
+    );
+    options.onStatus(status);
+  }
 
   while (toolCall && iterations < maxToolPasses) {
     const args = (toolCall.arguments ?? {}) as Record<string, unknown>;
@@ -1754,6 +1987,8 @@ export const handleAgentMessage = async (
       toolCallSource,
       toolCount: tools.length,
       modelCallCount: modelCalls.length,
+      replyTextLength: replyText.length,
+      replyPreview: replyText.slice(0, 160),
     },
     "agent.message.complete",
   );

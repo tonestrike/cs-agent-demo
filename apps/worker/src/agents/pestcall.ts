@@ -43,7 +43,12 @@ export class PestCallAgent extends Agent<Env, AgentState> {
   @callable({ streaming: true })
   async messageStream(stream: StreamingResponse, input: AgentMessageInput) {
     const deps = createDependencies(this.env);
-    const response = await handleAgentMessage(deps, input);
+    stream.send({ type: "status", text: "One moment while I check that." });
+    const response = await handleAgentMessage(deps, input, undefined, {
+      onStatus: (status) => {
+        stream.send({ type: "status", text: status.text });
+      },
+    });
     this.setState({
       lastCallSessionId: response.callSessionId,
       lastPhoneNumber: input.phoneNumber,

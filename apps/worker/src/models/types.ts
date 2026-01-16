@@ -37,7 +37,13 @@ export const agentModelOutputSchema = z.union([
 export type AgentModelOutput = z.infer<typeof agentModelOutputSchema>;
 
 export const agentRouteSchema = z.object({
-  intent: z.enum(["appointments", "billing", "policy", "general"]),
+  intent: z.enum([
+    "appointments",
+    "reschedule",
+    "billing",
+    "policy",
+    "general",
+  ]),
   topic: z.string().optional(),
   reasoning: z.string().optional(),
 });
