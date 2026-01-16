@@ -4,25 +4,25 @@ import {
   type WorkflowStep,
 } from "cloudflare:workers";
 import {
-  cancelConfirmEventSchema,
-  cancelSelectAppointmentEventSchema,
-  cancelWorkflowInputSchema,
   type CancelWorkflowInput,
   type CancelWorkflowOutput,
   ServiceAppointmentStatus,
+  cancelConfirmEventSchema,
+  cancelSelectAppointmentEventSchema,
+  cancelWorkflowInputSchema,
 } from "@pestcall/core";
 
 import { createDependencies } from "../context";
 import type { Env } from "../env";
-import {
-  CANCEL_WORKFLOW_EVENT_CONFIRM,
-  CANCEL_WORKFLOW_EVENT_SELECT_APPOINTMENT,
-} from "./constants";
+import { cancelAppointment as cancelAppointmentInStore } from "../use-cases/appointments";
 import {
   cancelAppointment as cancelAppointmentInCrm,
   listUpcomingAppointments,
 } from "../use-cases/crm";
-import { cancelAppointment as cancelAppointmentInStore } from "../use-cases/appointments";
+import {
+  CANCEL_WORKFLOW_EVENT_CONFIRM,
+  CANCEL_WORKFLOW_EVENT_SELECT_APPOINTMENT,
+} from "./constants";
 
 const parseSummary = (summary: string | null) => {
   if (!summary) {

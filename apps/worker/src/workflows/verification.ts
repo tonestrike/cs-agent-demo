@@ -126,7 +126,7 @@ export class VerificationWorkflow extends WorkflowEntrypoint<
       matches = await step.do("lookup customer by phone", async () => {
         return lookupCustomerByPhone(deps.crm, params.phoneE164);
       });
-    } catch (error) {
+    } catch (_error) {
       await step.do("escalate lookup error", async () => {
         await updateSummary("escalate", {
           identityStatus: "unknown",
@@ -213,7 +213,7 @@ export class VerificationWorkflow extends WorkflowEntrypoint<
           }
           return null;
         });
-      } catch (error) {
+      } catch (_error) {
         await step.do("escalate verify error", async () => {
           await updateSummary("escalate", {
             identityStatus: "pending",

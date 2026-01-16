@@ -21,11 +21,6 @@ import type {
 } from "../models/types";
 import type { AgentMessageInput, AgentMessageOutput } from "../schemas/agent";
 import {
-  cancelAppointment as cancelAppointmentUseCase,
-  rescheduleAppointment as rescheduleAppointmentUseCase,
-} from "./appointments";
-import { createTicketUseCase } from "./tickets";
-import {
   CANCEL_WORKFLOW_EVENT_CONFIRM,
   CANCEL_WORKFLOW_EVENT_SELECT_APPOINTMENT,
   RESCHEDULE_WORKFLOW_EVENT_CONFIRM,
@@ -33,6 +28,11 @@ import {
   RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
   VERIFY_WORKFLOW_EVENT_ZIP,
 } from "../workflows/constants";
+import {
+  cancelAppointment as cancelAppointmentUseCase,
+  rescheduleAppointment as rescheduleAppointmentUseCase,
+} from "./appointments";
+import { createTicketUseCase } from "./tickets";
 
 type ToolCall = {
   toolName: string;
