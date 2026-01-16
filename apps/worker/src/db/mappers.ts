@@ -6,6 +6,7 @@ import type {
   TicketEventTypeValue,
   TicketStatus,
 } from "@pestcall/core";
+import { defaultLogger } from "../logging";
 
 type JoinedCustomerRow = {
   customer_id?: string | null;
@@ -92,8 +93,11 @@ const safeJsonParse = (value: string): Record<string, unknown> => {
     if (parsed && typeof parsed === "object") {
       return parsed as Record<string, unknown>;
     }
-  } catch {
-    // fall through
+  } catch (error) {
+    defaultLogger.warn(
+      { error: error instanceof Error ? error.message : "unknown" },
+      "db.safeJsonParse.failed",
+    );
   }
   return {};
 };

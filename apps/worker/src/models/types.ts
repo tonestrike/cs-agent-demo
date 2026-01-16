@@ -259,7 +259,7 @@ export type SelectionOption = {
 export type SelectionInput = {
   text: string;
   options: SelectionOption[];
-  kind: "appointment" | "slot";
+  kind: "appointment" | "slot" | "confirmation";
 };
 
 export type SelectionResult = {
@@ -274,10 +274,11 @@ export type StatusInput = {
 };
 
 export type ModelAdapter = {
-  name: "mock" | "workers-ai" | "openrouter";
+  name: "mock" | "workers-ai" | "openrouter" | "hybrid";
   modelId?: string;
   generate: (input: AgentModelInput) => Promise<AgentModelOutput>;
   respond: (input: AgentResponseInput) => Promise<string>;
+  respondStream?: (input: AgentResponseInput) => AsyncIterable<string>;
   route: (input: AgentModelInput) => Promise<AgentRouteDecision>;
   selectOption: (input: SelectionInput) => Promise<SelectionResult>;
   status: (input: StatusInput) => Promise<string>;

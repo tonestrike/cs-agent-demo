@@ -1,4 +1,5 @@
 import type { Env } from "../env";
+import { defaultLogger } from "../logging";
 
 type HubEvent = {
   type: "status" | "delta" | "final";
@@ -40,7 +41,11 @@ export class ConversationHub {
       for (const socket of this.connections) {
         try {
           socket.send(payload);
-        } catch {
+        } catch (error) {
+          defaultLogger.error(
+            { error: error instanceof Error ? error.message : "unknown" },
+            "conversation-hub.send_failed",
+          );
           this.connections.delete(socket);
         }
       }

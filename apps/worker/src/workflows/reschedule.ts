@@ -15,6 +15,7 @@ import {
 
 import { createDependencies } from "../context";
 import type { Env } from "../env";
+import { defaultLogger } from "../logging";
 import { rescheduleAppointment as rescheduleAppointmentInStore } from "../use-cases/appointments";
 import {
   getAvailableSlots,
@@ -33,7 +34,11 @@ const parseSummary = (summary: string | null) => {
   }
   try {
     return JSON.parse(summary) as Record<string, unknown>;
-  } catch {
+  } catch (error) {
+    defaultLogger.warn(
+      { error: error instanceof Error ? error.message : "unknown" },
+      "workflow.reschedule.summary.parse_failed",
+    );
     return {};
   }
 };
@@ -49,7 +54,10 @@ export class RescheduleWorkflow extends WorkflowEntrypoint<
     event: WorkflowEvent<RescheduleWorkflowInput>,
     step: WorkflowStep,
   ): Promise<RescheduleWorkflowOutput> {
-    const input = rescheduleWorkflowInputSchema.safeParse(event.payload);
+    const payload = (
+      "params" in event ? event.params : event.payload
+    ) as RescheduleWorkflowInput;
+    const input = rescheduleWorkflowInputSchema.safeParse(payload);
     if (!input.success) {
       throw new Error("Invalid reschedule workflow input.");
     }

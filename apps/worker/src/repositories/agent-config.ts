@@ -3,6 +3,7 @@ import type {
   AgentPromptConfigRecord,
   AgentPromptConfigUpdate,
 } from "@pestcall/core";
+import { defaultLogger } from "../logging";
 
 type AgentConfigRow = {
   id: string;
@@ -33,7 +34,11 @@ const parseToolGuidance = (
       if (parsed && typeof parsed === "object") {
         return parsed as AgentPromptConfigRecord["toolGuidance"];
       }
-    } catch {
+    } catch (error) {
+      defaultLogger.warn(
+        { error: error instanceof Error ? error.message : "unknown" },
+        "agent-config.tool-guidance.parse_failed",
+      );
       return undefined;
     }
   }

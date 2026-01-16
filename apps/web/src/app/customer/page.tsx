@@ -148,7 +148,7 @@ export default function CustomerPage() {
           setStatus(`Session ${sessionId.slice(0, 8)}…`);
         }
       } catch {
-        // ignore malformed events
+        setStatus("Received malformed message.");
       }
       requestAnimationFrame(() => {
         if (shouldAutoScroll.current && listRef.current) {

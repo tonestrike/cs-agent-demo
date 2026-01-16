@@ -2,6 +2,7 @@ import { Agent, type StreamingResponse, callable } from "agents";
 
 import { createDependencies } from "../context";
 import type { Env } from "../env";
+import { defaultLogger } from "../logging";
 import {
   type AgentMessageInput,
   agentMessageInputSchema,
@@ -216,7 +217,11 @@ export class PestCallAgent extends Agent<Env, AgentState> {
       ? (() => {
           try {
             return JSON.parse(rawText) as unknown;
-          } catch {
+          } catch (error) {
+            defaultLogger.warn(
+              { error: error instanceof Error ? error.message : "unknown" },
+              "agent.message.parse_failed",
+            );
             return null;
           }
         })()

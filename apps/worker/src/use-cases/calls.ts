@@ -1,3 +1,4 @@
+import { defaultLogger } from "../logging";
 import type { createCallRepository } from "../repositories";
 
 export const listCalls = (
@@ -26,8 +27,11 @@ const parseSummary = (summary: string | null) => {
     if (parsed && typeof parsed === "object") {
       return parsed as Record<string, unknown>;
     }
-  } catch {
-    // fall through
+  } catch (error) {
+    defaultLogger.warn(
+      { error: error instanceof Error ? error.message : "unknown" },
+      "calls.summary.parse_failed",
+    );
   }
   return null;
 };

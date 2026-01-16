@@ -4,6 +4,7 @@ import { AppError } from "@pestcall/core";
 import type { AgentPromptConfig } from "@pestcall/core";
 import { z } from "zod";
 import type { Logger } from "../logger";
+import { defaultLogger } from "../logging";
 import { toolDefinitions } from "./tool-definitions";
 import {
   type AgentModelInput,
@@ -217,7 +218,7 @@ const buildRouteInstructions = (input: AgentModelInput) => {
 };
 
 const buildSelectionInstructions = (
-  kind: "appointment" | "slot",
+  kind: "appointment" | "slot" | "confirmation",
   options: Array<{ label: string }>,
 ) => {
   const optionLines = options
@@ -245,11 +246,6 @@ const buildStatusInstructions = (contextHint?: string) => {
     .join("\n");
 };
 
-const responseSchema = z.object({
-  answer: z.string().min(1),
-  citations: z.array(z.string().url()).optional(),
-});
-
 const selectionSchema = z.object({
   index: z.number().int().nullable(),
   reason: z.string().optional(),
@@ -258,16 +254,6 @@ const selectionSchema = z.object({
 const statusSchema = z.object({
   message: z.string().min(1),
 });
-
-const responseJsonSchema = {
-  type: "object",
-  properties: {
-    answer: { type: "string" },
-    citations: { type: "array", items: { type: "string" } },
-  },
-  required: ["answer"],
-  additionalProperties: false,
-};
 
 const selectionJsonSchema = {
   type: "object",
@@ -342,7 +328,11 @@ const responseToJsonObject = <T>(response: unknown): T | null => {
     if (typeof value === "string") {
       try {
         return JSON.parse(value) as T;
-      } catch {
+      } catch (error) {
+        defaultLogger.warn(
+          { error: error instanceof Error ? error.message : "unknown" },
+          "workers-ai.response.parse_failed",
+        );
         return null;
       }
     }
@@ -437,7 +427,13 @@ export const createWorkersAiAdapter = (
             text?.trim() ||
             "I could not interpret the request. Can you rephrase?",
         };
-      } catch {
+      } catch (error) {
+        logger.warn(
+          {
+            error: error instanceof Error ? error.message : "unknown",
+          },
+          "workers_ai.tool_call.fallback",
+        );
         const fallbackPayload = {
           messages: buildMessages(instructions, input.context, input.messages),
           max_new_tokens: MAX_NEW_TOKENS,
@@ -486,22 +482,16 @@ export const createWorkersAiAdapter = (
       );
       const response = await ai.run(model as keyof AiModels, {
         messages: buildMessages(instructions, input.context, input.messages),
-        response_format: {
-          type: "json_schema",
-          json_schema: responseJsonSchema,
-        },
         max_new_tokens: MAX_NEW_TOKENS,
         max_tokens: MAX_NEW_TOKENS,
       });
-      const parsed =
-        responseToJsonObject<z.infer<typeof responseSchema>>(response);
-      const validated = responseSchema.safeParse(parsed);
-      if (!validated.success) {
-        throw new AppError("Invalid JSON response", {
-          code: "JSON_MODE_FAILED",
-        });
+      const text = responseToText(response)?.trim();
+      if (text) {
+        return text;
       }
-      return validated.data.answer.trim();
+      throw new AppError("Empty response from model", {
+        code: "RESPOND_EMPTY",
+      });
     },
     async route(input: AgentModelInput) {
       if (!ai) {

@@ -3,6 +3,7 @@ import { AppError } from "@pestcall/core";
 import { z } from "zod";
 import type { Env } from "../env";
 import type { Logger } from "../logger";
+import { defaultLogger } from "../logging";
 import { toolDefinitions } from "./tool-definitions";
 import {
   type AgentModelInput,
@@ -214,7 +215,7 @@ const buildRouteInstructions = (input: AgentModelInput) => {
 };
 
 const buildSelectionInstructions = (
-  kind: "appointment" | "slot",
+  kind: "appointment" | "slot" | "confirmation",
   options: Array<{ label: string }>,
 ) => {
   const optionLines = options
@@ -241,10 +242,6 @@ const buildStatusInstructions = (contextHint?: string) => {
     .filter(Boolean)
     .join("\n");
 };
-
-const responseSchema = z.object({
-  answer: z.string().min(1),
-});
 
 const selectionSchema = z.object({
   index: z.number().int().nullable(),
@@ -292,6 +289,69 @@ const responseToText = (response: unknown) => {
   return null;
 };
 
+const streamOpenRouterResponse = async function* (
+  response: Response,
+  logger: Logger,
+): AsyncIterable<string> {
+  if (!response.body) {
+    return;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) {
+        continue;
+      }
+      let payload = trimmed.slice("data:".length).trim();
+      while (payload.startsWith("data:")) {
+        payload = payload.slice("data:".length).trim();
+      }
+      if (!payload || payload === "[DONE]") {
+        continue;
+      }
+      logger.debug(
+        {
+          payload: truncate(payload, 240),
+        },
+        "openrouter.respond.stream.line",
+      );
+      try {
+        const parsed = JSON.parse(payload) as {
+          choices?: Array<{ delta?: { content?: string } }>;
+        };
+        const delta = parsed.choices?.[0]?.delta?.content;
+        if (delta) {
+          logger.debug(
+            {
+              deltaLength: delta.length,
+            },
+            "openrouter.respond.stream.delta",
+          );
+          yield delta;
+        }
+      } catch (error) {
+        logger.warn(
+          {
+            error: error instanceof Error ? error.message : "unknown",
+            payload: truncate(payload, 240),
+          },
+          "openrouter.respond.stream.parse_failed",
+        );
+      }
+    }
+  }
+};
+
 const responseToJsonObject = <T>(response: unknown): T | null => {
   const text = responseToText(response);
   if (!text) {
@@ -299,7 +359,11 @@ const responseToJsonObject = <T>(response: unknown): T | null => {
   }
   try {
     return JSON.parse(text) as T;
-  } catch {
+  } catch (error) {
+    defaultLogger.warn(
+      { error: error instanceof Error ? error.message : "unknown" },
+      "openrouter.response.parse_failed",
+    );
     return null;
   }
 };
@@ -335,7 +399,7 @@ const requestOpenRouter = async (
   payload: Record<string, unknown>,
   logger: Logger,
   tag: string,
-) => {
+): Promise<Response> => {
   const baseUrl = resolveBaseUrl(env);
   const token = env.OPENROUTER_TOKEN;
   if (!baseUrl || !token) {
@@ -451,7 +515,14 @@ export const createOpenRouterAdapter = (
           if (typeof rawArgs === "string" && rawArgs.trim()) {
             try {
               parsedArgs = JSON.parse(rawArgs) as Record<string, unknown>;
-            } catch {
+            } catch (error) {
+              logger.warn(
+                {
+                  error: error instanceof Error ? error.message : "unknown",
+                  rawArgs: truncate(rawArgs, 240),
+                },
+                "openrouter.tool.args.parse_failed",
+              );
               parsedArgs = {};
             }
           }
@@ -488,21 +559,41 @@ export const createOpenRouterAdapter = (
         {
           model,
           messages: buildMessages(instructions, input.context, input.messages),
-          response_format: jsonResponseFormat(),
           max_tokens: MAX_NEW_TOKENS,
         },
         logger,
         "respond",
       );
-      const parsed =
-        responseToJsonObject<z.infer<typeof responseSchema>>(response);
-      const validated = responseSchema.safeParse(parsed);
-      if (!validated.success) {
-        throw new AppError("Invalid JSON response", {
-          code: "JSON_MODE_FAILED",
-        });
+      const text = responseToText(response)?.trim();
+      if (text) {
+        return text;
       }
-      return validated.data.answer.trim();
+      throw new AppError("Empty response from model", {
+        code: "RESPOND_EMPTY",
+      });
+    },
+    async *respondStream(input: AgentResponseInput) {
+      const instructions = buildRespondInstructions(input, config);
+      logger.info(
+        {
+          model,
+          max_tokens: MAX_NEW_TOKENS,
+          messageCount: 1 + (input.messages?.length ?? 0),
+        },
+        "openrouter.respond.stream.payload",
+      );
+      const response = await requestOpenRouter(
+        env,
+        {
+          model,
+          messages: buildMessages(instructions, input.context, input.messages),
+          max_tokens: MAX_NEW_TOKENS,
+          stream: true,
+        },
+        logger,
+        "respond_stream",
+      );
+      yield* streamOpenRouterResponse(response, logger);
     },
     async route(input: AgentModelInput): Promise<AgentRouteDecision> {
       logger.info(

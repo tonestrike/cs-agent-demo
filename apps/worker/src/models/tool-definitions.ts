@@ -107,7 +107,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     }),
     outputSchema: rescheduleResultSchema,
     missingArgsMessage:
-      "Appointment ID and slot ID are required to reschedule.",
+      "Which appointment should I reschedule, and which time works best? If you have multiple appointments, I can list them.",
   },
   "crm.cancelAppointment": {
     description: "Cancel a scheduled appointment.",
@@ -115,7 +115,8 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
       appointmentId: z.string().min(1),
     }),
     outputSchema: z.object({ ok: z.boolean() }),
-    missingArgsMessage: "Appointment ID is required to cancel.",
+    missingArgsMessage:
+      "Which appointment should I cancel? If you have multiple appointments, I can list them.",
   },
   "crm.createAppointment": {
     description: "Create a new appointment for a customer.",

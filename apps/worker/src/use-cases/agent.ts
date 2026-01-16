@@ -58,6 +58,7 @@ type AgentStatusUpdate = {
 
 type AgentMessageOptions = {
   onStatus?: (status: AgentStatusUpdate) => void;
+  onToken?: (token: string) => void;
 };
 
 const DEFAULT_TOOL_STATUS_MESSAGE = "Let me check that for you.";
@@ -295,7 +296,8 @@ const parseSummary = (summary: string | null) => {
       zipAttempts: parsed.zipAttempts ?? 0,
       callSummary: parsed.callSummary ?? null,
     };
-  } catch {
+  } catch (error) {
+    console.warn("agent.summary.parse_failed", error);
     return { identityStatus: "unknown" } satisfies CallSessionSummary;
   }
 };
@@ -325,7 +327,8 @@ const stringifyToolResult = (result: ToolResult) => {
   try {
     const text = JSON.stringify(result);
     return text.length > 800 ? `${text.slice(0, 800)}…` : text;
-  } catch {
+  } catch (error) {
+    console.warn("agent.tool.result.stringify_failed", error);
     return null;
   }
 };
@@ -340,25 +343,23 @@ const getNumberArg = (args: Record<string, unknown>, key: string) => {
   return typeof value === "number" ? value : undefined;
 };
 
-const parseConfirmation = (input: string) => {
-  const normalized = input.trim().toLowerCase();
-  if (!normalized) {
-    return null;
-  }
-  if (
-    ["yes", "y", "confirm", "confirmed", "ok", "okay", "sure"].includes(
-      normalized,
-    )
-  ) {
+const interpretConfirmation = async (
+  model: ModelAdapter,
+  inputText: string,
+): Promise<boolean | null> => {
+  const options = [
+    { id: "confirm", label: "Yes, confirm" },
+    { id: "decline", label: "No, do not change it" },
+  ];
+  const selection = await model.selectOption({
+    text: inputText,
+    options,
+    kind: "confirmation",
+  });
+  if (selection.selectedId === "confirm") {
     return true;
   }
-  if (["no", "n", "cancel", "stop", "never", "nope"].includes(normalized)) {
-    return false;
-  }
-  if (normalized.includes("yes") || normalized.includes("confirm")) {
-    return true;
-  }
-  if (normalized.includes("no") || normalized.includes("cancel")) {
+  if (selection.selectedId === "decline") {
     return false;
   }
   return null;
@@ -435,8 +436,9 @@ const workflowPromptToText = (prompt: {
   switch (prompt.kind) {
     case "select_appointment": {
       const options = formatWorkflowOptions(prompt.options);
+      const count = prompt.options?.length ?? 0;
       return options
-        ? `Which appointment should I reschedule? ${options}`
+        ? `I found ${count} upcoming appointments. Which one should I reschedule? ${options}`
         : "Which appointment should I reschedule?";
     }
     case "select_slot": {
@@ -446,7 +448,10 @@ const workflowPromptToText = (prompt: {
         : "Which time works best for you?";
     }
     case "confirm":
-      return prompt.details ?? "Confirm the new appointment time? (yes or no)";
+      return (
+        prompt.details ??
+        "Does that new appointment time look right? Please confirm or decline."
+      );
     default:
       return prompt.details ?? "Working on that now.";
   }
@@ -571,6 +576,7 @@ const generateReply = async (
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   logger: Logger,
   callSessionId: string,
+  onToken?: (token: string) => void,
 ) => {
   logger.debug(
     {
@@ -579,16 +585,25 @@ const generateReply = async (
     },
     "agent.reply.start",
   );
-  const responseCall = await recordModelCall(model, "respond", () =>
-    model.respond({
-      text: input.text,
-      customer: buildCustomerContext(customer),
-      messages,
-      context,
-      hasContext: messages.length > 1,
-      ...redactToolResultForPrompt(toolResult),
-    }),
-  );
+  const respondInput = {
+    text: input.text,
+    customer: buildCustomerContext(customer),
+    messages,
+    context,
+    hasContext: messages.length > 1,
+    ...redactToolResultForPrompt(toolResult),
+  };
+  const responseCall = await recordModelCall(model, "respond", async () => {
+    if (onToken && model.respondStream) {
+      let aggregated = "";
+      for await (const token of model.respondStream(respondInput)) {
+        aggregated += token;
+        onToken(token);
+      }
+      return aggregated;
+    }
+    return model.respond(respondInput);
+  });
   modelCalls.push(responseCall.record);
   logModelCall(logger, responseCall.record);
 
@@ -631,8 +646,18 @@ export const handleAgentMessage = async (
       callSessionId: input.callSessionId ?? "new",
       modelId: agentConfig.modelId,
       configUpdatedAt: agentConfig.updatedAt ?? null,
+      defaultsModelId: deps.agentConfigDefaults.modelId ?? null,
+      inputText: input.text,
     },
     "agent.config.loaded",
+  );
+  logger.debug(
+    {
+      callSessionId: input.callSessionId ?? "new",
+      phoneE164,
+      hasCallSessionId: Boolean(input.callSessionId),
+    },
+    "agent.request.received",
   );
 
   let callSessionId = input.callSessionId;
@@ -683,6 +708,15 @@ export const handleAgentMessage = async (
       callSessionId,
       summary: buildSummary(summary),
     });
+    logger.debug(
+      {
+        callSessionId,
+        callSummary: summary.callSummary ?? null,
+        identityStatus: summary.identityStatus ?? null,
+        workflowState: summary.workflowState ?? null,
+      },
+      "agent.summary.updated",
+    );
   };
 
   await deps.calls.addTurn({
@@ -799,6 +833,16 @@ export const handleAgentMessage = async (
       content: turn.text,
     }));
   messageHistory.push({ role: "user", content: input.text });
+  logger.debug(
+    {
+      callSessionId,
+      contextTurns,
+      messageHistoryCount: messageHistory.length,
+      lastUserMessage: input.text,
+      summarySnapshot: summary,
+    },
+    "agent.context.snapshot",
+  );
 
   const summarizeModelOutput = (output: AgentModelOutput) => {
     if (output.type === "tool_call") {
@@ -843,6 +887,15 @@ export const handleAgentMessage = async (
   if (!toolCall && summary.identityStatus !== "verified") {
     const existingVerifyState =
       workflowState?.kind === "verify" ? workflowState : null;
+    logger.debug(
+      {
+        callSessionId,
+        identityStatus: summary.identityStatus ?? null,
+        workflowState: summary.workflowState ?? null,
+        pendingCustomerId: summary.pendingCustomerId ?? null,
+      },
+      "agent.verify.state",
+    );
     if (existingVerifyState?.step === "escalate") {
       const replyText =
         "I'm going to connect you with a specialist to verify your account.";
@@ -1074,6 +1127,7 @@ export const handleAgentMessage = async (
             messageHistory,
             logger,
             callSessionId,
+            options?.onToken,
           );
           await updateCallSummary(replyText);
           await deps.calls.addTurn({
@@ -1125,6 +1179,7 @@ export const handleAgentMessage = async (
             messageHistory,
             logger,
             callSessionId,
+            options?.onToken,
           );
           await updateCallSummary(replyText);
           await deps.calls.addTurn({
@@ -1430,7 +1485,7 @@ export const handleAgentMessage = async (
         }
       }
     } else if (rescheduleWorkflow.step === "confirm") {
-      const confirmed = parseConfirmation(input.text);
+      const confirmed = await interpretConfirmation(model, input.text);
       if (confirmed === null) {
         workflowPrompt = {
           kind: "confirm",
@@ -1535,7 +1590,7 @@ export const handleAgentMessage = async (
         }
       }
     } else if (cancelWorkflow.step === "confirm") {
-      const confirmed = parseConfirmation(input.text);
+      const confirmed = await interpretConfirmation(model, input.text);
       if (confirmed === null) {
         workflowPrompt = {
           kind: "confirm",
@@ -2991,6 +3046,7 @@ export const handleAgentMessage = async (
       messageHistory,
       logger,
       callSessionId,
+      options?.onToken,
     );
     if (!replyText.trim()) {
       replyText = agentConfig.scopeMessage;

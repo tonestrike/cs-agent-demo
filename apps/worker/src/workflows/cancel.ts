@@ -14,6 +14,7 @@ import {
 
 import { createDependencies } from "../context";
 import type { Env } from "../env";
+import { defaultLogger } from "../logging";
 import { cancelAppointment as cancelAppointmentInStore } from "../use-cases/appointments";
 import {
   cancelAppointment as cancelAppointmentInCrm,
@@ -30,7 +31,11 @@ const parseSummary = (summary: string | null) => {
   }
   try {
     return JSON.parse(summary) as Record<string, unknown>;
-  } catch {
+  } catch (error) {
+    defaultLogger.warn(
+      { error: error instanceof Error ? error.message : "unknown" },
+      "workflow.cancel.summary.parse_failed",
+    );
     return {};
   }
 };
@@ -46,7 +51,10 @@ export class CancelWorkflow extends WorkflowEntrypoint<
     event: WorkflowEvent<CancelWorkflowInput>,
     step: WorkflowStep,
   ): Promise<CancelWorkflowOutput> {
-    const input = cancelWorkflowInputSchema.safeParse(event.payload);
+    const payload = (
+      "params" in event ? event.params : event.payload
+    ) as CancelWorkflowInput;
+    const input = cancelWorkflowInputSchema.safeParse(payload);
     if (!input.success) {
       throw new Error("Invalid cancel workflow input.");
     }
