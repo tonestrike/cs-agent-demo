@@ -122,8 +122,8 @@ const extractCallSummary = (summary: string | null) => {
   if (!summary) {
     return null;
   }
-  const parsed = safeJsonParse(summary);
-  const value = parsed["callSummary"];
+  const parsed = safeJsonParse(summary) as { callSummary?: unknown };
+  const value = parsed.callSummary;
   return typeof value === "string" ? value : null;
 };
 
