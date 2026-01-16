@@ -2,6 +2,7 @@ import type { AgentPromptConfig } from "@pestcall/core";
 import type {
   AgentModelInput,
   AgentResponseInput,
+  AgentRouteDecision,
   ModelAdapter,
 } from "./types";
 
@@ -185,6 +186,28 @@ export const createMockModelAdapter = (
             "I can help with pest control appointments, billing, or service questions."
           );
       }
+    },
+    async route(input: AgentModelInput): Promise<AgentRouteDecision> {
+      const lowered = normalizeConversationText(input.text).toLowerCase();
+      if (
+        lowered.includes("appointment") ||
+        lowered.includes("schedule") ||
+        lowered.includes("reschedule")
+      ) {
+        return { intent: "appointments" };
+      }
+      if (
+        lowered.includes("bill") ||
+        lowered.includes("invoice") ||
+        lowered.includes("balance") ||
+        lowered.includes("owe")
+      ) {
+        return { intent: "billing" };
+      }
+      if (lowered.includes("policy") || lowered.includes("coverage")) {
+        return { intent: "policy", topic: input.text };
+      }
+      return { intent: "general" };
     },
   };
 };

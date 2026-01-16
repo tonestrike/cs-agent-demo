@@ -55,10 +55,10 @@ Broaden model selection to the full Cloudflare Workers AI catalog so prompt tuni
 - The agent can continue multi-turn flows without restarting or repeating greetings.
 
 ## Refactor Direction (Reset Plan)
-1) **Two-step orchestration**
-   - Step 1: Model returns a tool call or a final response.
-   - Step 2: If the response implies action but has no tool call, force a second model decision for a tool call.
-   - Do not parse intents in code; only gate tool execution programmatically.
+1) **Prompt chaining (Agents pattern)**
+   - Step 1: Model decides on a tool call or final response (decision engine).
+   - Step 2: If a tool was called, run it and have the model produce the response with the tool result.
+   - No intent parsing or tool-call inference in code.
 
 2) **Verification as middleware**
    - Verification state is stored in the call session summary.
@@ -87,17 +87,43 @@ Broaden model selection to the full Cloudflare Workers AI catalog so prompt tuni
 - [Using AI Models](https://developers.cloudflare.com/agents/api-reference/using-ai-models/)
 - [WebSockets](https://developers.cloudflare.com/agents/api-reference/websockets/)
 - [Store and Sync State](https://developers.cloudflare.com/agents/api-reference/store-and-sync-state/)
+- [What are Agents?](https://developers.cloudflare.com/agents/concepts/what-are-agents/)
+- [Workflows](https://developers.cloudflare.com/agents/concepts/workflows/)
+- [Tools](https://developers.cloudflare.com/agents/concepts/tools/)
+- [Testing your Agent](https://developers.cloudflare.com/agents/getting-started/testing-your-agent/)
+- [Workers AI JSON Mode](https://developers.cloudflare.com/workers-ai/features/json-mode/)
 - [oRPC contracts](../docs/orpc.md)
 
 ## Best-Practice Notes (From Docs)
 - Centralize tool definitions with Zod input schemas; use structured tool calls instead of parsing tools from free-form text.
 - Prefer AI SDK tool definitions with input/output schemas to validate tool usage end-to-end.
-- Separate decision (tool call vs final response) from response generation; prefer prompt chaining for deterministic steps.
+- Separate decision (tool call vs final response) from response generation; use prompt chaining.
 - Distinguish auto-executed tools from confirmation-required tools (human-in-the-loop).
 - Keep session state close to the Agent instance when possible to reduce round trips.
 - Stream long-running model output over WebSockets when latency matters.
 - Persist short-lived state for follow-up actions (last appointment, last available slots) so confirmations resolve deterministically.
 - Use oRPC contracts from `@pestcall/core` in UI queries so inputs/outputs stay aligned with worker routes.
+- Use Workers AI JSON Mode for routing + response schemas to avoid free-form replies.
+
+## Pattern Alignment (What Matches the Docs)
+- **Prompt chaining** (“sequence of steps, where each LLM call processes the output of the previous one”): decision → tool execution → structured response.
+- **Routing** (“Classifies input and directs it to specialized followup tasks”): when the model returns a final response after verification, a routing step classifies intent and triggers a specific tool (appointments, billing, policy).
+- **Workflow input processing**: ZIP validation is a pre-model step when verification is pending.
+- **Tool integration**: tools are centralized with Zod schemas and validated arguments/results.
+
+## Gaps / Where We’re Still Off
+- **Tool leakage risks**: if the model leaks tool info in the `answer` field, the UI will still render it. Structured output helps but does not eliminate leakage.
+- **Agent autonomy**: the model can still return a final response without calling a tool when one is needed, which leads to stalled flows.
+- **Determinism vs. agent behavior**: relying on model decisions keeps alignment with docs but increases non-deterministic failure cases.
+- **“Totally fucked” cases**: if the model refuses to call tools in critical flows (verification, appointments) we have no deterministic fallback besides human escalation or repeated prompts.
+- **Routing JSON compliance**: some Workers AI models ignore JSON-only routing prompts, which breaks the routing step and leads to generic replies.
+
+## Notable Docs Quotes
+> “Prompt Chaining decomposes tasks into a sequence of steps, where each LLM call processes the output of the previous one.”  
+> — [Agents Patterns](https://developers.cloudflare.com/agents/patterns/)
+
+> “Routing classifies input and directs it to specialized followup tasks, allowing for separation of concerns.”  
+> — [Agents Patterns](https://developers.cloudflare.com/agents/patterns/)
 
 ## Tasks (Next Pass)
 1) Simplify orchestration to a two-step model decision with fallback decision on action commitments.

@@ -55,3 +55,19 @@ export const WORKERS_AI_MODELS = [
   "@hf/thebloke/openhermes-2.5-mistral-7b-awq",
   "@hf/thebloke/zephyr-7b-beta-awq",
 ] as const;
+
+export const JSON_MODE_MODELS = [
+  "@cf/meta/llama-3.1-8b-instruct-fast",
+  "@cf/meta/llama-3.1-70b-instruct",
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "@cf/meta/llama-3-8b-instruct",
+  "@cf/meta/llama-3.1-8b-instruct",
+  "@cf/meta/llama-3.2-11b-vision-instruct",
+  "@hf/nousresearch/hermes-2-pro-mistral-7b",
+  "@hf/thebloke/deepseek-coder-6.7b-instruct-awq",
+  "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+] as const;
+
+const jsonModeSet = new Set<string>(JSON_MODE_MODELS);
+
+export const isJsonModeModel = (modelId: string) => jsonModeSet.has(modelId);

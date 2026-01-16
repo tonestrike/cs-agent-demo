@@ -30,7 +30,10 @@ import { z } from "zod";
 
 import { Badge, Button, Card } from "../../../components/ui";
 import { orpc } from "../../../lib/orpc";
-import { WORKERS_AI_MODELS } from "../../../lib/workers-ai-models";
+import {
+  WORKERS_AI_MODELS,
+  isJsonModeModel,
+} from "../../../lib/workers-ai-models";
 
 const schemaToSummary = (
   schema: z.ZodTypeAny,
@@ -156,10 +159,14 @@ export default function PromptStudioPage() {
   const [jsonDraft, setJsonDraft] = useState("");
   const [jsonError, setJsonError] = useState("");
   const [editMode, setEditMode] = useState<"form" | "json">("form");
+  const [modelSearch, setModelSearch] = useState("");
   const queryClient = useQueryClient();
   const modelOptions = configDraft?.modelId
     ? Array.from(new Set([configDraft.modelId, ...WORKERS_AI_MODELS]))
     : [...WORKERS_AI_MODELS];
+  const filteredModelOptions = modelOptions.filter((option) =>
+    option.toLowerCase().includes(modelSearch.trim().toLowerCase()),
+  );
 
   const agentConfigQuery = useQuery(orpc.agentConfig.get.queryOptions());
 
@@ -593,6 +600,12 @@ export default function PromptStudioPage() {
               </label>
               <label className="flex flex-col gap-2 text-xs uppercase tracking-wide text-ink/60">
                 Model ID
+                <input
+                  className="rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
+                  placeholder="Search models..."
+                  value={modelSearch}
+                  onChange={(event) => setModelSearch(event.target.value)}
+                />
                 <select
                   className="rounded-2xl border border-ink/15 bg-white/80 px-3 py-2 text-sm text-ink shadow-soft"
                   value={configDraft.modelId}
@@ -600,12 +613,17 @@ export default function PromptStudioPage() {
                     handleConfigChange("modelId", event.target.value)
                   }
                 >
-                  {modelOptions.map((option) => (
+                  {filteredModelOptions.map((option) => (
                     <option key={option} value={option}>
                       {option}
+                      {isJsonModeModel(option) ? " (JSON)" : ""}
                     </option>
                   ))}
                 </select>
+                <span className="text-xs text-ink/50 normal-case">
+                  JSON Mode models are required for strict routing and response
+                  schemas.
+                </span>
               </label>
             </div>
           ) : (

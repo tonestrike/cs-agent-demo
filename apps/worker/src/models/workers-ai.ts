@@ -9,23 +9,13 @@ import {
   type AgentModelInput,
   type AgentResponseInput,
   type ModelAdapter,
+  agentRouteSchema,
   agentToolCallSchema,
 } from "./types";
 import {
   createWorkersAiLanguageModel,
   responseToText,
 } from "./workers-ai-language-model";
-
-const sanitizeResponse = (text: string, hasContext: boolean) => {
-  const cleaned = text
-    .replace(/\s{2,}/g, " ")
-    .replace(/\s+([,.;:!?])/g, "$1")
-    .trim();
-  if (hasContext && /how can i help today/i.test(cleaned)) {
-    return cleaned.replace(/.*how can i help today\??\s*/i, "").trim();
-  }
-  return cleaned;
-};
 
 const buildToolGuidanceLines = (
   config: AgentPromptConfig,
@@ -141,6 +131,7 @@ const buildRespondInstructions = (
     "Respond conversationally, keeping it concise and clear.",
     "Use the tool result to answer the customer or ask a follow-up.",
     "When a customer accepts help, move forward with the next step or ask for the missing detail instead of asking if you should proceed.",
+    "Return a JSON object with an answer string and optional citations array.",
     ...NON_OVERRIDABLE_POLICY,
     ...buildToolGuidanceLines(config, { hideVerification }),
     `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
@@ -153,6 +144,67 @@ const buildRespondInstructions = (
   ];
 
   return promptLines.join("\n");
+};
+
+const buildRouteInstructions = (input: AgentModelInput) => {
+  const lines = [
+    "Classify the customer's request into one of: appointments, billing, policy, general.",
+    'Return JSON only. No prose. Schema: {"intent":"appointments|billing|policy|general","topic"?:"string"}.',
+    "If the request is about service policy, include a short topic string.",
+    `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
+    `Message: ${input.text}`,
+  ];
+  return lines.join("\n");
+};
+
+const responseSchema = z.object({
+  answer: z.string().min(1),
+  citations: z.array(z.string().url()).optional(),
+});
+
+const responseJsonSchema = {
+  type: "object",
+  properties: {
+    answer: { type: "string" },
+    citations: { type: "array", items: { type: "string" } },
+  },
+  required: ["answer"],
+  additionalProperties: false,
+};
+
+const routeJsonSchema = {
+  type: "object",
+  properties: {
+    intent: {
+      type: "string",
+      enum: ["appointments", "billing", "policy", "general"],
+    },
+    topic: { type: "string" },
+  },
+  required: ["intent"],
+  additionalProperties: false,
+};
+
+const responseToJsonObject = <T>(response: unknown): T | null => {
+  if (
+    response &&
+    typeof response === "object" &&
+    "response" in response &&
+    (response as { response?: unknown }).response
+  ) {
+    const value = (response as { response?: unknown }).response;
+    if (typeof value === "string") {
+      try {
+        return JSON.parse(value) as T;
+      } catch {
+        return null;
+      }
+    }
+    if (typeof value === "object") {
+      return value as T;
+    }
+  }
+  return null;
 };
 
 const buildMessages = (
@@ -249,12 +301,49 @@ export const createWorkersAiAdapter = (
       const instructions = buildRespondInstructions(input, config);
       const response = await ai.run(model as keyof AiModels, {
         messages: buildMessages(instructions, input.context, input.messages),
+        response_format: {
+          type: "json_schema",
+          json_schema: responseJsonSchema,
+        },
       });
-      const text = responseToText(response);
-      if (!text) {
-        return "Thanks for the details. How else can I help?";
+      const parsed =
+        responseToJsonObject<z.infer<typeof responseSchema>>(response);
+      const validated = responseSchema.safeParse(parsed);
+      if (!validated.success) {
+        throw new AppError("Invalid JSON response", {
+          code: "JSON_MODE_FAILED",
+        });
       }
-      return sanitizeResponse(text, Boolean(input.hasContext));
+      return validated.data.answer.trim();
+    },
+    async route(input: AgentModelInput) {
+      if (!ai) {
+        throw new AppError("Workers AI binding is not configured.", {
+          code: "AI_NOT_CONFIGURED",
+        });
+      }
+
+      const response = await ai.run(model as keyof AiModels, {
+        messages: [
+          {
+            role: "system",
+            content: buildRouteInstructions(input),
+          },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: routeJsonSchema,
+        },
+      });
+      const parsed =
+        responseToJsonObject<z.infer<typeof agentRouteSchema>>(response);
+      const validated = agentRouteSchema.safeParse(parsed);
+      if (!validated.success) {
+        throw new AppError("Invalid JSON routing response", {
+          code: "JSON_MODE_FAILED",
+        });
+      }
+      return validated.data;
     },
   };
 };

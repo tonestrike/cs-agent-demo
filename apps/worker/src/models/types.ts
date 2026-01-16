@@ -36,6 +36,14 @@ export const agentModelOutputSchema = z.union([
 
 export type AgentModelOutput = z.infer<typeof agentModelOutputSchema>;
 
+export const agentRouteSchema = z.object({
+  intent: z.enum(["appointments", "billing", "policy", "general"]),
+  topic: z.string().optional(),
+  reasoning: z.string().optional(),
+});
+
+export type AgentRouteDecision = z.infer<typeof agentRouteSchema>;
+
 // Tool result schemas
 export const appointmentResultSchema = z
   .object({
@@ -223,4 +231,5 @@ export type ModelAdapter = {
   modelId?: string;
   generate: (input: AgentModelInput) => Promise<AgentModelOutput>;
   respond: (input: AgentResponseInput) => Promise<string>;
+  route: (input: AgentModelInput) => Promise<AgentRouteDecision>;
 };

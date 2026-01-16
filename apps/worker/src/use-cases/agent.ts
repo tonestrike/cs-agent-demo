@@ -8,10 +8,10 @@ import {
   validateToolArgs,
   validateToolResult,
 } from "../models/tool-definitions";
-import {
-  type ModelAdapter,
-  type ToolResult,
-  toolResultSchema,
+import type {
+  AgentModelOutput,
+  ModelAdapter,
+  ToolResult,
 } from "../models/types";
 import type { AgentMessageInput, AgentMessageOutput } from "../schemas/agent";
 import { rescheduleAppointment as rescheduleAppointmentUseCase } from "./appointments";
@@ -241,47 +241,60 @@ const getNumberArg = (args: Record<string, unknown>, key: string) => {
   return typeof value === "number" ? value : undefined;
 };
 
-const extractNameFromText = (text: string) => {
-  const cleaned = text
-    .replace(/\b\d{5}\b/g, "")
-    .replace(/[^\w\s]/g, " ")
-    .replace(/\b(zip|code|is|my|name|last|first|i|am|im|i'm|this)\b/gi, "")
-    .trim();
-  return cleaned;
-};
-
-const parseLastToolResult = (summary: CallSessionSummary) => {
-  if (!summary.lastToolResult) {
-    return null;
+const redactToolResultForPrompt = (toolResult: ToolResult): ToolResult => {
+  switch (toolResult.toolName) {
+    case "crm.lookupCustomerByPhone":
+    case "crm.lookupCustomerByNameAndZip":
+    case "crm.lookupCustomerByEmail":
+      return {
+        toolName: toolResult.toolName,
+        result: toolResult.result.map((match) => ({
+          id: match.id,
+          displayName: match.displayName,
+          phoneE164: match.phoneE164,
+          addressSummary: match.addressSummary,
+        })),
+      };
+    case "crm.getNextAppointment":
+    case "crm.getAppointmentById":
+      return {
+        toolName: toolResult.toolName,
+        result: toolResult.result
+          ? {
+              date: toolResult.result.date,
+              timeWindow: toolResult.result.timeWindow,
+              addressSummary: toolResult.result.addressSummary,
+              ...(toolResult.result.addressId
+                ? { addressId: toolResult.result.addressId }
+                : {}),
+            }
+          : null,
+      };
+    case "crm.listUpcomingAppointments":
+      return {
+        toolName: toolResult.toolName,
+        result: toolResult.result.map((appointment) => ({
+          id: appointment.id,
+          customerId: appointment.customerId,
+          ...(appointment.addressId
+            ? { addressId: appointment.addressId }
+            : {}),
+          date: appointment.date,
+          timeWindow: appointment.timeWindow,
+          addressSummary: appointment.addressSummary,
+        })),
+      };
+    case "crm.getAvailableSlots":
+      return {
+        toolName: toolResult.toolName,
+        result: toolResult.result.map((slot) => ({
+          date: slot.date,
+          timeWindow: slot.timeWindow,
+        })),
+      };
+    default:
+      return toolResult;
   }
-  try {
-    const parsed = JSON.parse(summary.lastToolResult) as unknown;
-    const validated = toolResultSchema.safeParse(parsed);
-    if (validated.success) {
-      return validated.data;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-};
-
-const selectSlotIndex = (text: string, slots: Array<{ id: string }>) => {
-  if (!slots.length) {
-    return null;
-  }
-  const normalized = text.toLowerCase();
-  const ordinalMap: Array<[RegExp, number]> = [
-    [/\b(first|1st|one)\b/, 0],
-    [/\b(second|2nd|two)\b/, 1],
-    [/\b(third|3rd|three)\b/, 2],
-  ];
-  for (const [pattern, index] of ordinalMap) {
-    if (pattern.test(normalized) && slots[index]) {
-      return index;
-    }
-  }
-  return null;
 };
 
 const formatSlotChoices = (
@@ -310,15 +323,9 @@ const getMissingArgsDetails = (
 };
 
 const hasZipCandidate = (text: string) => /\b\d{4,9}\b/.test(text);
-const extractZipCode = (text: string) => text.match(/\b\d{5}\b/)?.[0] ?? null;
 const zipCodeSchema = z.string().regex(/^\d{5}$/);
 const hasActionCommitment = (text: string) =>
   /\b(check|look up|lookup|find|fetch|pull up|review|confirm|verify|reschedule|schedule|book)\b/i.test(
-    text,
-  );
-
-const shouldForceToolDecision = (text: string) =>
-  /\b(appointment|reschedule|schedule|slot|available|invoice|balance|bill|owe|payment|policy)\b/i.test(
     text,
   );
 
@@ -335,16 +342,6 @@ const enforceVerificationLanguage = (
     return text;
   }
   return "I still need to verify your account with a 5-digit ZIP code before sharing details.";
-};
-
-const needsResponseRewrite = (text: string) => {
-  return (
-    /\b(crm|agent)\.[a-zA-Z0-9_]+\b/.test(text) ||
-    /\btool result\b/i.test(text) ||
-    /\bwas used\b/i.test(text) ||
-    /\barguments?\b/i.test(text) ||
-    /{[^}]*"type"\s*:\s*"tool_call"[^}]*}/i.test(text)
-  );
 };
 
 const generateReply = async (
@@ -364,6 +361,13 @@ const generateReply = async (
   logger: Logger,
   callSessionId: string,
 ) => {
+  logger.debug(
+    {
+      callSessionId,
+      toolName: toolResult.toolName,
+    },
+    "agent.reply.start",
+  );
   if (toolResult.toolName === "agent.message") {
     const result = toolResult.result as { kind?: string; details?: string };
     if (
@@ -384,7 +388,7 @@ const generateReply = async (
       messages,
       context,
       hasContext: messages.length > 1,
-      ...toolResult,
+      ...redactToolResultForPrompt(toolResult),
     }),
   );
   modelCalls.push(responseCall.record);
@@ -397,44 +401,18 @@ const generateReply = async (
     if (!trimmed) {
       return fallbackText;
     }
-    if (!needsResponseRewrite(trimmed)) {
-      return trimmed;
-    }
-    const rewriteContext = [
-      context,
-      "Rewrite instruction: Rewrite the assistant response to be customer-facing only. Do not mention tools, tool names, tool usage, internal reasoning, or JSON. Keep it concise and helpful.",
-    ]
-      .filter(Boolean)
-      .join("\n");
-    const rewriteMessages = [
-      ...messages,
-      { role: "assistant" as const, content: trimmed },
-    ];
-    const rewriteCall = await recordModelCall(model, "respond", () =>
-      model.respond({
-        text: input.text,
-        customer: buildCustomerContext(customer),
-        messages: rewriteMessages,
-        context: rewriteContext,
-        hasContext: true,
-        ...toolResult,
-      }),
-    );
-    modelCalls.push(rewriteCall.record);
-    logModelCall(logger, callSessionId, rewriteCall.record);
-    if (rewriteCall.record.success) {
-      const rewritten =
-        typeof rewriteCall.result === "string" ? rewriteCall.result : "";
-      return rewritten.trim() ? rewritten.trim() : trimmed;
-    }
     return trimmed;
   }
 
-  try {
-    throw responseCall.result;
-  } catch {
-    return fallbackText;
-  }
+  logger.info(
+    {
+      callSessionId,
+      errorCode: responseCall.record.errorCode ?? "unknown",
+      toolName: toolResult.toolName,
+    },
+    "agent.reply.failed",
+  );
+  return fallbackText;
 };
 
 export const handleAgentMessage = async (
@@ -577,6 +555,17 @@ export const handleAgentMessage = async (
   ];
   const context = systemContext.filter(Boolean).join("\n");
 
+  logger.debug(
+    {
+      callSessionId,
+      identityStatus: summary.identityStatus,
+      pendingCustomerId: summary.pendingCustomerId,
+      verifiedCustomerId: summary.verifiedCustomerId,
+      inputText: input.text,
+    },
+    "agent.message.start",
+  );
+
   const messageHistory: Array<{ role: "user" | "assistant"; content: string }> =
     recentTurns.map((turn) => ({
       role: turn.speaker === "agent" ? "assistant" : "user",
@@ -584,24 +573,7 @@ export const handleAgentMessage = async (
     }));
   messageHistory.push({ role: "user", content: input.text });
 
-  const modelDecision = await recordModelCall(model, "decide", () =>
-    model.generate({
-      text: input.text,
-      customer: buildCustomerContext(customer),
-      messages: messageHistory,
-      context,
-      hasContext: messageHistory.length > 1,
-    }),
-  );
-  modelCalls.push(modelDecision.record);
-  logModelCall(logger, callSessionId, modelDecision.record);
-
-  if (!modelDecision.record.success) {
-    throw modelDecision.result;
-  }
-
-  const modelOutput = modelDecision.result;
-  const summarizeModelOutput = (output: typeof modelOutput) => {
+  const summarizeModelOutput = (output: AgentModelOutput) => {
     if (output.type === "tool_call") {
       return {
         type: output.type,
@@ -614,50 +586,130 @@ export const handleAgentMessage = async (
       text: output.text.slice(0, 400),
     };
   };
-  const decisionSnapshot = summarizeModelOutput(modelOutput);
-  let followUpDecisionSnapshot: ReturnType<typeof summarizeModelOutput> | null =
-    null;
-  let toolCallSource:
-    | "model"
-    | "forced_verify"
-    | "forced_lookup"
-    | "forced_selection"
-    | "forced_router"
-    | "follow_up"
-    | null = null;
+  let toolCallSource: "model" | "input_processing" | "routing" | null = null;
+  let toolCall: AgentModelOutput | null = null;
+  let decisionSnapshot: ReturnType<typeof summarizeModelOutput> | null = null;
+  let modelOutput: AgentModelOutput | null = null;
 
-  const attemptFollowUpToolCall = async (
-    draftResponse: string,
-    mode: "commitment" | "force_tool",
-  ): Promise<typeof modelOutput | null> => {
-    const followUpContext = [
-      context,
-      mode === "commitment"
-        ? "Follow-up instruction: If your last response commits to checking, looking up, scheduling, rescheduling, or fetching details, return a tool_call now."
-        : "Follow-up instruction: The user asked for appointments, billing, or service details. Return a tool_call that fulfills the request. Do not return a final response.",
-    ]
-      .filter(Boolean)
-      .join("\n");
-    const followUpMessages = [
-      ...messageHistory,
-      { role: "assistant" as const, content: draftResponse },
-    ];
-    const followUpDecision = await recordModelCall(model, "decide", () =>
+  if (summary.identityStatus !== "verified" && summary.pendingCustomerId) {
+    const zipCandidate = input.text.match(/\b\d{5}\b/)?.[0] ?? null;
+    const zipValidation = zipCodeSchema.safeParse(zipCandidate ?? "");
+    if (zipValidation.success) {
+      logger.debug(
+        {
+          callSessionId,
+          pendingCustomerId: summary.pendingCustomerId,
+          zipProvided: zipCandidate ? `***${zipCandidate.slice(-2)}` : null,
+        },
+        "agent.input_processing.verify",
+      );
+      toolCall = {
+        type: "tool_call",
+        toolName: "crm.verifyAccount",
+        arguments: {
+          customerId: summary.pendingCustomerId,
+          zipCode: zipValidation.data,
+        },
+      };
+      toolCallSource = "input_processing";
+      decisionSnapshot = summarizeModelOutput(toolCall);
+    }
+  }
+
+  if (!toolCall) {
+    const modelDecision = await recordModelCall(model, "decide", () =>
       model.generate({
         text: input.text,
         customer: buildCustomerContext(customer),
-        messages: followUpMessages,
-        context: followUpContext,
-        hasContext: true,
+        messages: messageHistory,
+        context,
+        hasContext: messageHistory.length > 1,
       }),
     );
-    modelCalls.push(followUpDecision.record);
-    logModelCall(logger, callSessionId, followUpDecision.record);
-    if (!followUpDecision.record.success) {
-      return null;
+    modelCalls.push(modelDecision.record);
+    logModelCall(logger, callSessionId, modelDecision.record);
+
+    if (!modelDecision.record.success) {
+      throw modelDecision.result;
     }
-    return followUpDecision.result;
-  };
+
+    modelOutput = modelDecision.result;
+    decisionSnapshot = summarizeModelOutput(modelOutput);
+    logger.debug({ callSessionId, decisionSnapshot }, "agent.decision.result");
+    toolCall = modelOutput.type === "tool_call" ? modelOutput : null;
+    if (toolCall) {
+      toolCallSource = "model";
+    }
+  }
+
+  if (
+    !toolCall &&
+    modelOutput?.type === "final" &&
+    summary.identityStatus === "verified"
+  ) {
+    const routeDecision = await recordModelCall(model, "decide", () =>
+      model.route({
+        text: input.text,
+        customer: buildCustomerContext(customer),
+        messages: messageHistory,
+        context,
+        hasContext: messageHistory.length > 1,
+      }),
+    );
+    modelCalls.push(routeDecision.record);
+    logModelCall(logger, callSessionId, routeDecision.record);
+
+    if (routeDecision.record.success) {
+      logger.debug(
+        { callSessionId, routeDecision: routeDecision.result },
+        "agent.routing.result",
+      );
+      const customerId =
+        verifiedCustomerId ??
+        summary.verifiedCustomerId ??
+        resolvedCustomer?.id ??
+        session?.customerCacheId ??
+        null;
+      if (customerId) {
+        switch (routeDecision.result.intent) {
+          case "appointments":
+            toolCall = {
+              type: "tool_call",
+              toolName: "crm.getNextAppointment",
+              arguments: { customerId },
+            };
+            toolCallSource = "routing";
+            break;
+          case "billing":
+            toolCall = {
+              type: "tool_call",
+              toolName: "crm.getOpenInvoices",
+              arguments: { customerId },
+            };
+            toolCallSource = "routing";
+            break;
+          case "policy":
+            toolCall = {
+              type: "tool_call",
+              toolName: "crm.getServicePolicy",
+              arguments: { topic: routeDecision.result.topic ?? input.text },
+            };
+            toolCallSource = "routing";
+            break;
+          default:
+            break;
+        }
+      }
+    } else {
+      logger.info(
+        {
+          callSessionId,
+          errorCode: routeDecision.record.errorCode ?? "unknown",
+        },
+        "agent.routing.failed",
+      );
+    }
+  }
 
   const executeToolCall = async (
     toolName: AgentToolName,
@@ -1484,6 +1536,15 @@ export const handleAgentMessage = async (
       lastAvailableSlots = null;
     }
 
+    const redactedToolResult = redactToolResultForPrompt(toolResult);
+    logger.debug(
+      {
+        callSessionId,
+        toolName: toolResult.toolName,
+        toolResult: stringifyToolResult(redactedToolResult),
+      },
+      "agent.tool.result",
+    );
     summary = {
       identityStatus: summary.identityStatus,
       verifiedCustomerId: summary.verifiedCustomerId ?? null,
@@ -1491,7 +1552,7 @@ export const handleAgentMessage = async (
       pendingCustomerProfile: summary.pendingCustomerProfile ?? null,
       zipAttempts: summary.zipAttempts ?? 0,
       lastToolName: toolResult.toolName,
-      lastToolResult: stringifyToolResult(toolResult),
+      lastToolResult: stringifyToolResult(redactedToolResult),
       lastAppointmentId,
       lastAvailableSlots,
     };
@@ -1503,129 +1564,7 @@ export const handleAgentMessage = async (
     return { toolResult, toolCustomer, ticketId };
   };
 
-  let toolCall = modelOutput.type === "tool_call" ? modelOutput : null;
-  if (toolCall) {
-    toolCallSource = "model";
-  }
-  const lastToolResult = parseLastToolResult(summary);
-  const availableSlots =
-    summary.lastAvailableSlots ??
-    (lastToolResult?.toolName === "crm.getAvailableSlots"
-      ? (lastToolResult.result as Array<{
-          id: string;
-          date: string;
-          timeWindow: string;
-        }>)
-      : null);
-  const appointmentId =
-    summary.lastAppointmentId ??
-    (lastToolResult?.toolName === "crm.getNextAppointment"
-      ? ((lastToolResult.result as { id?: string } | null)?.id ?? null)
-      : lastToolResult?.toolName === "crm.getAppointmentById"
-        ? ((lastToolResult.result as { id?: string } | null)?.id ?? null)
-        : null);
-
-  if (!toolCall && availableSlots?.length && appointmentId) {
-    const selection = selectSlotIndex(input.text, availableSlots);
-    if (selection !== null) {
-      toolCall = {
-        type: "tool_call",
-        toolName: "crm.rescheduleAppointment",
-        arguments: {
-          appointmentId,
-          slotId: availableSlots[selection]?.id,
-        },
-      };
-      toolCallSource = "forced_selection";
-    }
-  }
-
-  if (!toolCall && summary.identityStatus !== "verified") {
-    const zipFromText = extractZipCode(input.text);
-    const zipValidation = zipCodeSchema.safeParse(zipFromText ?? "");
-    if (zipValidation.success && summary.pendingCustomerId) {
-      toolCall = {
-        type: "tool_call",
-        toolName: "crm.verifyAccount",
-        arguments: {
-          customerId: summary.pendingCustomerId,
-          zipCode: zipValidation.data,
-        },
-      };
-      toolCallSource = "forced_verify";
-    }
-    if (!toolCall && zipValidation.success && matches.length > 1) {
-      const fullName = extractNameFromText(input.text);
-      if (fullName) {
-        toolCall = {
-          type: "tool_call",
-          toolName: "crm.lookupCustomerByNameAndZip",
-          arguments: {
-            fullName,
-            zipCode: zipValidation.data,
-          },
-        };
-        toolCallSource = "forced_lookup";
-      }
-    }
-  }
-
-  if (
-    !toolCall &&
-    modelOutput.type === "final" &&
-    (hasActionCommitment(modelOutput.text) ||
-      shouldForceToolDecision(input.text))
-  ) {
-    const followUp = await attemptFollowUpToolCall(
-      modelOutput.text,
-      shouldForceToolDecision(input.text) ? "force_tool" : "commitment",
-    );
-    if (followUp?.type === "tool_call") {
-      toolCall = followUp;
-      followUpDecisionSnapshot = summarizeModelOutput(followUp);
-      toolCallSource = "follow_up";
-    }
-  }
-
-  if (
-    !toolCall &&
-    summary.identityStatus === "verified" &&
-    shouldForceToolDecision(input.text)
-  ) {
-    const normalized = input.text.toLowerCase();
-    const customerId =
-      verifiedCustomerId ??
-      summary.verifiedCustomerId ??
-      resolvedCustomer?.id ??
-      session?.customerCacheId ??
-      null;
-    if (customerId) {
-      if (normalized.includes("appointment")) {
-        toolCall = {
-          type: "tool_call",
-          toolName: "crm.getNextAppointment",
-          arguments: { customerId },
-        };
-        toolCallSource = "forced_router";
-      } else if (/\b(invoice|balance|bill|owe|payment)\b/.test(normalized)) {
-        toolCall = {
-          type: "tool_call",
-          toolName: "crm.getOpenInvoices",
-          arguments: { customerId },
-        };
-        toolCallSource = "forced_router";
-      } else if (normalized.includes("policy")) {
-        toolCall = {
-          type: "tool_call",
-          toolName: "crm.getServicePolicy",
-          arguments: { topic: normalized },
-        };
-        toolCallSource = "forced_router";
-      }
-    }
-  }
-
-  if (!toolCall && modelOutput.type === "final") {
+  if (!toolCall && modelOutput?.type === "final") {
     let replyText =
       summary.identityStatus !== "verified"
         ? hasZipCandidate(input.text)
@@ -1663,7 +1602,6 @@ export const handleAgentMessage = async (
         contextUsed: Boolean(context),
         contextTurns,
         decisionSnapshot,
-        followUpDecisionSnapshot,
         toolCallSource,
         replyTextLength: replyText.length,
         replyTextWasEmpty: !replyText.trim(),
@@ -1697,6 +1635,14 @@ export const handleAgentMessage = async (
 
   while (toolCall && iterations < maxToolPasses) {
     const args = (toolCall.arguments ?? {}) as Record<string, unknown>;
+    logger.debug(
+      {
+        callSessionId,
+        toolName: toolCall.toolName,
+        argKeys: Object.keys(args),
+      },
+      "agent.tool.execute",
+    );
     const exec = await executeToolCall(toolCall.toolName, args);
     toolCustomer = exec.toolCustomer;
     ticketId = exec.ticketId ?? ticketId;
@@ -1749,7 +1695,6 @@ export const handleAgentMessage = async (
       contextUsed: Boolean(context),
       contextTurns,
       decisionSnapshot,
-      followUpDecisionSnapshot,
       toolCallSource,
       replyTextLength: replyText.length,
       replyTextWasEmpty: !replyText.trim(),

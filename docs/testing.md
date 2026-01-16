@@ -10,6 +10,13 @@ bun run test:integration # Integration tests
 bun run test:e2e        # E2E tests (starts local worker)
 ```
 
+## Agents SDK testing
+
+Cloudflare's Agents guide recommends `@cloudflare/vitest-pool-workers` for Durable Objects-based agents. We keep a Workers-pool config in `vitest.workers.config.ts` for parity when you want to exercise the Agent runtime end-to-end.
+
+- Guide: [Testing your Agent](https://developers.cloudflare.com/agents/getting-started/testing-your-agent/)
+- Config: `vitest.workers.config.ts`
+
 ## Test structure
 
 All tests run in Node.js using [Vitest](https://vitest.dev/):
