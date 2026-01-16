@@ -462,27 +462,7 @@ const getMissingArgsDetails = (
     : "Missing or invalid tool arguments.";
 };
 
-const hasZipCandidate = (text: string) => /\b\d{4,9}\b/.test(text);
 const zipCodeSchema = z.string().regex(/^\d{5}$/);
-const hasActionCommitment = (text: string) =>
-  /\b(check|look up|lookup|find|fetch|pull up|review|confirm|verify|reschedule|schedule|book)\b/i.test(
-    text,
-  );
-
-const enforceVerificationLanguage = (
-  text: string,
-  identityStatus: CallSessionSummary["identityStatus"],
-) => {
-  if (identityStatus === "verified") {
-    return text;
-  }
-  const hasVerifyClaim =
-    /\bverified\b/i.test(text) || /\bverification succeeded\b/i.test(text);
-  if (!hasVerifyClaim) {
-    return text;
-  }
-  return "I still need to verify your account with a 5-digit ZIP code before sharing details.";
-};
 
 const generateReply = async (
   model: ModelAdapter,
@@ -508,119 +488,6 @@ const generateReply = async (
     },
     "agent.reply.start",
   );
-  if (toolResult.toolName === "agent.message") {
-    const result = toolResult.result as { kind?: string; details?: string };
-    if (
-      result.kind === "request_zip" ||
-      result.kind === "blocked_unverified" ||
-      result.kind === "missing_arguments"
-    ) {
-      return (
-        result.details ??
-        "Please provide your 5-digit ZIP code to verify your account."
-      );
-    }
-  }
-  if (toolResult.toolName === "crm.verifyAccount") {
-    const result = toolResult.result as { ok?: boolean };
-    return result.ok
-      ? "Verification succeeded. How can I help you today?"
-      : "That ZIP does not match our records. Do you have another ZIP code on file?";
-  }
-  if (toolResult.toolName === "crm.getNextAppointment") {
-    const appointment = toolResult.result as {
-      date: string;
-      timeWindow: string;
-      addressSummary: string;
-    } | null;
-    if (!appointment) {
-      return "I couldn't find a scheduled appointment.";
-    }
-    return `Your next appointment is ${formatDateForSpeech(
-      appointment.date,
-    )} from ${formatTimeWindowForSpeech(
-      appointment.timeWindow,
-    )} at ${appointment.addressSummary}.`;
-  }
-  if (toolResult.toolName === "crm.listUpcomingAppointments") {
-    const list = toolResult.result as Array<{
-      date: string;
-      timeWindow: string;
-      addressSummary: string;
-    }>;
-    if (!Array.isArray(list) || list.length === 0) {
-      return "I couldn't find any upcoming appointments to reschedule.";
-    }
-    const lines = list.slice(0, 3).map((appointment, index) => {
-      return `${index + 1}) ${formatDateForSpeech(
-        appointment.date,
-      )} from ${formatTimeWindowForSpeech(
-        appointment.timeWindow,
-      )} at ${appointment.addressSummary}`;
-    });
-    return `Here are your upcoming appointments:\n${lines.join("\n")}\nWhich one would you like to reschedule?`;
-  }
-  if (toolResult.toolName === "crm.getAvailableSlots") {
-    const slots = toolResult.result as Array<{
-      date?: string;
-      timeWindow?: string;
-    }>;
-    if (!Array.isArray(slots) || slots.length === 0) {
-      return "I couldn't find any available time slots to reschedule.";
-    }
-    const lines = slots
-      .filter((slot): slot is { date: string; timeWindow: string } =>
-        Boolean(slot.date && slot.timeWindow),
-      )
-      .slice(0, 3)
-      .map(
-        (slot, index) =>
-          `${index + 1}) ${formatDateForSpeech(
-            slot.date,
-          )} from ${formatTimeWindowForSpeech(slot.timeWindow)}`,
-      );
-    if (lines.length === 0) {
-      return "I couldn't find any available time slots to reschedule.";
-    }
-    return `Here are the available time slots:\n${lines.join("\n")}\nWhich one would you like to book?`;
-  }
-  if (toolResult.toolName === "crm.getOpenInvoices") {
-    const invoice = toolResult.result as { balanceCents?: number };
-    const balanceCents = invoice.balanceCents ?? 0;
-    return balanceCents === 0
-      ? "You have no outstanding balance."
-      : `Your current balance is $${(balanceCents / 100).toFixed(2)}.`;
-  }
-  if (toolResult.toolName === "crm.getServicePolicy") {
-    const policy = toolResult.result as { text?: string };
-    if (policy.text?.trim()) {
-      return policy.text.trim();
-    }
-  }
-  if (toolResult.toolName === "crm.rescheduleAppointment") {
-    const rescheduled = toolResult.result as {
-      date: string;
-      timeWindow: string;
-    };
-    return `Your appointment has been rescheduled to ${formatDateForSpeech(
-      rescheduled.date,
-    )} from ${formatTimeWindowForSpeech(rescheduled.timeWindow)}.`;
-  }
-  if (toolResult.toolName === "crm.cancelAppointment") {
-    const result = toolResult.result as { ok?: boolean };
-    return result.ok
-      ? "Your appointment has been canceled."
-      : "I couldn't cancel that appointment. Would you like me to try again?";
-  }
-  if (toolResult.toolName === "crm.escalate") {
-    const result = toolResult.result as { ticketId?: string };
-    return result.ticketId
-      ? `Got it. I’ve created a ticket (${result.ticketId}) and a specialist will reach out to take payment.`
-      : "Got it. I’ll have a specialist reach out to take payment.";
-  }
-  if (toolResult.toolName === "agent.escalate") {
-    return "Got it. I’ll have a specialist reach out to help with that.";
-  }
   const responseCall = await recordModelCall(model, "respond", () =>
     model.respond({
       text: input.text,
@@ -853,33 +720,15 @@ export const handleAgentMessage = async (
   let decisionSnapshot: ReturnType<typeof summarizeModelOutput> | null = null;
   let modelOutput: AgentModelOutput | null = null;
   let workflow = summary.workflow ?? null;
-  let workflowReply: string | null = null;
+  let workflowPrompt:
+    | {
+        kind: "select_appointment" | "select_slot";
+        options: Array<{ id: string; label: string }>;
+      }
+    | null = null;
   let statusOpen = true;
-
-  if (summary.identityStatus !== "verified" && summary.pendingCustomerId) {
-    const zipCandidate = input.text.match(/\b\d{5}\b/)?.[0] ?? null;
-    const zipValidation = zipCodeSchema.safeParse(zipCandidate ?? "");
-    if (zipValidation.success) {
-      logger.debug(
-        {
-          callSessionId,
-          pendingCustomerId: summary.pendingCustomerId,
-          zipProvided: zipCandidate ? `***${zipCandidate.slice(-2)}` : null,
-        },
-        "agent.input_processing.verify",
-      );
-      toolCall = {
-        type: "tool_call",
-        toolName: "crm.verifyAccount",
-        arguments: {
-          customerId: summary.pendingCustomerId,
-          zipCode: zipValidation.data,
-        },
-      };
-      toolCallSource = "input_processing";
-      decisionSnapshot = summarizeModelOutput(toolCall);
-    }
-  }
+  const trimmedInput = input.text.trim();
+  const isZipInput = zipCodeSchema.safeParse(trimmedInput).success;
 
   const activeCustomerId =
     verifiedCustomerId ??
@@ -960,8 +809,15 @@ export const handleAgentMessage = async (
       } else if (appointmentOptions.length === 1) {
         const appointment = appointmentOptions[0];
         if (!appointment) {
-          workflowReply =
-            "Which appointment would you like to reschedule? Please choose one of the listed options.";
+          workflowPrompt = {
+            kind: "select_appointment",
+            options: appointmentOptions.map((option) => ({
+              id: option.id,
+              label: `${formatDateForSpeech(option.date)} from ${formatTimeWindowForSpeech(
+                option.timeWindow,
+              )} at ${option.addressSummary}`,
+            })),
+          };
         } else {
           workflow = {
             kind: "reschedule",
@@ -1030,8 +886,10 @@ export const handleAgentMessage = async (
             decisionSnapshot = summarizeModelOutput(toolCall);
           }
         } else {
-          workflowReply =
-            "Which appointment would you like to reschedule? Please choose one of the listed options.";
+          workflowPrompt = {
+            kind: "select_appointment",
+            options,
+          };
         }
       }
     } else if (workflow.step === "select_slot") {
@@ -1061,8 +919,15 @@ export const handleAgentMessage = async (
             callSessionId,
             summary: buildSummary(summary),
           });
-          workflowReply =
-            "Which appointment would you like to reschedule? Please choose one of the listed options.";
+          workflowPrompt = {
+            kind: "select_appointment",
+            options: (summary.lastAppointmentOptions ?? []).map((option) => ({
+              id: option.id,
+              label: `${formatDateForSpeech(option.date)} from ${formatTimeWindowForSpeech(
+                option.timeWindow,
+              )} at ${option.addressSummary}`,
+            })),
+          };
         }
       } else {
         const options = slots.map((slot) => ({
@@ -1084,8 +949,10 @@ export const handleAgentMessage = async (
           toolCallSource = "workflow";
           decisionSnapshot = summarizeModelOutput(toolCall);
         } else {
-          workflowReply =
-            "Which time slot should I book? Please choose one of the listed options.";
+          workflowPrompt = {
+            kind: "select_slot",
+            options,
+          };
         }
       }
     }
@@ -1119,8 +986,15 @@ export const handleAgentMessage = async (
         toolCallSource = "workflow";
         decisionSnapshot = summarizeModelOutput(toolCall);
       } else {
-        workflowReply =
-          "Which appointment would you like to cancel? Please choose one of the listed options.";
+        workflowPrompt = {
+          kind: "select_appointment",
+          options: appointmentOptions.map((option) => ({
+            id: option.id,
+            label: `${formatDateForSpeech(option.date)} from ${formatTimeWindowForSpeech(
+              option.timeWindow,
+            )} at ${option.addressSummary}`,
+          })),
+        };
       }
     } else {
       const options = appointmentOptions.map((appointment) => ({
@@ -1140,10 +1014,82 @@ export const handleAgentMessage = async (
         toolCallSource = "workflow";
         decisionSnapshot = summarizeModelOutput(toolCall);
       } else {
-        workflowReply =
-          "Which appointment would you like to cancel? Please choose one of the listed options.";
+        workflowPrompt = {
+          kind: "select_appointment",
+          options,
+        };
       }
     }
+  }
+
+  if (
+    !toolCall &&
+    summary.identityStatus !== "verified" &&
+    summary.pendingCustomerId &&
+    !isZipInput
+  ) {
+    const replyText = await generateReply(
+      model,
+      input,
+      customer,
+      {
+        toolName: "agent.message",
+        result: {
+          kind: "request_zip",
+        },
+      },
+      agentConfig.scopeMessage,
+      context,
+      modelCalls,
+      messageHistory,
+      logger,
+      callSessionId,
+    );
+    statusOpen = false;
+    summary = {
+      ...summary,
+      callSummary: trimSummaryText(replyText),
+    };
+    await deps.calls.updateSessionSummary({
+      callSessionId,
+      summary: buildSummary(summary),
+    });
+    await deps.calls.addTurn({
+      id: crypto.randomUUID(),
+      callSessionId,
+      ts: new Date().toISOString(),
+      speaker: "agent",
+      text: replyText,
+      meta: {
+        intent: "final",
+        tools,
+        modelCalls,
+        customerId: resolvedCustomer?.id ?? customer.id,
+        contextUsed: Boolean(context),
+        contextTurns,
+        decisionSnapshot,
+        toolCallSource,
+        replyTextLength: replyText.length,
+        replyTextWasEmpty: !replyText.trim(),
+      },
+    });
+    logger.info(
+      {
+        callSessionId,
+        intent: "final",
+        toolCallSource,
+        toolCount: tools.length,
+        modelCallCount: modelCalls.length,
+        replyTextLength: replyText.length,
+        replyPreview: replyText.slice(0, 160),
+      },
+      "agent.message.complete",
+    );
+    return {
+      callSessionId,
+      replyText,
+      actions,
+    };
   }
 
   if (!toolCall) {
@@ -2307,8 +2253,25 @@ export const handleAgentMessage = async (
     return { toolResult, toolCustomer, ticketId };
   };
 
-  if (!toolCall && workflowReply) {
-    const replyText = workflowReply;
+  if (!toolCall && workflowPrompt) {
+    const replyText = await generateReply(
+      model,
+      input,
+      customer,
+      {
+        toolName: "agent.message",
+        result: {
+          kind: workflowPrompt.kind,
+          options: workflowPrompt.options,
+        },
+      },
+      agentConfig.scopeMessage,
+      context,
+      modelCalls,
+      messageHistory,
+      logger,
+      callSessionId,
+    );
     statusOpen = false;
     summary = {
       ...summary,
@@ -2359,18 +2322,7 @@ export const handleAgentMessage = async (
   }
 
   if (!toolCall && modelOutput?.type === "final") {
-    let replyText =
-      summary.identityStatus !== "verified"
-        ? hasZipCandidate(input.text)
-          ? "Please provide your 5-digit ZIP code to verify your account."
-          : "Please confirm your ZIP code to verify your account."
-        : enforceVerificationLanguage(modelOutput.text, summary.identityStatus);
-    if (
-      summary.identityStatus === "verified" &&
-      hasActionCommitment(replyText)
-    ) {
-      replyText = `${agentConfig.scopeMessage} What would you like to do next?`;
-    }
+    let replyText = modelOutput.text;
     if (!replyText.trim()) {
       replyText = agentConfig.scopeMessage;
     }

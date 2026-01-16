@@ -145,6 +145,14 @@ export const crmEscalateResultSchema = z.object({
 export const agentMessageResultSchema = z.object({
   kind: z.string().min(1),
   details: z.string().optional(),
+  options: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 // Discriminated union for tool results

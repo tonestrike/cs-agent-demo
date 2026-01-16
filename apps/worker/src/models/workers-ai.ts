@@ -160,6 +160,8 @@ const buildDecisionInstructions = (
     "Do not include JSON in responses.",
     ...NON_OVERRIDABLE_POLICY,
     ...buildToolGuidanceLines(config, { hideVerification }),
+    "If identity status is pending or there is a single phone match, ask only for the 5-digit ZIP code. Do not ask if they are a new or existing customer.",
+    "Never ask whether the caller is a new or existing customer.",
     `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
     "Ask follow-up questions when details are missing.",
     "Prefer tool calls over assumptions or guesses.",
@@ -177,7 +179,6 @@ const buildRespondInstructions = (
   input: AgentResponseInput,
   config: AgentPromptConfig,
 ) => {
-  const hideVerification = input.context?.includes("Identity status: verified");
   const promptLines = [
     config.personaSummary,
     `Company: ${config.companyName}.`,
@@ -188,14 +189,14 @@ const buildRespondInstructions = (
     "When a customer accepts help, move forward with the next step or ask for the missing detail instead of asking if you should proceed.",
     "Return a JSON object with an answer string and optional citations array.",
     ...NON_OVERRIDABLE_POLICY,
-    ...buildToolGuidanceLines(config, { hideVerification }),
     `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
-    "Never include tool names like crm.* or agent.* in responses.",
+    "Never include tool names or internal system references in responses.",
+    "Do not describe internal actions like checking tools or databases in parentheses.",
     "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
     `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
     `HasContext: ${input.hasContext ? "true" : "false"}`,
-    `Tool: ${input.toolName}`,
-    `Tool Result: ${JSON.stringify(input.result)}`,
+    "Internal tool result (do not mention internal field names or IDs in the answer):",
+    JSON.stringify(input.result),
   ];
 
   return promptLines.join("\n");
