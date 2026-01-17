@@ -1,3 +1,4 @@
+import type { DurableObjectStub } from "@cloudflare/workers-types";
 import { onError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { CORSPlugin } from "@orpc/server/plugins";
@@ -11,6 +12,7 @@ export { ConversationHub } from "./durable-objects/conversation-hub";
 export { ConversationSessionV2DO } from "./durable-objects/conversation-session/v2";
 export { RescheduleWorkflow } from "./workflows/reschedule";
 export { VerificationWorkflow } from "./workflows/verification";
+export { VoiceAgentDO } from "./durable-objects/voice-agent";
 
 const fallbackLogger = createLogger({});
 const corsHeaders = {
@@ -52,6 +54,112 @@ const handler = new RPCHandler(router, {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // Voice Agent internal routes (used by realtime-agents SDK)
+    if (url.pathname.startsWith("/agentsInternal")) {
+      const meetingId = url.searchParams.get("meetingId");
+      if (!meetingId || !env.VOICE_AGENT) {
+        return new Response("Bad Request", { status: 400 });
+      }
+      const id = env.VOICE_AGENT.idFromName(meetingId);
+      const stub = env.VOICE_AGENT.get(id);
+      return stub.fetch(request);
+    }
+
+    // Voice Agent API routes
+    const voiceAgentMatch = url.pathname.match(
+      /^\/api\/voice-agent\/([^/]+)\/(init|deinit)$/,
+    );
+    if (voiceAgentMatch) {
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders });
+      }
+      if (!env.VOICE_AGENT) {
+        return withCors(
+          new Response("Voice agent not configured", { status: 500 }),
+        );
+      }
+      const token =
+        request.headers.get("x-demo-auth") ??
+        request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
+        url.searchParams.get("token") ??
+        "";
+      if (env.DEMO_AUTH_TOKEN && token !== env.DEMO_AUTH_TOKEN) {
+        return withCors(new Response("Unauthorized", { status: 401 }));
+      }
+      const agentId = voiceAgentMatch[1] ?? "";
+      const action = voiceAgentMatch[2] ?? "";
+      if (!agentId) {
+        return withCors(new Response("Agent ID required", { status: 400 }));
+      }
+      const id = env.VOICE_AGENT.idFromName(agentId);
+      const stub = env.VOICE_AGENT.get(id) as DurableObjectStub & {
+        init: (
+          agentId: string,
+          meetingId: string,
+          authToken: string,
+          workerUrl: string,
+          accountId: string,
+          apiToken: string,
+          options?: { phoneNumber?: string; callSessionId?: string },
+        ) => Promise<void>;
+        deinit: () => Promise<void>;
+      };
+      try {
+        if (action === "init" && request.method === "POST") {
+          const body = (await request.json()) as {
+            meetingId: string;
+            authToken: string;
+            phoneNumber?: string;
+            callSessionId?: string;
+          };
+          if (!body.meetingId || !body.authToken) {
+            return withCors(
+              new Response("meetingId and authToken required", { status: 400 }),
+            );
+          }
+          const accountId = env.REALTIMEKIT_ACCOUNT_ID ?? "";
+          const apiToken = env.REALTIMEKIT_API_TOKEN ?? "";
+          await stub.init(
+            agentId,
+            body.meetingId,
+            body.authToken,
+            url.host,
+            accountId,
+            apiToken,
+            {
+              phoneNumber: body.phoneNumber,
+              callSessionId: body.callSessionId,
+            },
+          );
+          return withCors(Response.json({ ok: true }));
+        }
+        if (action === "deinit" && request.method === "POST") {
+          await stub.deinit();
+          return withCors(Response.json({ ok: true }));
+        }
+        return withCors(new Response("Method not allowed", { status: 405 }));
+      } catch (error) {
+        const logger = createLogger(env);
+        logger.error(
+          { error: error instanceof Error ? error.message : "unknown", action },
+          "voice_agent.route.error",
+        );
+        return withCors(
+          Response.json(
+            {
+              ok: false,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Internal server error",
+            },
+            { status: 500 },
+          ),
+        );
+      }
+    }
+
     // Conversation Session v2 routes (supports /api/conversations and /api/v2/conversations)
     const conversationMatch = url.pathname.match(
       /^\/api\/(?:v2\/)?conversations\/([^/]+)\/(socket|message|resync|debug|rtk-token|summary)$/,

@@ -143,7 +143,7 @@ export function RealtimeKitChatPanel({
 
   // Visual indicator states
   const [, setWsConnected] = useState(false);
-  const [, setIsSpeaking] = useState(false);
+  const [, _setIsSpeaking] = useState(false);
   const [, setLastActivity] = useState<{
     type: "send" | "receive" | "status" | "error";
     text: string;
@@ -156,6 +156,9 @@ export function RealtimeKitChatPanel({
   const sentMessageIds = useRef(new Set<string>());
   const assistantBuffers = useRef(new Map<string, string>());
   const postedAssistantMessageIds = useRef(new Set<string>());
+  const pendingAssistantMessages = useRef<
+    Array<{ id: string | null; text: string }>
+  >([]);
   const ttsEnabled = useRef(enableTts);
   const meetingReadyRef = useRef(false);
   const timers = useRef<{
@@ -284,6 +287,7 @@ export function RealtimeKitChatPanel({
 
     const cleanup = () => {
       const client = meetingRef.current;
+      const currentSessionId = meetingSessionRef.current.sessionId;
       if (client) {
         const chatEl = chatElementRef.current;
         const micEl = micToggleRef.current;
@@ -293,6 +297,13 @@ export function RealtimeKitChatPanel({
         }
         if (micEl && !micEl.isConnected) {
           micEl.meeting = client;
+        }
+        // Deinit the voice agent before leaving the meeting
+        if (currentSessionId) {
+          fetch(`${getBaseUrl()}/api/voice-agent/${currentSessionId}/deinit`, {
+            method: "POST",
+            headers: getApiHeaders(),
+          }).catch(() => {});
         }
         client
           .leave()
@@ -369,6 +380,43 @@ export function RealtimeKitChatPanel({
         meetingId: payload.meetingId,
         preset: payload.presetName ?? undefined,
       });
+
+      // Initialize voice agent for server-side TTS via WebRTC
+      try {
+        log("voice_agent.init.start", { meetingId: payload.meetingId });
+        const voiceAgentResponse = await fetch(
+          `${getBaseUrl()}/api/voice-agent/${sessionId}/init`,
+          {
+            method: "POST",
+            headers: getApiHeaders(),
+            body: JSON.stringify({
+              meetingId: payload.meetingId,
+              authToken,
+              phoneNumber: customer.phoneE164,
+              callSessionId: sessionId,
+            }),
+          },
+        );
+        if (!voiceAgentResponse.ok) {
+          const errorData = await voiceAgentResponse.json().catch(() => ({}));
+          log(
+            "voice_agent.init.failed",
+            {
+              status: voiceAgentResponse.status,
+              error: (errorData as { error?: string }).error ?? "unknown",
+            },
+            "warn",
+          );
+        } else {
+          log("voice_agent.init.success", { meetingId: payload.meetingId });
+        }
+      } catch (err) {
+        log(
+          "voice_agent.init.error",
+          { error: err instanceof Error ? err.message : "unknown" },
+          "warn",
+        );
+      }
     };
 
     const scheduleRetry = () => {
@@ -392,7 +440,7 @@ export function RealtimeKitChatPanel({
       cancelled = true;
       cleanup();
     };
-  }, [sessionId, customer?.id, clearTimers, log]);
+  }, [sessionId, customer?.id, customer?.phoneE164, clearTimers, log]);
 
   // Wait for meeting emitters to be ready before enabling UI
   useEffect(() => {
@@ -441,6 +489,7 @@ export function RealtimeKitChatPanel({
     setLastActivity(null);
     setStatusError(undefined);
     postedAssistantMessageIds.current.clear();
+    pendingAssistantMessages.current = [];
   }, [sessionId]);
 
   // Listen for chat messages from the local user
@@ -582,12 +631,19 @@ export function RealtimeKitChatPanel({
             emit?: (event: string, payload: unknown) => void;
           })
         | undefined;
-      if (!chat || !isEmitterReady(chat)) {
-        log("assistant.chat.skip", { reason: "chat_unavailable" });
-        return;
-      }
       const trimmed = text?.trim();
       if (!trimmed) return;
+      if (!chat || !isEmitterReady(chat)) {
+        pendingAssistantMessages.current.push({
+          id: messageId ?? null,
+          text: trimmed,
+        });
+        log("assistant.chat.buffer", {
+          reason: "chat_unavailable",
+          pending: pendingAssistantMessages.current.length,
+        });
+        return;
+      }
       const id = messageId ? `assistant-${messageId}` : crypto.randomUUID();
       if (postedAssistantMessageIds.current.has(id)) {
         log("assistant.chat.skip", { reason: "duplicate", id });
@@ -632,6 +688,16 @@ export function RealtimeKitChatPanel({
     },
     [log],
   );
+
+  // Flush buffered assistant/status messages once chat is ready
+  useEffect(() => {
+    if (!meetingReady || pendingAssistantMessages.current.length === 0) return;
+    const queued = [...pendingAssistantMessages.current];
+    pendingAssistantMessages.current = [];
+    for (const item of queued) {
+      appendAssistantChatMessage(item.id, item.text);
+    }
+  }, [appendAssistantChatMessage, meetingReady]);
 
   // WebSocket for TTS playback of assistant responses
   useEffect(() => {
@@ -708,14 +774,10 @@ export function RealtimeKitChatPanel({
             textPreview: text?.slice(0, 80) ?? "",
             messageId: payload.messageId ?? null,
           });
-          if (text && ttsEnabled.current) {
-            window.speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.onstart = () => setIsSpeaking(true);
-            utterance.onend = () => setIsSpeaking(false);
-            utterance.onerror = () => setIsSpeaking(false);
-            window.speechSynthesis.speak(utterance);
+          if (text) {
+            appendAssistantChatMessage(payload.messageId, text);
           }
+          // TTS is now handled by VoiceAgentDO via WebRTC audio track
           return;
         }
 
@@ -752,14 +814,7 @@ export function RealtimeKitChatPanel({
             textLength: text.length,
             messageId,
           });
-          if (text && ttsEnabled.current) {
-            window.speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.onstart = () => setIsSpeaking(true);
-            utterance.onend = () => setIsSpeaking(false);
-            utterance.onerror = () => setIsSpeaking(false);
-            window.speechSynthesis.speak(utterance);
-          }
+          // TTS is now handled by VoiceAgentDO via WebRTC audio track
           appendAssistantChatMessage(messageId, text);
         }
       } catch {

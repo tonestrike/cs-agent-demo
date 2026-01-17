@@ -45,6 +45,9 @@ export const envSchema = z.object({
   REALTIMEKIT_API_TOKEN: z.string().optional(),
   REALTIMEKIT_PRESET_NAME: z.string().optional(),
   REALTIMEKIT_API_BASE_URL: z.string().url().optional(),
+  // Voice agent API keys (optional - only needed for voice features)
+  DEEPGRAM_API_KEY: z.string().optional(),
+  ELEVENLABS_API_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
