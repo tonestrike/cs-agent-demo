@@ -25,8 +25,7 @@ const HARDCODED_MEETING_ID = "bbb58ddd-1416-4812-aceb-7e078e61c78b";
 const ensureRealtimeKitConfig = (env: Env): RealtimeKitConfig => {
   const accountId = env.REALTIMEKIT_ACCOUNT_ID?.trim();
   const appId = env.REALTIMEKIT_APP_ID?.trim();
-  const meetingId =
-    env.REALTIMEKIT_MEETING_ID?.trim() ?? HARDCODED_MEETING_ID;
+  const meetingId = env.REALTIMEKIT_MEETING_ID?.trim() ?? HARDCODED_MEETING_ID;
   const apiToken = env.REALTIMEKIT_API_TOKEN?.trim() ?? HARDCODED_API_TOKEN;
   const baseUrl =
     env.REALTIMEKIT_API_BASE_URL?.trim() ?? "https://api.cloudflare.com";
