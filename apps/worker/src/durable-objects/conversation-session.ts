@@ -88,6 +88,7 @@ type SessionState = {
   availableSlots?: Array<{ id: string; date: string; timeWindow: string }>;
   rtkGuestParticipantId?: string;
   rtkGuestCustomId?: string;
+  rtkCallSessionId?: string;
   pendingIntent?: {
     kind:
       | "appointments"
@@ -400,11 +401,23 @@ export class ConversationSession {
         { status: 400 },
       );
     }
-    const response = await this.runMessage(input);
-    return Response.json({
-      ok: true,
-      callSessionId: response.callSessionId,
-    });
+    try {
+      const response = await this.runMessage(input);
+      return Response.json({
+        ok: true,
+        callSessionId: response.callSessionId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      this.logger.error(
+        { error: message, inputText: input.text?.slice(0, 50) },
+        "conversation.session.message.error",
+      );
+      return Response.json(
+        { ok: false, error: message },
+        { status: 500 },
+      );
+    }
   }
 
   private async handleResyncRequest(request: Request): Promise<Response> {
@@ -458,6 +471,25 @@ export class ConversationSession {
       { config: getRealtimeKitConfigSummary(this.env) },
       "conversation.session.rtk_config",
     );
+
+    // Get current call session ID to determine if we need a fresh participant
+    const currentCallSessionId = this.sessionState.lastCallSessionId;
+    const storedRtkCallSessionId = this.sessionState.rtkCallSessionId;
+    const needsFreshParticipant =
+      currentCallSessionId !== storedRtkCallSessionId;
+
+    this.logger.info(
+      {
+        currentCallSessionId,
+        storedRtkCallSessionId,
+        needsFreshParticipant,
+        hasExistingParticipant: Boolean(
+          this.sessionState.rtkGuestParticipantId,
+        ),
+      },
+      "conversation.session.rtk_token_check",
+    );
+
     const verifiedCustomerId =
       this.sessionState.conversation?.verification.customerId;
     let customer: CustomerCache | null = null;
@@ -465,8 +497,9 @@ export class ConversationSession {
       customer = await deps.customers.get(verifiedCustomerId);
     }
     if (!customer) {
+      // Try to refresh existing participant if same call session
       const guestParticipantId = this.sessionState.rtkGuestParticipantId;
-      if (guestParticipantId) {
+      if (guestParticipantId && !needsFreshParticipant) {
         try {
           const token = await refreshRealtimeKitToken(
             this.env,
@@ -482,11 +515,12 @@ export class ConversationSession {
           );
         }
       }
+      // Create a new participant with unique ID per call session
       const phoneNumber = this.sessionState.lastPhoneNumber;
-      const rawCustomId =
-        this.sessionState.lastCallSessionId ?? this.state.id.toString();
-      const customParticipantId =
-        this.sessionState.rtkGuestCustomId ?? `session:${rawCustomId}`;
+      const callId = currentCallSessionId ?? this.state.id.toString();
+      // Include timestamp to ensure uniqueness even if same call session ID is reused
+      const uniqueId = `${callId}:${Date.now()}`;
+      const customParticipantId = `session:${uniqueId}`;
       const displayName = phoneNumber ? `Caller ${phoneNumber}` : "Caller";
       const token = await addRealtimeKitGuestParticipant(
         this.env,
@@ -500,6 +534,7 @@ export class ConversationSession {
         ...this.sessionState,
         rtkGuestParticipantId: token.participantId,
         rtkGuestCustomId: customParticipantId,
+        rtkCallSessionId: currentCallSessionId,
       };
       await this.state.storage.put("state", this.sessionState);
       return Response.json({ ok: true, ...token });
@@ -512,6 +547,12 @@ export class ConversationSession {
     }
     try {
       const token = await this.getRealtimeKitToken(deps, customer);
+      // Update the call session tracking for verified customers too
+      this.sessionState = {
+        ...this.sessionState,
+        rtkCallSessionId: currentCallSessionId,
+      };
+      await this.state.storage.put("state", this.sessionState);
       return Response.json({ ok: true, ...token });
     } catch (error) {
       const message =
@@ -3423,7 +3464,7 @@ export class ConversationSession {
     }
     // Strip embedded JSON objects (function calls, tool calls) from anywhere in text
     // Match patterns like {"name": ...} or {"arguments": ...}
-    let sanitized = trimmed
+    const sanitized = trimmed
       .replace(/\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}/g, "")
       .replace(/\{[^{}]*"arguments"\s*:\s*[^{}]*\}/g, "")
       .replace(/\{[^{}]*"tool"\s*:\s*"[^"]*"[^{}]*\}/g, "")

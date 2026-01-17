@@ -166,26 +166,41 @@ export function RealtimeKitChatPanel({
   const sendToConversation = useCallback(
     async (text: string, source: string) => {
       if (!sessionId || !customer) return;
-      setLastActivity({ type: "send", text: `[${source}] ${text.slice(0, 50)}`, time: Date.now() });
+      setLastActivity({
+        type: "send",
+        text: `[${source}] ${text.slice(0, 50)}`,
+        time: Date.now(),
+      });
       try {
-        const response = await fetch(`${getBaseUrl()}/api/conversations/${sessionId}/message`, {
-          method: "POST",
-          headers: getApiHeaders(),
-          body: JSON.stringify({
-            phoneNumber: customer.phoneE164,
-            text,
-            callSessionId: sessionId,
-            source,
-          }),
-        });
+        const response = await fetch(
+          `${getBaseUrl()}/api/conversations/${sessionId}/message`,
+          {
+            method: "POST",
+            headers: getApiHeaders(),
+            body: JSON.stringify({
+              phoneNumber: customer.phoneE164,
+              text,
+              callSessionId: sessionId,
+              source,
+            }),
+          },
+        );
         if (!response.ok) {
           const errorText = await response.text();
           console.error("rtk message send failed", response.status, errorText);
-          setLastActivity({ type: "error", text: `Error ${response.status}: ${errorText.slice(0, 50)}`, time: Date.now() });
+          setLastActivity({
+            type: "error",
+            text: `Error ${response.status}: ${errorText.slice(0, 50)}`,
+            time: Date.now(),
+          });
         }
       } catch (err) {
         console.error("rtk message send failed", err);
-        setLastActivity({ type: "error", text: `Send failed: ${err instanceof Error ? err.message : "unknown"}`, time: Date.now() });
+        setLastActivity({
+          type: "error",
+          text: `Send failed: ${err instanceof Error ? err.message : "unknown"}`,
+          time: Date.now(),
+        });
       }
     },
     [customer, sessionId],
@@ -311,6 +326,11 @@ export function RealtimeKitChatPanel({
     };
   }, [meeting]);
 
+  // Clear sent message IDs when session changes to avoid stale deduplication
+  useEffect(() => {
+    sentMessageIds.current.clear();
+  }, [sessionId]);
+
   // Listen for chat messages from the local user
   useEffect(() => {
     if (!meeting || !meetingReady) return;
@@ -319,13 +339,37 @@ export function RealtimeKitChatPanel({
     const handleChatUpdate = (event: ChatEvent) => {
       const detail = "detail" in event ? event.detail : event;
       const msg = detail && "message" in detail ? detail.message : undefined;
-      if (!msg?.id || msg.type !== "chat") return;
-      if (msg.userId !== meeting.self?.userId) return;
-      if (sentMessageIds.current.has(msg.id)) return;
+
+      // Log all chat events for debugging
+      console.log("[RTK Chat] chatUpdate event:", {
+        hasMsg: Boolean(msg),
+        msgId: msg?.id,
+        msgType: msg?.type,
+        msgUserId: msg?.userId,
+        selfUserId: meeting.self?.userId,
+        text: msg?.message?.slice(0, 30),
+      });
+
+      if (!msg?.id || msg.type !== "chat") {
+        console.log("[RTK Chat] Skipping: not a chat message");
+        return;
+      }
+      if (msg.userId !== meeting.self?.userId) {
+        console.log("[RTK Chat] Skipping: not from local user");
+        return;
+      }
+      if (sentMessageIds.current.has(msg.id)) {
+        console.log("[RTK Chat] Skipping: duplicate message ID");
+        return;
+      }
 
       const text = msg.message?.trim();
-      if (!text) return;
+      if (!text) {
+        console.log("[RTK Chat] Skipping: empty message");
+        return;
+      }
 
+      console.log("[RTK Chat] Sending to conversation:", text.slice(0, 50));
       sentMessageIds.current.add(msg.id);
       void sendToConversation(text, "rtk_chat");
     };
@@ -334,15 +378,24 @@ export function RealtimeKitChatPanel({
       if (cancelled) return;
       const { chat } = meeting;
       if (!chat || !isEmitterReady(chat)) {
+        console.log("[RTK Chat] Waiting for chat emitter to be ready...");
         timers.current.chatReady = window.setTimeout(attach, 100);
         return;
       }
       try {
         chat.addListener("chatUpdate", handleChatUpdate);
-      } catch {
+        console.log("[RTK Chat] Successfully attached chat listener", {
+          selfUserId: meeting.self?.userId,
+        });
+      } catch (err) {
+        console.warn("[RTK Chat] Failed to attach listener, retrying...", err);
         timers.current.chatReady = window.setTimeout(attach, 100);
       }
     };
+    console.log("[RTK Chat] Effect running, attempting to attach listener", {
+      meetingReady,
+      hasMeeting: Boolean(meeting),
+    });
     attach();
 
     return () => {
@@ -417,16 +470,28 @@ export function RealtimeKitChatPanel({
 
     socket.onopen = () => {
       setWsConnected(true);
-      setLastActivity({ type: "receive", text: "WebSocket connected", time: Date.now() });
+      setLastActivity({
+        type: "receive",
+        text: "WebSocket connected",
+        time: Date.now(),
+      });
     };
 
     socket.onclose = () => {
       setWsConnected(false);
-      setLastActivity({ type: "error", text: "WebSocket disconnected", time: Date.now() });
+      setLastActivity({
+        type: "error",
+        text: "WebSocket disconnected",
+        time: Date.now(),
+      });
     };
 
     socket.onerror = () => {
-      setLastActivity({ type: "error", text: "WebSocket error", time: Date.now() });
+      setLastActivity({
+        type: "error",
+        text: "WebSocket error",
+        time: Date.now(),
+      });
     };
 
     socket.onmessage = (event) => {
@@ -442,7 +507,11 @@ export function RealtimeKitChatPanel({
         // Handle status events for TTS - speak them immediately
         if (payload.type === "status") {
           const text = payload.text?.trim();
-          setLastActivity({ type: "status", text: `Status: ${text?.slice(0, 40) ?? ""}`, time: Date.now() });
+          setLastActivity({
+            type: "status",
+            text: `Status: ${text?.slice(0, 40) ?? ""}`,
+            time: Date.now(),
+          });
           if (text && ttsEnabled.current) {
             window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
@@ -466,14 +535,23 @@ export function RealtimeKitChatPanel({
           );
           // Show streaming indicator
           const buffer = assistantBuffers.current.get(messageId) ?? "";
-          if (buffer.length % 20 === 0) { // Update every ~20 chars to reduce overhead
-            setLastActivity({ type: "receive", text: `Streaming: ${buffer.slice(-30)}...`, time: Date.now() });
+          if (buffer.length % 20 === 0) {
+            // Update every ~20 chars to reduce overhead
+            setLastActivity({
+              type: "receive",
+              text: `Streaming: ${buffer.slice(-30)}...`,
+              time: Date.now(),
+            });
           }
         } else if (payload.type === "final") {
           const buffer = assistantBuffers.current.get(messageId) ?? "";
           assistantBuffers.current.delete(messageId);
           const text = payload.data?.replyText ?? buffer;
-          setLastActivity({ type: "receive", text: `Reply: ${text.slice(0, 40)}...`, time: Date.now() });
+          setLastActivity({
+            type: "receive",
+            text: `Reply: ${text.slice(0, 40)}...`,
+            time: Date.now(),
+          });
           if (text && ttsEnabled.current) {
             window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
@@ -535,13 +613,20 @@ export function RealtimeKitChatPanel({
   }, []);
 
   // Get activity indicator color based on type
-  const getActivityColor = (type: typeof lastActivity extends { type: infer T } | null ? T : never) => {
+  const getActivityColor = (
+    type: typeof lastActivity extends { type: infer T } | null ? T : never,
+  ) => {
     switch (type) {
-      case "send": return "bg-blue-500";
-      case "receive": return "bg-green-500";
-      case "status": return "bg-yellow-500";
-      case "error": return "bg-red-500";
-      default: return "bg-gray-400";
+      case "send":
+        return "bg-blue-500";
+      case "receive":
+        return "bg-green-500";
+      case "status":
+        return "bg-yellow-500";
+      case "error":
+        return "bg-red-500";
+      default:
+        return "bg-gray-400";
     }
   };
 
@@ -555,13 +640,25 @@ export function RealtimeKitChatPanel({
         </div>
         <div className="flex items-center gap-2">
           {/* WebSocket connection indicator */}
-          <div className="flex items-center gap-1" title={wsConnected ? "WebSocket connected" : "WebSocket disconnected"}>
-            <div className={`h-2 w-2 rounded-full ${wsConnected ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
+          <div
+            className="flex items-center gap-1"
+            title={
+              wsConnected ? "WebSocket connected" : "WebSocket disconnected"
+            }
+          >
+            <div
+              className={`h-2 w-2 rounded-full ${wsConnected ? "bg-green-500 animate-pulse" : "bg-red-500"}`}
+            />
             <span className="text-xs text-ink/50">WS</span>
           </div>
           {/* RTK meeting indicator */}
-          <div className="flex items-center gap-1" title={meetingReady ? "Meeting ready" : "Meeting not ready"}>
-            <div className={`h-2 w-2 rounded-full ${meetingReady ? "bg-green-500" : meeting ? "bg-yellow-500 animate-pulse" : "bg-gray-400"}`} />
+          <div
+            className="flex items-center gap-1"
+            title={meetingReady ? "Meeting ready" : "Meeting not ready"}
+          >
+            <div
+              className={`h-2 w-2 rounded-full ${meetingReady ? "bg-green-500" : meeting ? "bg-yellow-500 animate-pulse" : "bg-gray-400"}`}
+            />
             <span className="text-xs text-ink/50">RTK</span>
           </div>
           {/* TTS speaking indicator */}
@@ -582,7 +679,9 @@ export function RealtimeKitChatPanel({
         {/* Last activity indicator */}
         {lastActivity && (
           <div className="flex items-center gap-1.5 text-xs text-ink/60">
-            <div className={`h-1.5 w-1.5 rounded-full ${getActivityColor(lastActivity.type)}`} />
+            <div
+              className={`h-1.5 w-1.5 rounded-full ${getActivityColor(lastActivity.type)}`}
+            />
             <span className="max-w-48 truncate" title={lastActivity.text}>
               {lastActivity.text}
             </span>
@@ -608,14 +707,22 @@ export function RealtimeKitChatPanel({
       )}
 
       {/* Main chat area */}
-      <div className="min-h-0 flex-1 bg-sand-50">
-        {meetingReady ? (
+      <div className="relative min-h-0 flex-1 bg-sand-50">
+        {/* Always render rtk-chat to prevent unmounting and focus loss */}
+        {meeting && (
           <rtk-chat
             ref={handleChatRef}
-            style={{ width: "100%", height: "100%" }}
+            style={{
+              width: "100%",
+              height: "100%",
+              opacity: meetingReady ? 1 : 0,
+              pointerEvents: meetingReady ? "auto" : "none",
+            }}
           />
-        ) : (
-          <div className="flex h-full items-center justify-center px-4 text-sm text-ink/70">
+        )}
+        {/* Overlay loading state when not ready */}
+        {!meetingReady && (
+          <div className="absolute inset-0 flex items-center justify-center px-4 text-sm text-ink/70 bg-sand-50">
             {sessionId
               ? status
               : "Send a message to establish a session before realtime chat loads."}

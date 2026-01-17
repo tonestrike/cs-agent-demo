@@ -148,7 +148,7 @@ const recordModelCall = async <T>(
  */
 const sanitizeModelOutput = (text: string): string => {
   if (!text) return "";
-  let sanitized = text
+  const sanitized = text
     // Strip JSON objects that look like function/tool calls
     .replace(/\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}/g, "")
     .replace(/\{[^{}]*"arguments"\s*:\s*[^{}]*\}/g, "")
