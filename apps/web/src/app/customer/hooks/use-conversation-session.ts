@@ -337,21 +337,29 @@ export function useConversationSession(phoneNumber: string) {
     [buildWsUrl, logEvent, updateTurnMetric],
   );
 
+  const resetSessionState = useCallback(
+    (reason: "manual" | "start_call" = "manual") => {
+      hasDeltaRef.current = false;
+      responseIdRef.current = null;
+      setMessages([]);
+      setConnectionStatus("New session");
+      pendingTurnsRef.current = [];
+      turnMetricsRef.current.clear();
+      setTurnMetrics([]);
+      socketRef.current?.close();
+      socketRef.current = null;
+      sessionRef.current = null;
+      clearAutoZipTimer();
+      logEvent("session.reset", { phoneNumber, reason });
+    },
+    [clearAutoZipTimer, logEvent, phoneNumber],
+  );
+
   const resetSession = useCallback(() => {
     setCallSessionId(null);
     setConfirmedSessionId(null);
-    hasDeltaRef.current = false;
-    setMessages([]);
-    setConnectionStatus("New session");
-    pendingTurnsRef.current = [];
-    turnMetricsRef.current.clear();
-    setTurnMetrics([]);
-    socketRef.current?.close();
-    socketRef.current = null;
-    sessionRef.current = null;
-    clearAutoZipTimer();
-    logEvent("session.reset", { phoneNumber });
-  }, [phoneNumber, logEvent, clearAutoZipTimer]);
+    resetSessionState("manual");
+  }, [resetSessionState]);
 
   const sendMessage = useCallback(
     async (
@@ -444,27 +452,46 @@ export function useConversationSession(phoneNumber: string) {
   // Keep ref in sync with latest sendMessage to avoid stale closures in timeouts
   sendMessageRef.current = sendMessage;
 
-  const startCall = useCallback(async () => {
-    if (!phoneNumber) {
-      return;
-    }
-    logEvent("chat.start_call", { phoneNumber });
-    clearAutoZipTimer();
-    // Just establish the WebSocket connection - greeting is sent on connect
-    const sessionId = callSessionId ?? crypto.randomUUID();
-    if (!callSessionId) {
-      setCallSessionId(sessionId);
-      setConfirmedSessionId(sessionId);
-    }
-    try {
-      setConnectionStatus("Connecting");
-      await ensureSocket(sessionId);
-      logEvent("ws.ready", { sessionId });
-    } catch {
-      setConnectionStatus("Connection issue. Try again.");
-      logEvent("ws.unavailable", { sessionId });
-    }
-  }, [callSessionId, clearAutoZipTimer, ensureSocket, logEvent, phoneNumber]);
+  const startCall = useCallback(
+    async (options?: { fresh?: boolean }) => {
+      if (!phoneNumber) {
+        return;
+      }
+      clearAutoZipTimer();
+      const forceFresh = options?.fresh ?? false;
+      let sessionId = callSessionId;
+      if (forceFresh || !sessionId) {
+        resetSessionState("start_call");
+        sessionId = crypto.randomUUID();
+        setCallSessionId(sessionId);
+        setConfirmedSessionId(sessionId);
+      }
+      if (!sessionId) {
+        return;
+      }
+      logEvent("chat.start_call", {
+        phoneNumber,
+        sessionId,
+        fresh: forceFresh || !callSessionId,
+      });
+      try {
+        setConnectionStatus("Connecting");
+        await ensureSocket(sessionId);
+        logEvent("ws.ready", { sessionId });
+      } catch {
+        setConnectionStatus("Connection issue. Try again.");
+        logEvent("ws.unavailable", { sessionId });
+      }
+    },
+    [
+      callSessionId,
+      clearAutoZipTimer,
+      ensureSocket,
+      logEvent,
+      phoneNumber,
+      resetSessionState,
+    ],
+  );
 
   const recordClientLog = useCallback(
     (

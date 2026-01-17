@@ -57,7 +57,7 @@ export function RealtimeChatView({
     }
     setStartingCall(true);
     try {
-      await startCall();
+      await startCall({ fresh: true });
     } finally {
       setStartingCall(false);
     }

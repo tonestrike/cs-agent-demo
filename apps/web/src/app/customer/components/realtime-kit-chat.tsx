@@ -111,6 +111,19 @@ function isEmitterReady(obj: unknown): boolean {
   );
 }
 
+/**
+ * Browser TTS fallback using Web Speech API.
+ * Used when server-side voice (WebRTC TTS) is unavailable.
+ */
+function speakWithBrowserTTS(text: string): void {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 1.0;
+  utterance.pitch = 1.0;
+  window.speechSynthesis.speak(utterance);
+}
+
 // -----------------------------------------------------------------------------
 // Component
 // -----------------------------------------------------------------------------
@@ -160,6 +173,7 @@ export function RealtimeKitChatPanel({
     Array<{ id: string | null; text: string }>
   >([]);
   const ttsEnabled = useRef(enableTts);
+  const serverVoiceEnabled = useRef(false); // Tracks if server-side TTS via WebRTC is active
   const meetingReadyRef = useRef(false);
   const timers = useRef<{
     retry?: number;
@@ -407,8 +421,17 @@ export function RealtimeKitChatPanel({
             },
             "warn",
           );
+          serverVoiceEnabled.current = false;
         } else {
-          log("voice_agent.init.success", { meetingId: payload.meetingId });
+          const result = (await voiceAgentResponse.json()) as {
+            ok: boolean;
+            voiceEnabled?: boolean;
+          };
+          serverVoiceEnabled.current = result.voiceEnabled ?? false;
+          log("voice_agent.init.success", {
+            meetingId: payload.meetingId,
+            voiceEnabled: serverVoiceEnabled.current,
+          });
         }
       } catch (err) {
         log(
@@ -416,6 +439,7 @@ export function RealtimeKitChatPanel({
           { error: err instanceof Error ? err.message : "unknown" },
           "warn",
         );
+        serverVoiceEnabled.current = false;
       }
     };
 
@@ -776,8 +800,11 @@ export function RealtimeKitChatPanel({
           });
           if (text) {
             appendAssistantChatMessage(payload.messageId, text);
+            // Fallback to browser TTS if server voice is disabled
+            if (ttsEnabled.current && !serverVoiceEnabled.current) {
+              speakWithBrowserTTS(text);
+            }
           }
-          // TTS is now handled by VoiceAgentDO via WebRTC audio track
           return;
         }
 
@@ -814,8 +841,11 @@ export function RealtimeKitChatPanel({
             textLength: text.length,
             messageId,
           });
-          // TTS is now handled by VoiceAgentDO via WebRTC audio track
           appendAssistantChatMessage(messageId, text);
+          // Fallback to browser TTS if server voice is disabled
+          if (ttsEnabled.current && !serverVoiceEnabled.current) {
+            speakWithBrowserTTS(text);
+          }
         }
       } catch {
         // Ignore malformed messages
