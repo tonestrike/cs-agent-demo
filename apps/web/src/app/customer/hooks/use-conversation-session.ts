@@ -285,10 +285,7 @@ export function useConversationSession(phoneNumber: string) {
                 );
               });
             }
-            if (data?.callSessionId && data.callSessionId !== callSessionId) {
-              setCallSessionId(data.callSessionId);
-              setConfirmedSessionId(data.callSessionId);
-            }
+            // Ignore server-suggested callSessionId; we own session ids per tab.
             if (typeof payload.turnId === "number") {
               updateTurnMetric(payload.turnId, sessionId, (metric) => {
                 const now = Date.now();
@@ -372,6 +369,7 @@ export function useConversationSession(phoneNumber: string) {
       const sessionId = callSessionId ?? crypto.randomUUID();
       if (!callSessionId) {
         setCallSessionId(sessionId);
+        setConfirmedSessionId(sessionId);
       }
       logEvent("message.send.start", { sessionId, length: trimmed.length });
       if (!options?.skipUserMessage) {
@@ -428,13 +426,7 @@ export function useConversationSession(phoneNumber: string) {
         if (!response.ok) {
           throw new Error("Request failed");
         }
-        const data = (await response.json()) as {
-          callSessionId?: string;
-        };
-        if (data.callSessionId && data.callSessionId !== callSessionId) {
-          setCallSessionId(data.callSessionId);
-          setConfirmedSessionId(data.callSessionId);
-        }
+        await response.json();
         logEvent("rpc.agent.message.done", {
           sessionId,
           replyLength: 0,

@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { RTKClientOptions } from "@cloudflare/realtimekit";
 import type { Meeting } from "@cloudflare/realtimekit-ui";
 import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
+import { getLogger } from "../../../lib/logger";
 import type { Customer } from "../types";
 
 // -----------------------------------------------------------------------------
@@ -133,18 +134,6 @@ export function RealtimeKitChatPanel({
   const [, setFinalTranscripts] = useState<Array<{ id: string; text: string }>>(
     [],
   );
-  const log = useCallback(
-    (message: string, data?: Record<string, unknown>) => {
-      // eslint-disable-next-line no-console
-      console.info("[RTK Chat]", message, {
-        sessionId,
-        customerId: customer?.id ?? null,
-        meetingReady,
-        ...data,
-      });
-    },
-    [customer?.id, meetingReady, sessionId],
-  );
 
   // Visual indicator states
   const [, setWsConnected] = useState(false);
@@ -171,6 +160,34 @@ export function RealtimeKitChatPanel({
     sessionId: string | null;
     customerId: string | null;
   }>({ sessionId: null, customerId: null });
+
+  const logger = useMemo(
+    () =>
+      getLogger("rtk-chat", {
+        sessionId,
+        customerId: customer?.id ?? null,
+      }),
+    [customer?.id, sessionId],
+  );
+  const log = useCallback(
+    (
+      message: string,
+      data?: Record<string, unknown>,
+      level: "info" | "warn" | "error" = "info",
+    ) => {
+      const payload = { meetingReady, ...data };
+      if (level === "error") {
+        logger.error(payload, message);
+        return;
+      }
+      if (level === "warn") {
+        logger.warn(payload, message);
+        return;
+      }
+      logger.info(payload, message);
+    },
+    [logger, meetingReady],
+  );
 
   // Keep ttsEnabled ref in sync
   useEffect(() => {
@@ -203,7 +220,11 @@ export function RealtimeKitChatPanel({
         );
         if (!response.ok) {
           const errorText = await response.text();
-          console.error("rtk message send failed", response.status, errorText);
+          log(
+            "send.error",
+            { status: response.status, error: errorText },
+            "error",
+          );
           setLastActivity({
             type: "error",
             text: `Error ${response.status}: ${errorText.slice(0, 50)}`,
@@ -211,7 +232,11 @@ export function RealtimeKitChatPanel({
           });
         }
       } catch (err) {
-        console.error("rtk message send failed", err);
+        log(
+          "send.error",
+          { error: err instanceof Error ? err.message : "unknown" },
+          "error",
+        );
         setLastActivity({
           type: "error",
           text: `Send failed: ${err instanceof Error ? err.message : "unknown"}`,
@@ -442,21 +467,23 @@ export function RealtimeKitChatPanel({
       if (cancelled) return;
       const { chat } = meeting;
       if (!chat || !isEmitterReady(chat)) {
-        console.log("[RTK Chat] Waiting for chat emitter to be ready...");
+        log("chat.attach.waiting");
         timers.current.chatReady = window.setTimeout(attach, 100);
         return;
       }
       try {
         chat.addListener("chatUpdate", handleChatUpdate);
-        console.log("[RTK Chat] Successfully attached chat listener", {
-          selfUserId: meeting.self?.userId,
-        });
+        log("chat.attach.success", { selfUserId: meeting.self?.userId });
       } catch (err) {
-        console.warn("[RTK Chat] Failed to attach listener, retrying...", err);
+        log(
+          "chat.attach.retry",
+          { error: err instanceof Error ? err.message : "unknown" },
+          "warn",
+        );
         timers.current.chatReady = window.setTimeout(attach, 100);
       }
     };
-    console.log("[RTK Chat] Effect running, attempting to attach listener", {
+    log("chat.attach.start", {
       meetingReady,
       hasMeeting: Boolean(meeting),
     });
@@ -658,7 +685,11 @@ export function RealtimeKitChatPanel({
         if (retries < 20) {
           window.setTimeout(() => assign(element, name, retries + 1), 50);
         } else {
-          console.warn(`${name}: failed to assign meeting`, err);
+          log(
+            "meeting.assign.failed",
+            { target: name, error: err instanceof Error ? err.message : "unknown" },
+            "warn",
+          );
         }
       }
     };
