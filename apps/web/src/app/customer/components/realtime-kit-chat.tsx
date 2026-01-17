@@ -350,8 +350,9 @@ export function RealtimeKitChatPanel({
         text: msg?.message?.slice(0, 30),
       });
 
-      if (!msg?.id || msg.type !== "chat") {
-        console.log("[RTK Chat] Skipping: not a chat message");
+      // Accept both "chat" and "text" message types from RTK
+      if (!msg?.id || (msg.type !== "chat" && msg.type !== "text")) {
+        console.log("[RTK Chat] Skipping: not a chat message, type:", msg?.type);
         return;
       }
       if (msg.userId !== meeting.self?.userId) {

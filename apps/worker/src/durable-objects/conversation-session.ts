@@ -261,66 +261,78 @@ export class ConversationSession {
     socket: WebSocket,
     raw: unknown,
   ): Promise<void> {
-    const parsed = this.parseClientMessage(raw);
-    if (!parsed) {
-      this.sendTo(socket, {
-        type: "error",
-        text: "Invalid message payload.",
-      });
-      return;
-    }
-
-    this.logger.info({ parsed }, `handleSocketMessage: ${parsed.type}`);
-
-    if (parsed.type === "barge_in") {
-      await this.handleBargeIn();
-      return;
-    }
-
-    if (parsed.type === "resync") {
-      await this.replayEvents(parsed.lastEventId, socket);
-      return;
-    }
-
-    if (parsed.type === "confirm_cancel") {
-      const result = await this.handleCancelConfirmation(
-        parsed.confirmed,
-        parsed.callSessionId,
-      );
-      if (!result.ok) {
+    try {
+      const parsed = this.parseClientMessage(raw);
+      if (!parsed) {
         this.sendTo(socket, {
           type: "error",
-          text: result.message ?? "Unable to confirm cancellation.",
-        });
-      }
-      return;
-    }
-
-    if (parsed.type === "start_cancel") {
-      const result = await this.handleCancelStart({
-        callSessionId: parsed.callSessionId,
-        customerId: parsed.customerId,
-        message: parsed.message,
-      });
-      if (!result.ok) {
-        this.sendTo(socket, {
-          type: "error",
-          text: result.message ?? "Unable to start cancellation.",
-        });
-      }
-      return;
-    }
-
-    if (parsed.type === "final_transcript" || parsed.type === "message") {
-      const input = this.resolveInput(parsed);
-      if (!input) {
-        this.sendTo(socket, {
-          type: "error",
-          text: "Missing phone number or message text.",
+          text: "Invalid message payload.",
         });
         return;
       }
-      await this.runMessage(input);
+
+      this.logger.info({ parsed }, `handleSocketMessage: ${parsed.type}`);
+
+      if (parsed.type === "barge_in") {
+        await this.handleBargeIn();
+        return;
+      }
+
+      if (parsed.type === "resync") {
+        await this.replayEvents(parsed.lastEventId, socket);
+        return;
+      }
+
+      if (parsed.type === "confirm_cancel") {
+        const result = await this.handleCancelConfirmation(
+          parsed.confirmed,
+          parsed.callSessionId,
+        );
+        if (!result.ok) {
+          this.sendTo(socket, {
+            type: "error",
+            text: result.message ?? "Unable to confirm cancellation.",
+          });
+        }
+        return;
+      }
+
+      if (parsed.type === "start_cancel") {
+        const result = await this.handleCancelStart({
+          callSessionId: parsed.callSessionId,
+          customerId: parsed.customerId,
+          message: parsed.message,
+        });
+        if (!result.ok) {
+          this.sendTo(socket, {
+            type: "error",
+            text: result.message ?? "Unable to start cancellation.",
+          });
+        }
+        return;
+      }
+
+      if (parsed.type === "final_transcript" || parsed.type === "message") {
+        const input = this.resolveInput(parsed);
+        if (!input) {
+          this.sendTo(socket, {
+            type: "error",
+            text: "Missing phone number or message text.",
+          });
+          return;
+        }
+        await this.runMessage(input);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      this.logger.error(
+        { error: message },
+        "conversation.session.socket_message.error",
+      );
+      this.sendTo(socket, {
+        type: "error",
+        text: `Server error: ${message}`,
+      });
     }
   }
 
