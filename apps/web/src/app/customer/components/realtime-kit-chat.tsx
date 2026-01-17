@@ -102,6 +102,7 @@ export function RealtimeKitChatPanel({
   const micToggleRef = useRef<HTMLRtkMicToggleElement | null>(null);
   const sentMessageIds = useRef(new Set<string>());
   const retryTimerRef = useRef<number | null>(null);
+  const chatReadyTimerRef = useRef<number | null>(null);
   const assistantBuffersRef = useRef(new Map<string, string>());
   const ttsEnabledRef = useRef(enableTts);
   const [partialTranscript, setPartialTranscript] = useState<string | null>(
@@ -150,6 +151,14 @@ export function RealtimeKitChatPanel({
     const cleanup = () => {
       const client = meetingRef.current;
       if (client) {
+        const chatElement = chatElementRef.current;
+        if (chatElement) {
+          chatElement.meeting = undefined as unknown as typeof chatElement.meeting;
+        }
+        const micElement = micToggleRef.current;
+        if (micElement) {
+          micElement.meeting = undefined as unknown as typeof micElement.meeting;
+        }
         // Allow RTK web components to detach listeners before tearing down.
         window.setTimeout(() => {
           client.leave().catch(() => {});
@@ -160,6 +169,10 @@ export function RealtimeKitChatPanel({
       if (retryTimerRef.current) {
         window.clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
+      }
+      if (chatReadyTimerRef.current) {
+        window.clearTimeout(chatReadyTimerRef.current);
+        chatReadyTimerRef.current = null;
       }
     };
 
@@ -259,10 +272,7 @@ export function RealtimeKitChatPanel({
     if (!meeting || !sessionId || !customer) {
       return;
     }
-    const chat = meeting.chat;
-    if (!chat?.addListener || !chat?.removeListener) {
-      return;
-    }
+    let cancelled = false;
     const handleChatUpdate = (event: RealtimeKitChatEvent) => {
       const detail = "detail" in event ? event.detail : event;
       const message =
@@ -284,9 +294,30 @@ export function RealtimeKitChatPanel({
       sentMessageIds.current.add(message.id);
       void sendToConversation(text, "rtk_chat");
     };
-    chat.addListener("chatUpdate", handleChatUpdate);
+
+    const attachChatListener = () => {
+      if (cancelled) {
+        return;
+      }
+      const chat = meeting.chat;
+      if (!chat?.addListener || !chat?.removeListener) {
+        chatReadyTimerRef.current = window.setTimeout(attachChatListener, 100);
+        return;
+      }
+      chat.addListener("chatUpdate", handleChatUpdate);
+    };
+
+    attachChatListener();
     return () => {
-      chat.removeListener("chatUpdate", handleChatUpdate);
+      cancelled = true;
+      const chat = meeting.chat;
+      if (chat?.removeListener) {
+        chat.removeListener("chatUpdate", handleChatUpdate);
+      }
+      if (chatReadyTimerRef.current) {
+        window.clearTimeout(chatReadyTimerRef.current);
+        chatReadyTimerRef.current = null;
+      }
     };
   }, [meeting, sessionId, customer, sendToConversation]);
 

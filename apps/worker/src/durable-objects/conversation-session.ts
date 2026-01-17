@@ -1231,7 +1231,7 @@ export class ConversationSession {
         return { role, content: turn.text };
       })
       .filter((turn) => turn.content.trim().length > 0);
-    const chronological = [...messages].reverse();
+    const chronological = messages;
     this.logger.info(
       {
         callSessionId,
@@ -3346,6 +3346,16 @@ export class ConversationSession {
               checkedForJson = true;
               waitingForJson =
                 trimmed.startsWith("{") || trimmed.startsWith("[");
+              if (waitingForJson) {
+                this.logger.info(
+                  {
+                    callSessionId,
+                    toolName: toolResult.toolName,
+                    prefix: trimmed.slice(0, 120),
+                  },
+                  "conversation.session.narrate.json_detected",
+                );
+              }
             }
           }
           if (!waitingForJson) {
