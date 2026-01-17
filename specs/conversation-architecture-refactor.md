@@ -666,15 +666,21 @@ All customer-facing text must be model-generated with appropriate context and to
 - [x] CORS fix for 500 errors (`apps/worker/src/index.ts`)
 - [x] Core design principle added: all customer-facing text model-generated
 - [x] Removed deterministic message references from spec
+- [x] Implement non-blocking status emission (`emitEarlyAcknowledgement` fires in parallel)
+- [x] Reduce FILLER_TIMEOUT_MS to 400ms
+- [x] Fix status events not being spoken by RealtimeKit (`realtime-kit-chat.tsx`)
+- [x] Remove hardcoded filler text (use empty fallback, rely on model-generated)
+- [x] Fix JSON function calls leaking into responses (`sanitizeModelOutput` in agent.ts, improved `sanitizeNarratorOutput`)
+- [x] Include status messages in model context (`getRecentMessages` now includes status)
+- [x] Cache model adapter for session lifetime (`cachedModelAdapter`)
+- [x] Clean up unused code (removed `routeIntent`, fixed `earlyAckPromise` warning)
 
 **Next steps:**
-- [ ] Implement non-blocking status emission (fire model.status() in parallel)
-- [ ] Parallelize DB fetches at turn start
-- [ ] Cache model adapter for session lifetime
-- [ ] Reduce FILLER_TIMEOUT_MS to 400ms
-- [ ] Add updateType to event schema
-- [ ] Fix model prompts to avoid JSON output in narrator mode
-- [ ] Add TTL to cachedCustomerContext
+- [ ] Add updateType to event schema for message updates vs new messages
+- [ ] Add TTL to cachedCustomerContext (invalidate if customer data changes)
+- [ ] Refactor conversation-session.ts into smaller modules (~4000 lines is too large)
+  - Extract: HTTP handlers, session state management, verification flow, workflow selection, tool calling, narration utilities
+- [ ] Consider extracting model prompt templates to separate files
 
 ## Realtime quality requirements
 - Acknowledge intent immediately with a first streamed token (e.g., “Got it — rescheduling your appointment now.”).

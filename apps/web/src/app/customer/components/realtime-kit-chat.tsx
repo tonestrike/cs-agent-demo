@@ -136,6 +136,15 @@ export function RealtimeKitChatPanel({
     Array<{ id: string; text: string }>
   >([]);
 
+  // Visual indicator states
+  const [wsConnected, setWsConnected] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [lastActivity, setLastActivity] = useState<{
+    type: "send" | "receive" | "status" | "error";
+    text: string;
+    time: number;
+  } | null>(null);
+
   const meetingRef = useRef<RealtimeKitClient | null>(null);
   const chatElementRef = useRef<HTMLRtkChatElement | null>(null);
   const micToggleRef = useRef<HTMLRtkMicToggleElement | null>(null);
@@ -157,8 +166,9 @@ export function RealtimeKitChatPanel({
   const sendToConversation = useCallback(
     async (text: string, source: string) => {
       if (!sessionId || !customer) return;
+      setLastActivity({ type: "send", text: `[${source}] ${text.slice(0, 50)}`, time: Date.now() });
       try {
-        await fetch(`${getBaseUrl()}/api/conversations/${sessionId}/message`, {
+        const response = await fetch(`${getBaseUrl()}/api/conversations/${sessionId}/message`, {
           method: "POST",
           headers: getApiHeaders(),
           body: JSON.stringify({
@@ -168,8 +178,14 @@ export function RealtimeKitChatPanel({
             source,
           }),
         });
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("rtk message send failed", response.status, errorText);
+          setLastActivity({ type: "error", text: `Error ${response.status}: ${errorText.slice(0, 50)}`, time: Date.now() });
+        }
       } catch (err) {
         console.error("rtk message send failed", err);
+        setLastActivity({ type: "error", text: `Send failed: ${err instanceof Error ? err.message : "unknown"}`, time: Date.now() });
       }
     },
     [customer, sessionId],
@@ -387,7 +403,10 @@ export function RealtimeKitChatPanel({
 
   // WebSocket for TTS playback of assistant responses
   useEffect(() => {
-    if (!sessionId || !customer) return;
+    if (!sessionId || !customer) {
+      setWsConnected(false);
+      return;
+    }
 
     const url = new URL(getBaseUrl());
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -395,6 +414,21 @@ export function RealtimeKitChatPanel({
     if (demoAuthToken) url.searchParams.set("token", demoAuthToken);
 
     const socket = new WebSocket(url.toString());
+
+    socket.onopen = () => {
+      setWsConnected(true);
+      setLastActivity({ type: "receive", text: "WebSocket connected", time: Date.now() });
+    };
+
+    socket.onclose = () => {
+      setWsConnected(false);
+      setLastActivity({ type: "error", text: "WebSocket disconnected", time: Date.now() });
+    };
+
+    socket.onerror = () => {
+      setLastActivity({ type: "error", text: "WebSocket error", time: Date.now() });
+    };
+
     socket.onmessage = (event) => {
       try {
         const payload = JSON.parse(String(event.data)) as {
@@ -408,9 +442,14 @@ export function RealtimeKitChatPanel({
         // Handle status events for TTS - speak them immediately
         if (payload.type === "status") {
           const text = payload.text?.trim();
+          setLastActivity({ type: "status", text: `Status: ${text?.slice(0, 40) ?? ""}`, time: Date.now() });
           if (text && ttsEnabled.current) {
             window.speechSynthesis.cancel();
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.onstart = () => setIsSpeaking(true);
+            utterance.onend = () => setIsSpeaking(false);
+            utterance.onerror = () => setIsSpeaking(false);
+            window.speechSynthesis.speak(utterance);
           }
           return;
         }
@@ -425,13 +464,23 @@ export function RealtimeKitChatPanel({
             messageId,
             current + (payload.text ?? ""),
           );
+          // Show streaming indicator
+          const buffer = assistantBuffers.current.get(messageId) ?? "";
+          if (buffer.length % 20 === 0) { // Update every ~20 chars to reduce overhead
+            setLastActivity({ type: "receive", text: `Streaming: ${buffer.slice(-30)}...`, time: Date.now() });
+          }
         } else if (payload.type === "final") {
           const buffer = assistantBuffers.current.get(messageId) ?? "";
           assistantBuffers.current.delete(messageId);
           const text = payload.data?.replyText ?? buffer;
+          setLastActivity({ type: "receive", text: `Reply: ${text.slice(0, 40)}...`, time: Date.now() });
           if (text && ttsEnabled.current) {
             window.speechSynthesis.cancel();
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.onstart = () => setIsSpeaking(true);
+            utterance.onend = () => setIsSpeaking(false);
+            utterance.onerror = () => setIsSpeaking(false);
+            window.speechSynthesis.speak(utterance);
           }
         }
       } catch {
@@ -439,7 +488,10 @@ export function RealtimeKitChatPanel({
       }
     };
 
-    return () => socket.close();
+    return () => {
+      socket.close();
+      setWsConnected(false);
+    };
   }, [sessionId, customer]);
 
   // Assign meeting to RTK web components with retry logic
@@ -482,18 +534,66 @@ export function RealtimeKitChatPanel({
     micToggleRef.current = el;
   }, []);
 
+  // Get activity indicator color based on type
+  const getActivityColor = (type: typeof lastActivity extends { type: infer T } | null ? T : never) => {
+    switch (type) {
+      case "send": return "bg-blue-500";
+      case "receive": return "bg-green-500";
+      case "status": return "bg-yellow-500";
+      case "error": return "bg-red-500";
+      default: return "bg-gray-400";
+    }
+  };
+
   return (
     <div className="flex h-full flex-col rounded-xl border border-ink-200 bg-white shadow-soft">
+      {/* Header with status indicators */}
       <div className="flex flex-shrink-0 items-center justify-between border-b border-ink-100 px-4 py-3">
         <div className="flex items-center gap-3">
           <h3 className="text-sm font-semibold text-ink">RealtimeKit chat</h3>
           {meetingReady && <rtk-mic-toggle ref={handleMicRef} size="sm" />}
         </div>
+        <div className="flex items-center gap-2">
+          {/* WebSocket connection indicator */}
+          <div className="flex items-center gap-1" title={wsConnected ? "WebSocket connected" : "WebSocket disconnected"}>
+            <div className={`h-2 w-2 rounded-full ${wsConnected ? "bg-green-500 animate-pulse" : "bg-red-500"}`} />
+            <span className="text-xs text-ink/50">WS</span>
+          </div>
+          {/* RTK meeting indicator */}
+          <div className="flex items-center gap-1" title={meetingReady ? "Meeting ready" : "Meeting not ready"}>
+            <div className={`h-2 w-2 rounded-full ${meetingReady ? "bg-green-500" : meeting ? "bg-yellow-500 animate-pulse" : "bg-gray-400"}`} />
+            <span className="text-xs text-ink/50">RTK</span>
+          </div>
+          {/* TTS speaking indicator */}
+          {isSpeaking && (
+            <div className="flex items-center gap-1" title="TTS speaking">
+              <div className="h-2 w-2 rounded-full bg-purple-500 animate-pulse" />
+              <span className="text-xs text-ink/50">TTS</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Status bar */}
+      <div className="flex flex-shrink-0 items-center justify-between border-b border-ink-100 bg-ink-50 px-4 py-1.5">
         <span className="text-xs text-ink/70" title={statusError}>
           {status}
         </span>
+        {/* Last activity indicator */}
+        {lastActivity && (
+          <div className="flex items-center gap-1.5 text-xs text-ink/60">
+            <div className={`h-1.5 w-1.5 rounded-full ${getActivityColor(lastActivity.type)}`} />
+            <span className="max-w-48 truncate" title={lastActivity.text}>
+              {lastActivity.text}
+            </span>
+            <span className="text-ink/40">
+              {Math.round((Date.now() - lastActivity.time) / 1000)}s ago
+            </span>
+          </div>
+        )}
       </div>
 
+      {/* Transcript display */}
       {(partialTranscript || finalTranscripts.length > 0) && (
         <div className="flex-shrink-0 border-b border-ink-100 bg-sand-50 px-4 py-2 text-xs text-ink-600">
           {finalTranscripts.map((line) => (
@@ -507,6 +607,7 @@ export function RealtimeKitChatPanel({
         </div>
       )}
 
+      {/* Main chat area */}
       <div className="min-h-0 flex-1 bg-sand-50">
         {meetingReady ? (
           <rtk-chat

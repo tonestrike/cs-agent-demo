@@ -99,10 +99,7 @@ export default {
           "conversation.session.fetch.error",
         );
         return withCors(
-          Response.json(
-            { error: "Internal server error" },
-            { status: 500 },
-          ),
+          Response.json({ error: "Internal server error" }, { status: 500 }),
         );
       }
     }

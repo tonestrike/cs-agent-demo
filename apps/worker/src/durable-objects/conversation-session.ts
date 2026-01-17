@@ -179,6 +179,9 @@ export class ConversationSession {
     preWorkMs?: number;
   } | null = null;
   private cachedCustomerContext: AgentModelInput["customer"] | null = null;
+  private cachedModelAdapter: ReturnType<
+    ReturnType<typeof createDependencies>["modelFactory"]
+  > | null = null;
 
   constructor(
     private state: DurableObjectState,
@@ -611,16 +614,11 @@ export class ConversationSession {
       "conversation.session.turn.start",
     );
     // First-token-fast: emit early acknowledgement for verified users
-    // This runs the acknowledgement model call concurrently with other pre-work
+    // This runs the acknowledgement model call concurrently with other pre-work (fire-and-forget)
     const conversationState =
       this.sessionState.conversation ?? initialConversationState();
-    let earlyAckPromise: Promise<void> | null = null;
     if (conversationState.verification.verified) {
-      earlyAckPromise = this.emitEarlyAcknowledgement(
-        activeInput,
-        deps,
-        streamId,
-      );
+      void this.emitEarlyAcknowledgement(activeInput, deps, streamId);
     }
     let fillerTimer: ReturnType<typeof setTimeout> | null = null;
     let fillerEmitted = false;
@@ -1186,17 +1184,20 @@ export class ConversationSession {
     callSessionId: string,
   ): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
     const start = Date.now();
-    const turns = await deps.calls.getRecentTurns({ callSessionId, limit: 8 });
+    const turns = await deps.calls.getRecentTurns({ callSessionId, limit: 10 });
     const messages = turns
       .filter((turn) => {
+        // Include user, agent, and status messages (status is what the bot said as acknowledgement)
+        // Status messages are stored as speaker: "system" with kind: "status"
         const kind = (turn.meta as { kind?: string } | undefined)?.kind;
-        return turn.speaker !== "system" && kind !== "status";
+        const isStatus = kind === "status";
+        // Include: user messages, agent messages, and status messages
+        return turn.speaker === "user" || turn.speaker === "agent" || isStatus;
       })
       .map((turn) => {
-        const role = (turn.speaker === "agent" ? "assistant" : "user") as
-          | "assistant"
-          | "user";
-        return { role, content: turn.text };
+        // Map status messages to assistant role (they're things the bot said)
+        const role = turn.speaker === "user" ? "user" : "assistant";
+        return { role: role as "user" | "assistant", content: turn.text };
       })
       .filter((turn) => turn.content.trim().length > 0);
     const chronological = messages;
@@ -3135,39 +3136,17 @@ export class ConversationSession {
     return null;
   }
 
-  private async routeIntent(
-    input: AgentMessageInput,
-    deps: ReturnType<typeof createDependencies>,
-  ): Promise<string | null> {
-    const state = this.sessionState.conversation ?? initialConversationState();
-    if (!state.verification.verified) {
-      return null;
-    }
-    const customer = await this.getCustomerContext(deps, input);
-    const model = await this.getModelAdapter(deps);
-    const modelInput: AgentModelInput = {
-      text: input.text,
-      customer,
-      hasContext: Boolean(input.callSessionId),
-    };
-    try {
-      const routed = await model.route(modelInput);
-      return routed.intent;
-    } catch (error) {
-      this.logger.error(
-        { error: error instanceof Error ? error.message : "unknown" },
-        "conversation.session.route.failed",
-      );
-      const fallback = this.inferPendingIntent(input.text);
-      return fallback?.kind ?? null;
-    }
-  }
-
   private async getModelAdapter(
     deps: ReturnType<typeof createDependencies>,
   ): Promise<ReturnType<typeof deps.modelFactory>> {
+    // Return cached model adapter if available (agent config doesn't change mid-session)
+    if (this.cachedModelAdapter) {
+      return this.cachedModelAdapter;
+    }
     const agentConfig = await deps.agentConfig.get(deps.agentConfigDefaults);
     const model = deps.modelFactory(agentConfig);
+    // Cache for future calls in this session
+    this.cachedModelAdapter = model;
     this.logger.info(
       {
         callSessionId: this.activeCallSessionId,
@@ -3420,6 +3399,7 @@ export class ConversationSession {
     if (!trimmed) {
       return "";
     }
+    // If entire text is JSON, try to extract the answer field
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
       try {
         const parsed = JSON.parse(trimmed) as
@@ -3441,7 +3421,23 @@ export class ConversationSession {
         return match[1].replace(/\\"/g, '"').trim();
       }
     }
-    return trimmed;
+    // Strip embedded JSON objects (function calls, tool calls) from anywhere in text
+    // Match patterns like {"name": ...} or {"arguments": ...}
+    let sanitized = trimmed
+      .replace(/\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}/g, "")
+      .replace(/\{[^{}]*"arguments"\s*:\s*[^{}]*\}/g, "")
+      .replace(/\{[^{}]*"tool"\s*:\s*"[^"]*"[^{}]*\}/g, "")
+      // Also strip markdown code blocks with JSON
+      .replace(/```json[\s\S]*?```/g, "")
+      .replace(/```[\s\S]*?```/g, "")
+      // Clean up any double spaces or trailing punctuation issues
+      .replace(/\s{2,}/g, " ")
+      .trim();
+    // If stripping left nothing meaningful, return empty
+    if (!sanitized || sanitized.length < 3) {
+      return "";
+    }
+    return sanitized;
   }
 
   private async selectOption(

@@ -141,6 +141,28 @@ const recordModelCall = async <T>(
   }
 };
 
+/**
+ * Sanitizes model output to remove embedded JSON, function calls, and code blocks.
+ * The model sometimes outputs tool call JSON in its response text which should not
+ * be shown to customers.
+ */
+const sanitizeModelOutput = (text: string): string => {
+  if (!text) return "";
+  let sanitized = text
+    // Strip JSON objects that look like function/tool calls
+    .replace(/\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}/g, "")
+    .replace(/\{[^{}]*"arguments"\s*:\s*[^{}]*\}/g, "")
+    .replace(/\{[^{}]*"tool"\s*:\s*"[^"]*"[^{}]*\}/g, "")
+    .replace(/\{[^{}]*"function"\s*:\s*"[^"]*"[^{}]*\}/g, "")
+    // Strip markdown code blocks
+    .replace(/```json[\s\S]*?```/g, "")
+    .replace(/```[\s\S]*?```/g, "")
+    // Clean up whitespace
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return sanitized;
+};
+
 const buildCustomerContext = (customer: {
   id: string;
   displayName: string;
@@ -594,11 +616,12 @@ const generateReply = async (
   if (responseCall.record.success) {
     const text =
       typeof responseCall.result === "string" ? responseCall.result : "";
-    const trimmed = text.trim();
-    if (!trimmed) {
+    // Sanitize to remove any embedded JSON/function calls the model may have outputted
+    const sanitized = sanitizeModelOutput(text);
+    if (!sanitized) {
       return fallbackText;
     }
-    return trimmed;
+    return sanitized;
   }
 
   logger.info(
@@ -1226,10 +1249,12 @@ export const handleAgentMessage = async (
         );
         modelCalls.push(statusCall.record);
         logModelCall(logger, statusCall.record);
-        const replyText =
+        // Sanitize model output and use empty fallback (all customer-facing text must be model-generated)
+        const rawResult =
           statusCall.record.success && typeof statusCall.result === "string"
-            ? statusCall.result.trim()
-            : "I'm checking that now.";
+            ? statusCall.result
+            : "";
+        const replyText = sanitizeModelOutput(rawResult) || "";
         await updateCallSummary(replyText);
         await deps.calls.addTurn({
           id: crypto.randomUUID(),
@@ -2903,8 +2928,9 @@ export const handleAgentMessage = async (
   }
 
   if (!toolCall && modelOutput?.type === "final") {
-    let replyText = modelOutput.text;
-    if (!replyText.trim()) {
+    // Sanitize model output to remove any embedded JSON/function calls
+    let replyText = sanitizeModelOutput(modelOutput.text);
+    if (!replyText) {
       replyText = agentConfig.scopeMessage;
     }
     summary = {
@@ -2980,14 +3006,17 @@ export const handleAgentMessage = async (
       .then((statusCall) => {
         modelCalls.push(statusCall.record);
         logModelCall(logger, statusCall.record);
-        const text =
+        // Sanitize model output to remove any embedded JSON/function calls
+        const rawText =
           statusCall.record.success && typeof statusCall.result === "string"
-            ? statusCall.result.trim()
+            ? statusCall.result
             : "";
+        const text = sanitizeModelOutput(rawText);
         if (!statusOpen) {
           return;
         }
         const status: AgentStatusUpdate = {
+          // Use model-generated text, only fallback if empty
           text: text || statusMessageForTool(toolName),
           toolName,
           source,
