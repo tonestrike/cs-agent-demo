@@ -253,7 +253,8 @@ export default function CustomerPage() {
             <div className="flex-1 overflow-hidden px-4 pb-6">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-ink-200 pb-3">
                 <p className="text-xs text-ink-500">
-                  Start an incoming call session (runs verification before the customer replies).
+                  Start an incoming call session (runs verification before the
+                  customer replies).
                 </p>
                 <button
                   type="button"

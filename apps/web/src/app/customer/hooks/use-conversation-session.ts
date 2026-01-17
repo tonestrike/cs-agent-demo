@@ -210,7 +210,7 @@ export function useConversationSession(phoneNumber: string) {
     hasDeltaRef.current = false;
     pendingPlaceholderIdRef.current = null;
     setMessages([]);
-      setStatus("New session");
+    setStatus("New session");
     socketRef.current?.close();
     socketRef.current = null;
     sessionRef.current = null;
@@ -234,7 +234,11 @@ export function useConversationSession(phoneNumber: string) {
       if (!options?.skipUserMessage) {
         setMessages((prev) => [
           ...prev,
-          { id: crypto.randomUUID(), role: "customer", text: options?.userMessageText ?? trimmed },
+          {
+            id: crypto.randomUUID(),
+            role: "customer",
+            text: options?.userMessageText ?? trimmed,
+          },
         ]);
       }
 
@@ -281,29 +285,15 @@ export function useConversationSession(phoneNumber: string) {
         }
         const data = (await response.json()) as {
           callSessionId?: string;
-          replyText?: string;
         };
-        const replyText = data.replyText ?? "";
-        if (replyText && !hasDeltaRef.current) {
-          const currentResponseId = responseIdRef.current;
-          if (currentResponseId) {
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === currentResponseId && !msg.text
-                  ? { ...msg, text: replyText }
-                  : msg,
-              ),
-            );
-          }
-        }
         if (data.callSessionId) {
           setCallSessionId(data.callSessionId);
           setConfirmedSessionId(data.callSessionId);
         }
         logEvent("rpc.agent.message.done", {
           sessionId,
-          replyLength: replyText.length,
-          usedFallback: !hasDeltaRef.current && Boolean(replyText),
+          replyLength: 0,
+          usedFallback: false,
         });
       } catch {
         setStatus("Connection issue. Try again.");
