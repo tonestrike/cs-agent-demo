@@ -37,6 +37,7 @@ Split conversational streaming from deterministic control work using a Worker + 
 - Narrator: streams user-facing text (no JSON).
 - Interpreter: tiny structured decisions (yes/no confirmation, option selection).
 - Interpreter output always validated.
+- Intent routing should be model-driven (constrained schema), with deterministic fallbacks for high-risk actions.
 
 ## Conversation state machine
 States (owned by code, not the model):

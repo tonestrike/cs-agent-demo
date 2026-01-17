@@ -42,13 +42,16 @@ export default function CustomerPage() {
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
   }, [callSessionId, phoneNumber, messages]);
 
+  const statusLine =
+    status === "New session" || status.startsWith("Session ") ? "" : status;
+
   return (
     <main className="grid-dots min-h-screen px-4 py-6 sm:px-6 sm:py-8">
       <div className="mx-auto flex h-[calc(100vh-3rem)] max-w-2xl flex-col sm:h-[calc(100vh-4rem)]">
         <Card className="flex flex-1 flex-col gap-4 animate-rise overflow-hidden">
           <ChatHeader status={status} confirmedSessionId={confirmedSessionId} />
 
-          <ChatMessages messages={messages} />
+          <ChatMessages messages={messages} statusText={statusLine} />
 
           <div className="space-y-3">
             <CustomerBar

@@ -5,9 +5,10 @@ import type { ChatMessage } from "../types";
 
 type ChatMessagesProps = {
   messages: ChatMessage[];
+  statusText?: string;
 };
 
-export function ChatMessages({ messages }: ChatMessagesProps) {
+export function ChatMessages({ messages, statusText }: ChatMessagesProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScroll = useRef(true);
 
@@ -40,9 +41,16 @@ export function ChatMessages({ messages }: ChatMessagesProps) {
           <p className="text-[10px] uppercase tracking-wide opacity-50">
             {message.role === "customer" ? "You" : "PestCall"}
           </p>
-          <p className="mt-0.5">{message.text}</p>
+          <p className="mt-0.5">
+            {message.text || (message.role === "agent" ? "…" : "")}
+          </p>
         </div>
       ))}
+      {statusText ? (
+        <div className="rounded-full border border-ink/10 bg-white/70 px-3 py-1 text-[11px] text-ink/60 shadow-soft">
+          {statusText}
+        </div>
+      ) : null}
     </div>
   );
 }
