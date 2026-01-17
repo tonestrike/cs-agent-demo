@@ -201,12 +201,16 @@ The Worker forwards the DO event stream to the client unchanged.
 - [x] Verification gate with ZIP prompt + CRM verification in the DO.
 - [x] Deterministic appointment listing response + state updates in the DO.
 - [x] Conversational e2e tests covering verification + appointment listing.
+- [x] Deterministic billing flow for open invoices with conversational e2e coverage.
+- [x] Escalation flow for human handoff with conversational e2e coverage.
 - [x] Admin appointment lookup to verify cancel/reschedule outcomes in e2e tests.
 - [x] Conversational cancel/reschedule e2e tests validate appointment status changes.
 - [x] E2E tests validate DO state via resync instead of brittle response strings.
 - [x] E2E tests wait for appointment options before sending workflow selections.
 - [x] DO starts cancel/reschedule workflows deterministically and ensures call sessions exist.
 - [x] DO sends cancel/reschedule selection events directly (appointment/slot/confirm) for reliable e2e flows.
+- [x] Turn latency logging for `first_token_ms` and `time_to_status_ms`.
+- [x] Log filter helper for `callSessionId` via `bun run logs:call`.
 - Unit tests for state transitions and summary mapping.
 - Remote-only e2e tests for message/resync and WebSocket final events.
 - Resync payloads now include conversation state snapshots.

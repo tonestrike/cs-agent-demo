@@ -20,7 +20,11 @@ import {
   agentMessageInputSchema,
 } from "../schemas/agent";
 import { handleAgentMessage } from "../use-cases/agent";
-import { listUpcomingAppointments, verifyAccount } from "../use-cases/crm";
+import {
+  getOpenInvoices,
+  listUpcomingAppointments,
+  verifyAccount,
+} from "../use-cases/crm";
 import {
   CANCEL_WORKFLOW_EVENT_CONFIRM,
   CANCEL_WORKFLOW_EVENT_SELECT_APPOINTMENT,
@@ -308,6 +312,9 @@ export class ConversationSession {
     this.canceledStreamIds.delete(streamId);
     await this.setSpeaking(true);
     let lastStatus = "";
+    const turnStartedAt = Date.now();
+    let firstTokenAt: number | null = null;
+    let firstStatusAt: number | null = null;
     try {
       const verificationResponse = await this.handleVerificationGate(
         input,
@@ -344,6 +351,23 @@ export class ConversationSession {
         await this.syncConversationState(selectionResponse.callSessionId, deps);
         return selectionResponse;
       }
+      const escalationResponse = await this.handleEscalationFlow(input, deps);
+      if (escalationResponse) {
+        this.emitEvent({ type: "final", data: escalationResponse });
+        await this.updateSessionState(input, escalationResponse);
+        await this.syncConversationState(
+          escalationResponse.callSessionId,
+          deps,
+        );
+        return escalationResponse;
+      }
+      const billingResponse = await this.handleBillingFlow(input, deps);
+      if (billingResponse) {
+        this.emitEvent({ type: "final", data: billingResponse });
+        await this.updateSessionState(input, billingResponse);
+        await this.syncConversationState(billingResponse.callSessionId, deps);
+        return billingResponse;
+      }
       const appointmentResponse = await this.handleAppointmentsFlow(
         input,
         deps,
@@ -363,12 +387,18 @@ export class ConversationSession {
           if (!text || text === lastStatus) {
             return;
           }
+          if (firstStatusAt === null) {
+            firstStatusAt = Date.now();
+          }
           lastStatus = text;
           this.emitEvent({ type: "status", text });
         },
         onToken: (token) => {
           if (this.canceledStreamIds.has(streamId)) {
             return;
+          }
+          if (firstTokenAt === null) {
+            firstTokenAt = Date.now();
           }
           this.emitEvent({ type: "token", text: token });
         },
@@ -396,6 +426,18 @@ export class ConversationSession {
       }
       return fallback;
     } finally {
+      const firstTokenMs =
+        firstTokenAt === null ? null : firstTokenAt - turnStartedAt;
+      const firstStatusMs =
+        firstStatusAt === null ? null : firstStatusAt - turnStartedAt;
+      this.logger.info(
+        {
+          callSessionId: input.callSessionId ?? "new",
+          first_token_ms: firstTokenMs,
+          time_to_status_ms: firstStatusMs,
+        },
+        "conversation.session.turn.latency",
+      );
       await this.setSpeaking(false);
     }
   }
@@ -818,6 +860,42 @@ export class ConversationSession {
     return response;
   }
 
+  private async handleEscalationFlow(
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+  ): Promise<AgentMessageOutput | null> {
+    const state = this.sessionState.conversation ?? initialConversationState();
+    if (!state.verification.verified) {
+      return null;
+    }
+    const wantsEscalation =
+      /\b(agent|human|representative|manager|supervisor|complaint|escalate)\b/i.test(
+        input.text,
+      );
+    if (!wantsEscalation) {
+      return null;
+    }
+
+    this.emitEvent({
+      type: "status",
+      text: "Connecting you to a specialist now.",
+    });
+    const result = await deps.crm.escalate({
+      reason: "customer_request",
+      summary: input.text,
+      customerId: state.verification.customerId ?? undefined,
+    });
+    const callSessionId = input.callSessionId ?? crypto.randomUUID();
+    const replyText = result.ok
+      ? `I've asked a specialist to reach out. Your ticket ID is ${result.ticketId ?? "on file"}.`
+      : "I'm sorry, I couldn't start an escalation right now. Please try again in a moment.";
+    return {
+      callSessionId,
+      replyText,
+      actions: [],
+    };
+  }
+
   private async handleAppointmentsFlow(
     input: AgentMessageInput,
     deps: ReturnType<typeof createDependencies>,
@@ -872,6 +950,38 @@ export class ConversationSession {
     };
     await this.state.storage.put("state", this.sessionState);
     return response;
+  }
+
+  private async handleBillingFlow(
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+  ): Promise<AgentMessageOutput | null> {
+    const state = this.sessionState.conversation ?? initialConversationState();
+    if (!state.verification.verified || !state.verification.customerId) {
+      return null;
+    }
+    const wantsBilling =
+      /\b(bill|billing|invoice|payment|pay|balance|owe|owed)\b/i.test(
+        input.text,
+      );
+    if (!wantsBilling) {
+      return null;
+    }
+
+    this.emitEvent({ type: "status", text: "Checking your balance now." });
+    const invoices = await getOpenInvoices(
+      deps.crm,
+      state.verification.customerId,
+    );
+    const callSessionId = input.callSessionId ?? crypto.randomUUID();
+    const replyText = invoices.length
+      ? this.formatInvoicesResponse(invoices)
+      : "You're all set. I don't see any open invoices right now.";
+    return {
+      callSessionId,
+      replyText,
+      actions: [],
+    };
   }
 
   private async handleWorkflowIntent(
@@ -1081,6 +1191,8 @@ export class ConversationSession {
     if (this.canceledStreamIds.has(streamId)) {
       return;
     }
+    const turnStart = Date.now();
+    let firstTokenAt: number | null = null;
     const parts = text.split(/\s+/).filter(Boolean);
     if (!parts.length) {
       return;
@@ -1088,6 +1200,16 @@ export class ConversationSession {
     for (const part of parts) {
       if (this.canceledStreamIds.has(streamId)) {
         return;
+      }
+      if (firstTokenAt === null) {
+        firstTokenAt = Date.now();
+        this.logger.info(
+          {
+            callSessionId: this.sessionState.lastCallSessionId ?? "new",
+            first_token_ms: firstTokenAt - turnStart,
+          },
+          "conversation.session.narrator.first_token",
+        );
       }
       this.emitEvent({ type: "token", text: `${part} ` });
     }
@@ -1109,6 +1231,32 @@ export class ConversationSession {
       const dateLabel = appointment.date;
       const timeLabel = appointment.timeWindow;
       return `${index + 1}) ${dateLabel} ${timeLabel} at ${appointment.addressSummary}`;
+    });
+    return [intro, ...lines].join(" ");
+  }
+
+  private formatInvoicesResponse(
+    invoices: Array<{
+      id: string;
+      balanceCents: number;
+      balance?: string;
+      currency?: string;
+      dueDate: string;
+      status: "open" | "paid" | "overdue";
+    }>,
+  ): string {
+    const intro =
+      invoices.length === 1
+        ? "Here is your open invoice:"
+        : "Here are your open invoices:";
+    const lines = invoices.map((invoice, index) => {
+      const balance =
+        invoice.balance ?? (invoice.balanceCents / 100).toFixed(2);
+      const currency = invoice.currency ?? "USD";
+      const amount =
+        currency === "USD" ? `$${balance}` : `${balance} ${currency}`;
+      const status = invoice.status === "overdue" ? " (overdue)" : "";
+      return `${index + 1}) ${amount} due ${invoice.dueDate}${status}`;
     });
     return [intro, ...lines].join(" ");
   }
