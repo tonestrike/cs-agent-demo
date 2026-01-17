@@ -583,7 +583,10 @@ export function RealtimeKitChatPanel({
       socket.close();
       setWsConnected(false);
     };
-  }, [sessionId, customer]);
+    // Use customer?.id instead of customer object to avoid reconnecting when
+    // React Query returns new object reference with same data
+    // biome-ignore lint/correctness/useExhaustiveDependencies: customer?.id is stable identifier
+  }, [sessionId, customer?.id]);
 
   // Assign meeting to RTK web components with retry logic
   useEffect(() => {
