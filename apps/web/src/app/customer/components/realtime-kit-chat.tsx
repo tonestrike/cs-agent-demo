@@ -154,6 +154,11 @@ export function RealtimeKitChatPanel({
     chatReady?: number;
     uiReady?: number;
   }>({});
+  // Track which session the current meeting was created for to prevent unnecessary recreation
+  const meetingSessionRef = useRef<{
+    sessionId: string | null;
+    customerId: string | null;
+  }>({ sessionId: null, customerId: null });
 
   // Keep ttsEnabled ref in sync
   useEffect(() => {
@@ -221,6 +226,7 @@ export function RealtimeKitChatPanel({
       const client = meetingRef.current;
       if (client) {
         meetingRef.current = null;
+        meetingSessionRef.current = { sessionId: null, customerId: null };
         client.leave().catch(() => {});
       }
       setMeeting(null);
@@ -231,6 +237,20 @@ export function RealtimeKitChatPanel({
     if (!sessionId || !customer?.id) {
       cleanup();
       setStatus("Waiting for conversation session...");
+      return;
+    }
+
+    // Skip recreation if we already have a meeting for this exact session
+    const currentSession = meetingSessionRef.current;
+    if (
+      meetingRef.current &&
+      currentSession.sessionId === sessionId &&
+      currentSession.customerId === customer.id
+    ) {
+      console.log("[RTK Chat] Skipping recreation, meeting already exists for session", {
+        sessionId,
+        customerId: customer.id,
+      });
       return;
     }
 
@@ -265,6 +285,7 @@ export function RealtimeKitChatPanel({
       }
 
       meetingRef.current = client;
+      meetingSessionRef.current = { sessionId, customerId: customer.id };
       setMeeting(client);
       setMeetingReady(false);
       setStatus("RealtimeKit chat ready");
