@@ -1810,33 +1810,6 @@ export class ConversationSession {
     }
 
     if (this.sessionState.rescheduleWorkflowId) {
-      if (availableSlots.length && this.isSlotListRequest(text)) {
-        const replyText = await this.narrateToolResult(
-          {
-            toolName: "crm.getAvailableSlots",
-            result: availableSlots.map((slot) => ({
-              date: slot.date,
-              timeWindow: slot.timeWindow,
-            })),
-          },
-          {
-            input,
-            deps,
-            streamId,
-            fallback: this.formatAvailableSlotsResponse(
-              availableSlots,
-              "Which one works best?",
-            ),
-            contextHint:
-              "Share the available times and ask which slot they prefer.",
-          },
-        );
-        return {
-          callSessionId,
-          replyText,
-          actions: [],
-        };
-      }
       if (resolvedAppointmentId) {
         const instance = await deps.workflows.reschedule?.get(
           this.sessionState.rescheduleWorkflowId,
@@ -2273,15 +2246,6 @@ export class ConversationSession {
 
   private isAvailabilityRequest(text: string): boolean {
     return /\b(available|availability|openings|times available)\b/i.test(text);
-  }
-
-  private isSlotListRequest(text: string): boolean {
-    return (
-      /\b(what|which)\s+times\b/i.test(text) ||
-      /\b(show|list|give)\s+(me\s+)?(the\s+)?times\b/i.test(text) ||
-      /\b(available|availability|openings|times available)\b/i.test(text) ||
-      /\b(didn'?t|did not)\b.*\btimes\b/i.test(text)
-    );
   }
 
   private shouldPreAcknowledge(text: string): boolean {
@@ -3455,14 +3419,15 @@ export class ConversationSession {
 
   private buildTurnMeta(callSessionId: string): Record<string, unknown> {
     const metrics = this.turnMetrics;
+    const startedAt = metrics?.startedAt ?? Date.now();
     const firstTokenMs =
       metrics?.firstTokenAt === null
         ? null
-        : (metrics?.firstTokenAt ?? 0) - metrics.startedAt;
+        : (metrics?.firstTokenAt ?? 0) - startedAt;
     const firstStatusMs =
       metrics?.firstStatusAt === null
         ? null
-        : (metrics?.firstStatusAt ?? 0) - metrics.startedAt;
+        : (metrics?.firstStatusAt ?? 0) - startedAt;
     return {
       callSessionId,
       turnId: this.activeTurnId,
