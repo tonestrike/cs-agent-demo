@@ -10,6 +10,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@cloudflare/realtimekit": "^1.0.0",
     "@orpc/client": "1.13.4",
     "@orpc/react-query": "^1.13.4",
     "@pestcall/core": "workspace:*",

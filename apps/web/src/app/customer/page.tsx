@@ -9,12 +9,15 @@ import {
   CustomerBar,
 } from "./components";
 import { useConversationSession, useCustomers } from "./hooks";
+import { AudioChatInterface } from "./components/audio-chat-interface";
 
 type SidebarTab = "settings" | "logs";
+type ChatMode = "text" | "audio";
 
 export default function CustomerPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<SidebarTab>("settings");
+  const [chatMode, setChatMode] = useState<ChatMode>("text");
   const { customers, selectedCustomer, phoneNumber, selectCustomer } =
     useCustomers();
 
@@ -191,19 +194,62 @@ export default function CustomerPage() {
           </span>
         </div>
 
-        {/* Messages area - fills remaining space */}
-        <div className="min-h-0 flex-1 overflow-hidden">
-          <ChatMessages messages={messages} statusText={statusLine} />
+        {/* Chat mode tabs */}
+        <div className="flex flex-shrink-0 border-b border-ink-200 bg-sand-100">
+          <button
+            type="button"
+            onClick={() => setChatMode("text")}
+            className={`flex-1 px-6 py-3 text-sm font-semibold transition-colors ${
+              chatMode === "text"
+                ? "border-b-2 border-ink bg-white text-ink"
+                : "text-ink-500 hover:text-ink-700"
+            }`}
+          >
+            Text Chat
+          </button>
+          <button
+            type="button"
+            onClick={() => setChatMode("audio")}
+            className={`flex-1 px-6 py-3 text-sm font-semibold transition-colors ${
+              chatMode === "audio"
+                ? "border-b-2 border-ink bg-white text-ink"
+                : "text-ink-500 hover:text-ink-700"
+            }`}
+          >
+            Audio Chat
+          </button>
         </div>
 
-        {/* Input bar pinned at bottom */}
-        <div className="flex-shrink-0 border-t border-ink-200 bg-white p-4">
-          <div className="mx-auto max-w-3xl">
-            <ChatInput
-              onSend={sendMessage}
-              quickZip={selectedCustomer?.zipCode}
-            />
-          </div>
+        {/* Chat content area */}
+        <div className="min-h-0 flex-1 overflow-hidden flex flex-col">
+          {chatMode === "text" ? (
+            <>
+              {/* Messages area - fills remaining space */}
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <ChatMessages messages={messages} statusText={statusLine} />
+              </div>
+
+              {/* Input bar pinned at bottom */}
+              <div className="flex-shrink-0 border-t border-ink-200 bg-white p-4">
+                <div className="mx-auto max-w-3xl">
+                  <ChatInput
+                    onSend={sendMessage}
+                    quickZip={selectedCustomer?.zipCode}
+                  />
+                </div>
+              </div>
+            </>
+          ) : (
+            /* Audio chat fills entire space */
+            <div className="flex-1">
+              <AudioChatInterface
+                customer={selectedCustomer}
+                phoneNumber={phoneNumber}
+                callSessionId={callSessionId}
+                onAudioStatusChange={handleAudioStatusChange}
+              />
+            </div>
+          )}
         </div>
       </main>
     </div>

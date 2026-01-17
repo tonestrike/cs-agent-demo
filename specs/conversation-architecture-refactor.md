@@ -164,6 +164,7 @@ The Worker forwards the DO event stream to the client unchanged.
 - Integrate interpreter model with validation.
   - Add `selectOption` with Zod validation.
   - Only call on constrained selections (confirmation, appointment choice, slot choice).
+  - Add tool-calling model step to decide and validate tool invocations.
   - Add intent classification (single-pass) for primary routing; extend to multi-intent later.
 - Add latency metrics and fallback path.
   - Capture per-turn `interpret_ms` and `narrate_ms`.
@@ -222,6 +223,7 @@ The Worker forwards the DO event stream to the client unchanged.
 - [x] Narrator-driven responses for appointment, billing, cancel/reschedule, and escalation flows.
 - [x] Interpreter-driven intent classification with validated routing and selection handling.
 - [x] Reschedule flow presents available slots (no raw slot ids) and uses interpreter for slot selection.
+- [x] Tool-calling model now drives tool selection with validation in the session DO.
 - Unit tests for state transitions and summary mapping.
 - Remote-only e2e tests for message/resync and WebSocket final events.
 - Resync payloads now include conversation state snapshots.

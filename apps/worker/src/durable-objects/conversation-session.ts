@@ -26,9 +26,12 @@ import type {
   SelectionOption,
   ToolResult,
 } from "../models/types";
+import { validateToolArgs } from "../models/tool-definitions";
 import {
+  createAppointment,
   getAvailableSlots,
   getOpenInvoices,
+  getServicePolicy,
   listUpcomingAppointments,
   verifyAccount,
 } from "../use-cases/crm";
@@ -354,7 +357,6 @@ export class ConversationSession {
         return verificationResponse;
       }
 
-
       // Handle workflow selection
       const selectionResponse = await this.handleWorkflowSelection(
         input,
@@ -367,60 +369,16 @@ export class ConversationSession {
         await this.syncConversationState(selectionResponse.callSessionId, deps);
         return selectionResponse;
       }
-      const routedIntent = await this.routeIntent(input, deps);
-      const workflowResponse = await this.handleWorkflowIntent(
+      const toolResponse = await this.handleToolCallingFlow(
         input,
         deps,
         streamId,
-        routedIntent,
       );
-      if (workflowResponse) {
-        this.emitEvent({ type: "final", data: workflowResponse });
-        await this.updateSessionState(input, workflowResponse);
-        await this.syncConversationState(workflowResponse.callSessionId, deps);
-        return workflowResponse;
-      }
-      const escalationResponse = await this.handleEscalationFlow(
-        input,
-        deps,
-        routedIntent,
-        streamId,
-      );
-      if (escalationResponse) {
-        this.emitEvent({ type: "final", data: escalationResponse });
-        await this.updateSessionState(input, escalationResponse);
-        await this.syncConversationState(
-          escalationResponse.callSessionId,
-          deps,
-        );
-        return escalationResponse;
-      }
-      const billingResponse = await this.handleBillingFlow(
-        input,
-        deps,
-        routedIntent,
-        streamId,
-      );
-      if (billingResponse) {
-        this.emitEvent({ type: "final", data: billingResponse });
-        await this.updateSessionState(input, billingResponse);
-        await this.syncConversationState(billingResponse.callSessionId, deps);
-        return billingResponse;
-      }
-      const appointmentResponse = await this.handleAppointmentsFlow(
-        input,
-        deps,
-        routedIntent,
-        streamId,
-      );
-      if (appointmentResponse) {
-        this.emitEvent({ type: "final", data: appointmentResponse });
-        await this.updateSessionState(input, appointmentResponse);
-        await this.syncConversationState(
-          appointmentResponse.callSessionId,
-          deps,
-        );
-        return appointmentResponse;
+      if (toolResponse) {
+        this.emitEvent({ type: "final", data: toolResponse });
+        await this.updateSessionState(input, toolResponse);
+        await this.syncConversationState(toolResponse.callSessionId, deps);
+        return toolResponse;
       }
       const response = await handleAgentMessage(deps, input, undefined, {
         onStatus: (status) => {
@@ -1800,6 +1758,640 @@ export class ConversationSession {
     }
 
     return null;
+  }
+
+  private async handleToolCallingFlow(
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+    streamId: number,
+  ): Promise<AgentMessageOutput | null> {
+    const state = this.sessionState.conversation ?? initialConversationState();
+    if (!state.verification.verified || !state.verification.customerId) {
+      return null;
+    }
+    const callSessionId = input.callSessionId ?? crypto.randomUUID();
+    const model = await this.getModelAdapter(deps);
+    const customer = await this.getCustomerContext(deps, input);
+    const context = this.buildModelContext();
+    try {
+      const decision = await model.generate({
+        text: input.text,
+        customer,
+        hasContext: Boolean(input.callSessionId),
+        context,
+      });
+      if (decision.type === "final") {
+        const replyText =
+          decision.text.trim() ||
+          "I could not interpret the request. Can you rephrase?";
+        this.emitNarratorTokens(replyText, streamId);
+        return { callSessionId, replyText, actions: [] };
+      }
+      return await this.executeToolCall(
+        decision.toolName,
+        decision.arguments ?? {},
+        input,
+        deps,
+        streamId,
+      );
+    } catch (error) {
+      this.logger.error(
+        { error: error instanceof Error ? error.message : "unknown" },
+        "conversation.session.tool_call.failed",
+      );
+      return null;
+    }
+  }
+
+  private buildModelContext(): string {
+    const state = this.sessionState.conversation ?? initialConversationState();
+    const lines = [
+      `Identity status: ${state.verification.verified ? "verified" : "unknown"}`,
+    ];
+    if (state.appointments.length) {
+      const summary = state.appointments
+        .map((appointment, index) => {
+          return `${index + 1}) ${this.formatAppointmentLabel(appointment)}`;
+        })
+        .join(" ");
+      lines.push(`Cached appointments: ${summary}`);
+    }
+    if (this.sessionState.availableSlots?.length) {
+      const summary = this.sessionState.availableSlots
+        .map((slot, index) => `${index + 1}) ${this.formatSlotLabel(slot)}`)
+        .join(" ");
+      lines.push(`Cached available slots: ${summary}`);
+    }
+    return lines.join("\n");
+  }
+
+  private normalizeToolArgs(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const state = this.sessionState.conversation ?? initialConversationState();
+    const next: Record<string, unknown> & { customerId?: string } = {
+      ...args,
+    };
+    if (!state.verification.verified || !state.verification.customerId) {
+      return next;
+    }
+    switch (toolName) {
+      case "crm.listUpcomingAppointments":
+      case "crm.getNextAppointment":
+      case "crm.getOpenInvoices":
+      case "crm.getAvailableSlots":
+      case "crm.createAppointment":
+        if (!("customerId" in next)) {
+          next.customerId = state.verification.customerId;
+        }
+        break;
+      case "crm.verifyAccount":
+        if (!("customerId" in next)) {
+          next.customerId = state.verification.customerId;
+        }
+        break;
+      default:
+        break;
+    }
+    return next;
+  }
+
+  private async executeToolCall(
+    toolName: string,
+    args: Record<string, unknown>,
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+    streamId: number,
+  ): Promise<AgentMessageOutput> {
+    const callSessionId = input.callSessionId ?? crypto.randomUUID();
+    const normalizedArgs = this.normalizeToolArgs(toolName, args) as {
+      appointmentId?: string;
+      slotId?: string;
+      reason?: string;
+      summary?: string;
+      customerId?: string;
+    };
+
+    if (toolName === "crm.cancelAppointment") {
+      const appointmentId =
+        typeof normalizedArgs.appointmentId === "string"
+          ? normalizedArgs.appointmentId
+          : null;
+      const startResult = await this.handleCancelStart({
+        callSessionId,
+        customerId:
+          this.sessionState.conversation?.verification.customerId ?? undefined,
+        phoneNumber: input.phoneNumber,
+        message: input.text,
+      });
+      if (!startResult.ok) {
+        const replyText =
+          startResult.message ?? "Cancellation is temporarily unavailable.";
+        this.emitNarratorTokens(replyText, streamId);
+        return { callSessionId, replyText, actions: [] };
+      }
+      const appointments = startResult.appointments ?? [];
+      if (!appointmentId) {
+        const replyText = await this.narrateToolResult(
+          {
+            toolName: "crm.listUpcomingAppointments",
+            result: appointments.map((appointment) => ({
+              id: appointment.id,
+              customerId:
+                this.sessionState.conversation?.verification.customerId ?? "",
+              date: appointment.date,
+              timeWindow: appointment.timeWindow,
+              addressSummary: appointment.addressSummary,
+            })),
+          },
+          {
+            input,
+            deps,
+            streamId,
+            fallback: appointments.length
+              ? this.formatAppointmentsResponse(appointments)
+              : "I couldn't find any upcoming appointments to cancel.",
+            contextHint: "Ask which appointment to cancel using the list.",
+          },
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+      if (this.sessionState.cancelWorkflowId && deps.workflows.cancel) {
+        const instance = await deps.workflows.cancel.get(
+          this.sessionState.cancelWorkflowId,
+        );
+        await instance.sendEvent({
+          type: CANCEL_WORKFLOW_EVENT_SELECT_APPOINTMENT,
+          payload: { appointmentId },
+        });
+        const state =
+          this.sessionState.conversation ?? initialConversationState();
+        this.sessionState = {
+          ...this.sessionState,
+          conversation: applyIntent(state, {
+            type: "cancel_requested",
+            appointmentId,
+          }),
+        };
+        await this.state.storage.put("state", this.sessionState);
+      }
+      const replyText = await this.narrateText(
+        input,
+        deps,
+        streamId,
+        "Confirm cancelling this appointment?",
+        "Ask the customer to confirm cancelling the selected appointment.",
+      );
+      return { callSessionId, replyText, actions: [] };
+    }
+
+    if (toolName === "crm.rescheduleAppointment") {
+      const appointmentId =
+        typeof normalizedArgs.appointmentId === "string"
+          ? normalizedArgs.appointmentId
+          : null;
+      const slotId =
+        typeof normalizedArgs.slotId === "string"
+          ? normalizedArgs.slotId
+          : null;
+      const startResult = await this.handleRescheduleStart({
+        callSessionId,
+        customerId:
+          this.sessionState.conversation?.verification.customerId ?? undefined,
+        phoneNumber: input.phoneNumber,
+        message: input.text,
+      });
+      if (!startResult.ok) {
+        const replyText =
+          startResult.message ?? "Rescheduling is temporarily unavailable.";
+        this.emitNarratorTokens(replyText, streamId);
+        return { callSessionId, replyText, actions: [] };
+      }
+      const appointments = startResult.appointments ?? [];
+      if (!appointmentId) {
+        const replyText = await this.narrateToolResult(
+          {
+            toolName: "crm.listUpcomingAppointments",
+            result: appointments.map((appointment) => ({
+              id: appointment.id,
+              customerId:
+                this.sessionState.conversation?.verification.customerId ?? "",
+              date: appointment.date,
+              timeWindow: appointment.timeWindow,
+              addressSummary: appointment.addressSummary,
+            })),
+          },
+          {
+            input,
+            deps,
+            streamId,
+            fallback: appointments.length
+              ? this.formatAppointmentsResponse(appointments)
+              : "I couldn't find any upcoming appointments to reschedule.",
+            contextHint: "Ask which appointment to reschedule using the list.",
+          },
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+      if (this.sessionState.rescheduleWorkflowId && deps.workflows.reschedule) {
+        const instance = await deps.workflows.reschedule.get(
+          this.sessionState.rescheduleWorkflowId,
+        );
+        await instance.sendEvent({
+          type: RESCHEDULE_WORKFLOW_EVENT_SELECT_APPOINTMENT,
+          payload: { appointmentId },
+        });
+      }
+      if (!slotId) {
+        const customerId =
+          this.sessionState.conversation?.verification.customerId ?? null;
+        const slots = customerId
+          ? await getAvailableSlots(deps.crm, customerId, { daysAhead: 14 })
+          : [];
+        this.sessionState = {
+          ...this.sessionState,
+          availableSlots: slots.map((slot) => ({
+            id: slot.id,
+            date: slot.date,
+            timeWindow: slot.timeWindow,
+          })),
+        };
+        await this.state.storage.put("state", this.sessionState);
+        const replyText = await this.narrateToolResult(
+          {
+            toolName: "crm.getAvailableSlots",
+            result: slots.map((slot) => ({
+              date: slot.date,
+              timeWindow: slot.timeWindow,
+            })),
+          },
+          {
+            input,
+            deps,
+            streamId,
+            fallback: slots.length
+              ? "Here are the next available times. Which one works best?"
+              : "I couldn't find any available times right now. Would you like me to check again later?",
+            contextHint:
+              "Offer available reschedule slots and ask which one they prefer.",
+          },
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+      if (this.sessionState.rescheduleWorkflowId && deps.workflows.reschedule) {
+        const instance = await deps.workflows.reschedule.get(
+          this.sessionState.rescheduleWorkflowId,
+        );
+        await instance.sendEvent({
+          type: RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
+          payload: { slotId },
+        });
+      }
+      const replyText = await this.narrateText(
+        input,
+        deps,
+        streamId,
+        "Confirm the new appointment time?",
+        "Ask the customer to confirm the new appointment time.",
+      );
+      return { callSessionId, replyText, actions: [] };
+    }
+
+    const validation = validateToolArgs(toolName as never, normalizedArgs);
+    if (!validation.ok) {
+      const replyText = await this.narrateText(
+        input,
+        deps,
+        streamId,
+        validation.message,
+        "Ask the customer for the missing details.",
+      );
+      return { callSessionId, replyText, actions: [] };
+    }
+
+    switch (toolName) {
+      case "crm.listUpcomingAppointments": {
+        const listArgs = validation.data as {
+          customerId?: string;
+          limit?: number;
+        };
+        const customerId =
+          listArgs.customerId ??
+          this.sessionState.conversation?.verification.customerId ??
+          "";
+        const limit = listArgs.limit ?? 3;
+        const appointments = await listUpcomingAppointments(
+          deps.crm,
+          customerId,
+          limit,
+        );
+        await this.updateAppointmentSummary(
+          deps,
+          callSessionId,
+          input.phoneNumber,
+          appointments,
+        );
+        const replyText = await this.narrateToolResult(
+          {
+            toolName: "crm.listUpcomingAppointments",
+            result: appointments.map((appointment) => ({
+              id: appointment.id,
+              customerId,
+              date: appointment.date,
+              timeWindow: appointment.timeWindow,
+              addressSummary: appointment.addressSummary,
+            })),
+          },
+          {
+            input,
+            deps,
+            streamId,
+            fallback: appointments.length
+              ? this.formatAppointmentsResponse(appointments)
+              : "I couldn't find any upcoming appointments. Would you like to schedule one?",
+            contextHint: "Share upcoming appointments and ask next step.",
+          },
+        );
+        const state =
+          this.sessionState.conversation ?? initialConversationState();
+        this.sessionState = {
+          ...this.sessionState,
+          conversation: applyIntent(state, {
+            type: "appointments_loaded",
+            appointments: appointments.map((appointment) => ({
+              id: appointment.id,
+              date: appointment.date,
+              timeWindow: appointment.timeWindow,
+              addressSummary: appointment.addressSummary,
+            })),
+          }),
+        };
+        await this.state.storage.put("state", this.sessionState);
+        return { callSessionId, replyText, actions: [] };
+      }
+      case "crm.getNextAppointment": {
+        const nextArgs = validation.data as { customerId?: string };
+        const customerId =
+          nextArgs.customerId ??
+          this.sessionState.conversation?.verification.customerId ??
+          "";
+        const appointment = await deps.crm.getNextAppointment(customerId);
+        const replyText = await this.narrateToolResult(
+          {
+            toolName: "crm.getNextAppointment",
+            result: appointment
+              ? {
+                  date: appointment.date,
+                  timeWindow: appointment.timeWindow,
+                  addressSummary: appointment.addressSummary,
+                  ...(appointment.addressId
+                    ? { addressId: appointment.addressId }
+                    : {}),
+                }
+              : null,
+          },
+          {
+            input,
+            deps,
+            streamId,
+            fallback: appointment
+              ? this.formatAppointmentsResponse([
+                  {
+                    id: appointment.id,
+                    date: appointment.date,
+                    timeWindow: appointment.timeWindow,
+                    addressSummary: appointment.addressSummary,
+                  },
+                ])
+              : "I couldn't find any upcoming appointments. Would you like to schedule one?",
+            contextHint: "Share the next appointment details.",
+          },
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+      case "crm.getAppointmentById": {
+        const appointmentId = (validation.data as { appointmentId: string })
+          .appointmentId;
+        const appointment = await deps.crm.getAppointmentById(appointmentId);
+        const replyText = await this.narrateToolResult(
+          {
+            toolName: "crm.getAppointmentById",
+            result: appointment
+              ? {
+                  date: appointment.date,
+                  timeWindow: appointment.timeWindow,
+                  addressSummary: appointment.addressSummary,
+                  ...(appointment.addressId
+                    ? { addressId: appointment.addressId }
+                    : {}),
+                }
+              : null,
+          },
+          {
+            input,
+            deps,
+            streamId,
+            fallback: appointment
+              ? this.formatAppointmentsResponse([
+                  {
+                    id: appointment.id,
+                    date: appointment.date,
+                    timeWindow: appointment.timeWindow,
+                    addressSummary: appointment.addressSummary,
+                  },
+                ])
+              : "I couldn't find that appointment. Want me to list upcoming appointments?",
+            contextHint:
+              "Share the appointment details or ask for a new choice.",
+          },
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+      case "crm.getOpenInvoices": {
+        const invoices = await getOpenInvoices(
+          deps.crm,
+          this.sessionState.conversation?.verification.customerId ?? "",
+        );
+        const balanceCents = invoices.reduce(
+          (sum, invoice) => sum + (invoice.balanceCents ?? 0),
+          0,
+        );
+        const balance =
+          invoices.find((invoice) => invoice.balance)?.balance ??
+          (balanceCents / 100).toFixed(2);
+        const currency = invoices.find((invoice) => invoice.currency)?.currency;
+        const replyText = await this.narrateToolResult(
+          {
+            toolName: "crm.getOpenInvoices",
+            result: {
+              balanceCents,
+              balance,
+              currency,
+              invoiceCount: invoices.length,
+            },
+          },
+          {
+            input,
+            deps,
+            streamId,
+            fallback: invoices.length
+              ? this.formatInvoicesResponse(invoices)
+              : "You're all set. I don't see any open invoices right now.",
+            contextHint: "Share the balance and invoice status.",
+          },
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+      case "crm.getAvailableSlots": {
+        const slotArgs = validation.data as {
+          customerId?: string;
+          daysAhead?: number;
+          fromDate?: string;
+          toDate?: string;
+          preference?: "morning" | "afternoon" | "any";
+        };
+        const customerId =
+          slotArgs.customerId ??
+          this.sessionState.conversation?.verification.customerId ??
+          "";
+        const slots = await getAvailableSlots(deps.crm, customerId, slotArgs);
+        this.sessionState = {
+          ...this.sessionState,
+          availableSlots: slots.map((slot) => ({
+            id: slot.id,
+            date: slot.date,
+            timeWindow: slot.timeWindow,
+          })),
+        };
+        await this.state.storage.put("state", this.sessionState);
+        const replyText = await this.narrateToolResult(
+          {
+            toolName: "crm.getAvailableSlots",
+            result: slots.map((slot) => ({
+              date: slot.date,
+              timeWindow: slot.timeWindow,
+            })),
+          },
+          {
+            input,
+            deps,
+            streamId,
+            fallback: slots.length
+              ? "Here are the next available times. Which one works best?"
+              : "I couldn't find any available times right now. Would you like me to check again later?",
+            contextHint:
+              "Offer available reschedule slots and ask which they prefer.",
+          },
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+      case "crm.getServicePolicy": {
+        const topic = (validation.data as { topic: string }).topic;
+        const policyText = await getServicePolicy(deps.crm, topic);
+        const replyText = await this.narrateToolResult(
+          {
+            toolName: "crm.getServicePolicy",
+            result: { text: policyText },
+          },
+          {
+            input,
+            deps,
+            streamId,
+            fallback: policyText,
+            contextHint: "Share the requested service policy.",
+          },
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+      case "crm.escalate":
+      case "agent.escalate": {
+        const summary =
+          typeof normalizedArgs.summary === "string"
+            ? normalizedArgs.summary
+            : input.text;
+        const result = await deps.crm.escalate({
+          reason:
+            typeof normalizedArgs.reason === "string"
+              ? normalizedArgs.reason
+              : "customer_request",
+          summary,
+          customerId:
+            this.sessionState.conversation?.verification.customerId ??
+            undefined,
+        });
+        const replyText = result.ok
+          ? await this.narrateToolResult(
+              {
+                toolName: "crm.escalate",
+                result: { ok: true, ticketId: result.ticketId },
+              },
+              {
+                input,
+                deps,
+                streamId,
+                fallback: `I've asked a specialist to reach out. Your ticket ID is ${result.ticketId ?? "on file"}.`,
+                contextHint:
+                  "Confirm that a specialist will follow up and share the ticket id if available.",
+              },
+            )
+          : "I'm sorry, I couldn't start an escalation right now. Please try again in a moment.";
+        return { callSessionId, replyText, actions: [] };
+      }
+      case "crm.createAppointment": {
+        const createArgs = validation.data as { customerId?: string };
+        const customerId =
+          createArgs.customerId ??
+          this.sessionState.conversation?.verification.customerId ??
+          "";
+        const result = await createAppointment(deps.crm, {
+          ...validation.data,
+          customerId,
+        } as {
+          customerId: string;
+          preferredWindow: string;
+          notes?: string;
+          pestType?: string;
+        });
+        const replyText = await this.narrateToolResult(
+          {
+            toolName: "crm.createAppointment",
+            result,
+          },
+          {
+            input,
+            deps,
+            streamId,
+            fallback: result.ok
+              ? "You're all set. I've scheduled that appointment."
+              : "I couldn't create that appointment yet. Want to try a different time?",
+            contextHint:
+              "Confirm the appointment was scheduled or ask for another time.",
+          },
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+      case "agent.fallback": {
+        const replyText = await this.narrateText(
+          input,
+          deps,
+          streamId,
+          "I can help with appointments, billing, or service questions. What can I do for you?",
+          "Politely redirect to supported topics.",
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+      default: {
+        const replyText = await this.narrateText(
+          input,
+          deps,
+          streamId,
+          "I can help with appointments, billing, or service questions. What can I do for you?",
+          "Politely redirect to supported topics.",
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+    }
   }
 
   private parseConfirmation(value: string): boolean | null {
