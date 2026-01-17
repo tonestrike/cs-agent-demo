@@ -14,6 +14,11 @@ import {
   validateToolArgs,
   validateToolResult,
 } from "../models/tool-definitions";
+import {
+  DEFAULT_TOOL_STATUS_HINT,
+  DEFAULT_TOOL_STATUS_MESSAGE,
+  getToolStatusConfig,
+} from "../models/tool-status";
 import type {
   AgentModelOutput,
   ModelAdapter,
@@ -28,11 +33,6 @@ import {
   RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
   VERIFY_WORKFLOW_EVENT_ZIP,
 } from "../workflows/constants";
-import {
-  DEFAULT_TOOL_STATUS_MESSAGE,
-  DEFAULT_TOOL_STATUS_HINT,
-  getToolStatusConfig,
-} from "../models/tool-status";
 import {
   cancelAppointment as cancelAppointmentUseCase,
   rescheduleAppointment as rescheduleAppointmentUseCase,
