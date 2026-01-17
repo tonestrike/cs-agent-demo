@@ -198,6 +198,20 @@ export class ConversationSession {
   private turnCounter = 0;
   private statusSequence = 0;
   private activeStatusText: string | null = null;
+  private turnModelCalls: Array<{
+    kind: "generate" | "respond" | "status";
+    provider: string;
+    modelId: string | null;
+  }> = [];
+  private turnDecision: {
+    decisionType: string;
+    toolName?: string | null;
+    argKeys?: string[];
+    acknowledgementLength?: number;
+    finalLength?: number;
+  } | null = null;
+  private turnToolCalls: Array<{ toolName: string; argKeys: string[] }> = [];
+  private turnStatusTexts: string[] = [];
   private turnMetrics: {
     callSessionId: string;
     startedAt: number;
@@ -248,6 +262,10 @@ export class ConversationSession {
 
     if (request.method === "POST" && url.pathname.endsWith("/rtk-token")) {
       return this.handleRealtimeTokenRequest(request);
+    }
+
+    if (request.method === "GET" && url.pathname.endsWith("/summary")) {
+      return this.handleSummaryRequest(request);
     }
 
     return new Response("Not found", { status: 404 });
@@ -438,6 +456,33 @@ export class ConversationSession {
     });
   }
 
+  private async handleSummaryRequest(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const callSessionId =
+      url.searchParams.get("callSessionId") ??
+      this.sessionState.lastCallSessionId ??
+      null;
+    if (!callSessionId) {
+      return Response.json(
+        { ok: false, error: "Call session id required." },
+        { status: 400 },
+      );
+    }
+    const deps = createDependencies(this.env);
+    const record = await deps.calls.get(callSessionId);
+    if (!record) {
+      return Response.json(
+        { ok: false, error: "Conversation not found." },
+        { status: 404 },
+      );
+    }
+    const summary = this.formatConversationSummary(
+      record.session,
+      record.turns,
+    );
+    return Response.json({ ok: true, callSessionId, summary });
+  }
+
   private async handleRealtimeTokenRequest(
     request: Request,
   ): Promise<Response> {
@@ -566,6 +611,10 @@ export class ConversationSession {
     this.activeMessageId = crypto.randomUUID();
     this.statusSequence = 0;
     this.activeStatusText = null;
+    this.turnModelCalls = [];
+    this.turnDecision = null;
+    this.turnToolCalls = [];
+    this.turnStatusTexts = [];
     this.canceledStreamIds.delete(streamId);
     await this.setSpeaking(true);
     let lastStatus = "";
@@ -634,7 +683,8 @@ export class ConversationSession {
           verificationResponse.callSessionId,
           deps,
         );
-        await this.recordTurns(deps, activeInput, verificationResponse);
+        const meta = this.buildTurnMeta(callSessionId);
+        await this.recordTurns(deps, activeInput, verificationResponse, meta);
         return verificationResponse;
       }
 
@@ -648,7 +698,8 @@ export class ConversationSession {
         this.emitEvent({ type: "final", data: selectionResponse });
         await this.updateSessionState(activeInput, selectionResponse);
         await this.syncConversationState(selectionResponse.callSessionId, deps);
-        await this.recordTurns(deps, activeInput, selectionResponse);
+        const meta = this.buildTurnMeta(callSessionId);
+        await this.recordTurns(deps, activeInput, selectionResponse, meta);
         return selectionResponse;
       }
       const toolResponse = await this.handleToolCallingFlow(
@@ -660,7 +711,8 @@ export class ConversationSession {
         this.emitEvent({ type: "final", data: toolResponse });
         await this.updateSessionState(activeInput, toolResponse);
         await this.syncConversationState(toolResponse.callSessionId, deps);
-        await this.recordTurns(deps, activeInput, toolResponse);
+        const meta = this.buildTurnMeta(callSessionId);
+        await this.recordTurns(deps, activeInput, toolResponse, meta);
         return toolResponse;
       }
       const response = await handleAgentMessage(deps, input, undefined, {
@@ -690,6 +742,8 @@ export class ConversationSession {
         this.emitEvent({ type: "final", data: response });
         await this.updateSessionState(input, response);
         await this.syncConversationState(response.callSessionId, deps);
+        const meta = this.buildTurnMeta(callSessionId);
+        await this.recordTurns(deps, activeInput, response, meta);
       }
       return response;
     } catch (error) {
@@ -1046,6 +1100,7 @@ export class ConversationSession {
     deps: ReturnType<typeof createDependencies>,
     input: AgentMessageInput,
     response: AgentMessageOutput,
+    meta?: Record<string, unknown>,
   ): Promise<void> {
     const callSessionId = input.callSessionId ?? response.callSessionId;
     if (!callSessionId) {
@@ -1061,7 +1116,7 @@ export class ConversationSession {
         ts: nowIso,
         speaker: "customer",
         text: userText,
-        meta: {},
+        meta: { turnId: this.activeTurnId },
       });
     }
     const agentText = response.replyText.trim();
@@ -1072,7 +1127,7 @@ export class ConversationSession {
         ts: nowIso,
         speaker: "agent",
         text: agentText,
-        meta: {},
+        meta: meta ?? {},
       });
     }
   }
@@ -1442,7 +1497,10 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: slots.length
-              ? "Here are the next available times. Is this for the same address we have on file?"
+              ? this.formatAvailableSlotsResponse(
+                  slots,
+                  "Is this for the same address we have on file?",
+                )
               : "I couldn't find any available times right now. Would you like me to check again later?",
             contextHint:
               "Offer available appointment times and confirm whether the on-file address is correct.",
@@ -1752,6 +1810,33 @@ export class ConversationSession {
     }
 
     if (this.sessionState.rescheduleWorkflowId) {
+      if (availableSlots.length && this.isSlotListRequest(text)) {
+        const replyText = await this.narrateToolResult(
+          {
+            toolName: "crm.getAvailableSlots",
+            result: availableSlots.map((slot) => ({
+              date: slot.date,
+              timeWindow: slot.timeWindow,
+            })),
+          },
+          {
+            input,
+            deps,
+            streamId,
+            fallback: this.formatAvailableSlotsResponse(
+              availableSlots,
+              "Which one works best?",
+            ),
+            contextHint:
+              "Share the available times and ask which slot they prefer.",
+          },
+        );
+        return {
+          callSessionId,
+          replyText,
+          actions: [],
+        };
+      }
       if (resolvedAppointmentId) {
         const instance = await deps.workflows.reschedule?.get(
           this.sessionState.rescheduleWorkflowId,
@@ -1797,7 +1882,10 @@ export class ConversationSession {
               deps,
               streamId,
               fallback: slots.length
-                ? "Here are the next available times. Which one works best?"
+                ? this.formatAvailableSlotsResponse(
+                    slots,
+                    "Which one works best?",
+                  )
                 : "I couldn't find any available times right now. Would you like me to check again later?",
               contextHint:
                 "Offer available reschedule slots and ask which one they prefer.",
@@ -1895,8 +1983,10 @@ export class ConversationSession {
             input,
             deps,
             streamId,
-            fallback:
-              "Here are the next available times. Which one works best?",
+            fallback: this.formatAvailableSlotsResponse(
+              availableSlots,
+              "Which one works best?",
+            ),
             contextHint:
               "Offer available reschedule slots and ask which one they prefer.",
           },
@@ -1954,6 +2044,7 @@ export class ConversationSession {
     const context = this.buildModelContext();
     const messages = await this.getRecentMessages(deps, callSessionId);
     try {
+      this.recordModelCall("generate", model);
       this.logger.info(
         {
           callSessionId,
@@ -1998,6 +2089,19 @@ export class ConversationSession {
         },
         "conversation.session.generate.output",
       );
+      this.turnDecision = {
+        decisionType: decision.type,
+        toolName: "toolName" in decision ? decision.toolName : null,
+        argKeys:
+          decision.type === "tool_call"
+            ? Object.keys(decision.arguments ?? {})
+            : [],
+        acknowledgementLength:
+          "acknowledgement" in decision && decision.acknowledgement
+            ? decision.acknowledgement.length
+            : 0,
+        finalLength: decision.type === "final" ? decision.text.length : 0,
+      };
       if (decision.type === "final") {
         const inferredTool = this.inferToolFromText(input.text);
         if (inferredTool) {
@@ -2171,6 +2275,15 @@ export class ConversationSession {
     return /\b(available|availability|openings|times available)\b/i.test(text);
   }
 
+  private isSlotListRequest(text: string): boolean {
+    return (
+      /\b(what|which)\s+times\b/i.test(text) ||
+      /\b(show|list|give)\s+(me\s+)?(the\s+)?times\b/i.test(text) ||
+      /\b(available|availability|openings|times available)\b/i.test(text) ||
+      /\b(didn'?t|did not)\b.*\btimes\b/i.test(text)
+    );
+  }
+
   private shouldPreAcknowledge(text: string): boolean {
     return /\b(appointment|appointments|reschedule|cancel|schedule|book|billing|invoice|balance|payment|pay|charge|policy)\b/i.test(
       text,
@@ -2283,6 +2396,10 @@ export class ConversationSession {
       summary?: string;
       customerId?: string;
     };
+    this.turnToolCalls.push({
+      toolName,
+      argKeys: Object.keys(normalizedArgs ?? {}),
+    });
     const toolAck = toolAcknowledgementSchema.safeParse(toolName);
     const activeAcknowledgementText =
       acknowledgementText?.trim() ||
@@ -2498,7 +2615,10 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: slots.length
-              ? "Here are the next available times. Which one works best?"
+              ? this.formatAvailableSlotsResponse(
+                  slots,
+                  "Which one works best?",
+                )
               : "I couldn't find any available times right now. Would you like me to check again later?",
             contextHint:
               "Offer available reschedule slots and ask which one they prefer.",
@@ -2784,7 +2904,10 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: slots.length
-              ? "Here are the next available times. Which one works best?"
+              ? this.formatAvailableSlotsResponse(
+                  slots,
+                  "Which one works best?",
+                )
               : "I couldn't find any available times right now. Would you like me to check again later?",
             contextHint:
               "Offer available times and confirm whether the on-file address is correct.",
@@ -3083,6 +3206,7 @@ export class ConversationSession {
       messages: recentMessages,
       ...toolResult,
     };
+    this.recordModelCall("respond", model);
     this.logger.info(
       {
         callSessionId,
@@ -3318,6 +3442,43 @@ export class ConversationSession {
     }
   }
 
+  private recordModelCall(
+    kind: "generate" | "respond" | "status",
+    model: { name: string; modelId?: string | null },
+  ) {
+    this.turnModelCalls.push({
+      kind,
+      provider: model.name,
+      modelId: model.modelId ?? null,
+    });
+  }
+
+  private buildTurnMeta(callSessionId: string): Record<string, unknown> {
+    const metrics = this.turnMetrics;
+    const firstTokenMs =
+      metrics?.firstTokenAt === null
+        ? null
+        : (metrics?.firstTokenAt ?? 0) - metrics.startedAt;
+    const firstStatusMs =
+      metrics?.firstStatusAt === null
+        ? null
+        : (metrics?.firstStatusAt ?? 0) - metrics.startedAt;
+    return {
+      callSessionId,
+      turnId: this.activeTurnId,
+      streamId: this.activeStreamId,
+      messageId: this.activeMessageId,
+      modelCalls: [...this.turnModelCalls],
+      decision: this.turnDecision,
+      toolCalls: [...this.turnToolCalls],
+      statusTexts: [...this.turnStatusTexts],
+      latency: {
+        firstTokenMs,
+        firstStatusMs,
+      },
+    };
+  }
+
   private async emitNarratorStatus(
     input: AgentMessageInput,
     deps: ReturnType<typeof createDependencies>,
@@ -3338,6 +3499,7 @@ export class ConversationSession {
     const context = this.buildModelContext();
     let statusText = fallback;
     try {
+      this.recordModelCall("status", model);
       this.logger.info(
         {
           callSessionId,
@@ -3377,6 +3539,7 @@ export class ConversationSession {
     }
     this.activeStatusText = trimmed;
     this.statusSequence += 1;
+    this.turnStatusTexts = [...this.turnStatusTexts, trimmed];
     this.emitEvent({
       type: "status",
       text: trimmed,
@@ -3418,6 +3581,21 @@ export class ConversationSession {
     return `${slot.date} ${slot.timeWindow}`;
   }
 
+  private formatAvailableSlotsResponse(
+    slots: Array<{ date: string; timeWindow: string }>,
+    prompt?: string,
+  ): string {
+    const intro =
+      slots.length === 1
+        ? "Here is the next available time:"
+        : "Here are the next available times:";
+    const lines = slots.map((slot, index) => {
+      return `${index + 1}) ${this.formatSlotLabel(slot)}`;
+    });
+    const base = [intro, ...lines].join(" ");
+    return prompt ? `${base} ${prompt}` : base;
+  }
+
   private formatInvoicesResponse(
     invoices: Array<{
       id: string;
@@ -3442,6 +3620,83 @@ export class ConversationSession {
       return `${index + 1}) ${amount} due ${invoice.dueDate}${status}`;
     });
     return [intro, ...lines].join(" ");
+  }
+
+  private formatConversationSummary(
+    session: {
+      id: string;
+      startedAt: string;
+      endedAt: string | null;
+      phoneE164: string;
+      status: string;
+      transport: string;
+      summary: string | null;
+      callSummary: string | null;
+      customer?: {
+        id: string;
+        displayName: string;
+        phoneE164: string;
+        addressSummary: string | null;
+        zipCode?: string | null;
+      };
+    },
+    turns: Array<{
+      id: string;
+      ts: string;
+      speaker: string;
+      text: string;
+      meta?: Record<string, unknown>;
+    }>,
+  ): string {
+    const lines: string[] = [];
+    lines.push(`# Conversation ${session.id}`);
+    lines.push("");
+    lines.push("## Session");
+    lines.push(`- Phone: ${session.phoneE164}`);
+    lines.push(`- Status: ${session.status}`);
+    lines.push(`- Transport: ${session.transport}`);
+    lines.push(`- Started: ${session.startedAt}`);
+    lines.push(`- Ended: ${session.endedAt ?? "in progress"}`);
+    if (session.customer) {
+      lines.push(
+        `- Customer: ${session.customer.displayName} (${session.customer.phoneE164})`,
+      );
+      if (session.customer.addressSummary) {
+        lines.push(`- Address: ${session.customer.addressSummary}`);
+      }
+      if (session.customer.zipCode) {
+        lines.push(`- ZIP: ${session.customer.zipCode}`);
+      }
+    }
+    if (session.callSummary) {
+      lines.push("");
+      lines.push("## Call summary");
+      lines.push(session.callSummary);
+    }
+    if (session.summary) {
+      lines.push("");
+      lines.push("## Raw session summary");
+      lines.push("```json");
+      lines.push(session.summary);
+      lines.push("```");
+    }
+    lines.push("");
+    lines.push("## Turns");
+    turns.forEach((turn, index) => {
+      const role = turn.speaker === "agent" ? "Assistant" : "Customer";
+      lines.push("");
+      lines.push(`### Turn ${index + 1} (${role})`);
+      lines.push(`- Time: ${turn.ts}`);
+      lines.push(`- Text: ${turn.text}`);
+      if (turn.meta && Object.keys(turn.meta).length > 0) {
+        lines.push("");
+        lines.push("#### Meta");
+        lines.push("```json");
+        lines.push(JSON.stringify(turn.meta, null, 2));
+        lines.push("```");
+      }
+    });
+    return lines.join("\n");
   }
 
   private async handleBargeIn(): Promise<void> {

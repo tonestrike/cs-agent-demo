@@ -55,7 +55,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const conversationMatch = url.pathname.match(
-      /^\/api\/conversations\/([^/]+)\/(socket|message|resync|rtk-token)$/,
+      /^\/api\/conversations\/([^/]+)\/(socket|message|resync|rtk-token|summary)$/,
     );
     if (conversationMatch) {
       if (request.method === "OPTIONS") {
@@ -88,7 +88,7 @@ export default {
       if (action === "socket") {
         return stub.fetch(request);
       }
-      const target = `https://conversation-session/${action}`;
+      const target = `https://conversation-session/${action}?callSessionId=${conversationId}`;
       const response = await stub.fetch(new Request(target, request));
       return withCors(response);
     }

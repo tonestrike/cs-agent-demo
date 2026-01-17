@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { RTKClientOptions } from "@cloudflare/realtimekit";
 import type { Meeting } from "@cloudflare/realtimekit-ui";
 import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
 import type { Customer } from "../types";
@@ -59,7 +60,7 @@ declare global {
       init?: (options: {
         authToken: string;
         defaults?: { audio?: boolean; video?: boolean };
-        modules?: { chat?: boolean; participant?: boolean };
+        modules?: RTKClientOptions["modules"];
       }) => Promise<RealtimeKitClient>;
     };
   }
