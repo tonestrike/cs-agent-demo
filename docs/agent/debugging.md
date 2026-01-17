@@ -35,6 +35,7 @@ Triage steps:
   - Single session: `wrangler d1 execute pestcall_local --remote --config apps/worker/wrangler.toml --command "SELECT * FROM call_sessions WHERE id = '<callSessionId>';"`.
   - Turns: `wrangler d1 execute pestcall_local --remote --config apps/worker/wrangler.toml --command "SELECT speaker, ts, text, meta_json FROM call_turns WHERE call_session_id = '<callSessionId>' ORDER BY ts;"`.
   - Local dev data: drop `--remote` to hit the Miniflare DB (`wrangler dev --local` uses the same `pestcall_local` name). Wrangler stores the local SQLite under `.wrangler/state` if you need to open it directly.
+  - Each agent turn’s `meta_json` now includes `modelMessages` and `modelContext` captured right before the model generate call, so you can verify the exact conversation history the model saw.
 - **CRM cache**: `customers_cache` caches phone/name/ZIP lookups. Join via the session: `SELECT * FROM customers_cache WHERE id = (SELECT customer_cache_id FROM call_sessions WHERE id = '<callSessionId>');`.
 
 ## Artifacts to capture for investigations

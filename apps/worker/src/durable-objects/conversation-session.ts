@@ -59,6 +59,7 @@ import {
   RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
 } from "../workflows/constants";
 
+import { buildModelContext } from "./conversation-session/context";
 // Extracted modules
 import {
   type ClientMessage,
@@ -67,17 +68,16 @@ import {
   MAX_EVENT_BUFFER,
   type SessionState,
   evaluateActionPlan,
-  formatAppointmentLabel,
   formatAppointmentsResponse,
   formatAvailableSlotsResponse,
   formatConversationSummary,
   formatInvoicesResponse,
-  formatSlotLabel,
   getActionPreconditions,
   normalizeToolArgs,
   sanitizeNarratorOutput,
   toolAcknowledgementSchema,
 } from "./conversation-session/index";
+import { detectActionIntent } from "./conversation-session/intent";
 
 const INTERPRET_FALLBACK_TEXT =
   "I could not interpret the request. Can you rephrase? I can also connect you with a person.";
@@ -103,9 +103,10 @@ export class ConversationSession {
     modelId: string | null;
   }> = [];
   private turnModelContext: string | null = null;
-  private turnModelMessages:
-    | Array<{ role: "user" | "assistant"; content: string }>
-    | null = null;
+  private turnModelMessages: Array<{
+    role: "user" | "assistant";
+    content: string;
+  }> | null = null;
   private turnDecision: {
     decisionType: string;
     toolName?: string | null;
@@ -1095,66 +1096,7 @@ export class ConversationSession {
       addressSummary: string;
     }>;
   }> {
-    const deps = createDependencies(this.env);
-    const callSessionId =
-      input.callSessionId ?? this.sessionState.lastCallSessionId;
-    if (!callSessionId) {
-      return { ok: false, message: "No active session found." };
-    }
-    const phoneNumber =
-      input.phoneNumber ?? this.sessionState.lastPhoneNumber ?? null;
-    if (!phoneNumber) {
-      return { ok: false, message: "Phone number is required to cancel." };
-    }
-    await this.ensureCallSession(deps, callSessionId, phoneNumber);
-    if (!deps.workflows.cancel) {
-      return {
-        ok: false,
-        message: "Cancellation is temporarily unavailable.",
-      };
-    }
-    const customerId =
-      input.customerId ??
-      this.sessionState.conversation?.verification.customerId ??
-      null;
-    if (!customerId) {
-      return {
-        ok: false,
-        message: "Customer verification is required before cancelling.",
-      };
-    }
-    // Emit status immediately to give user feedback while we fetch data
-    this.emitEvent({
-      type: "status",
-      text: "Sure - I'm pulling your upcoming appointments now so we can pick the right one to cancel.",
-    });
-    const instance = await deps.workflows.cancel.create({
-      params: {
-        callSessionId,
-        customerId,
-        intent: "cancel",
-        message: input.message ?? "Cancel my appointment.",
-      },
-    });
-    const appointments = await listUpcomingAppointments(
-      deps.crm,
-      customerId,
-      3,
-    );
-    await this.updateAppointmentSummary(
-      deps,
-      callSessionId,
-      phoneNumber,
-      appointments,
-    );
-    this.sessionState = {
-      ...this.sessionState,
-      cancelWorkflowId: instance.id,
-      availableSlots: undefined,
-    };
-    await this.state.storage.put("state", this.sessionState);
-    await this.syncConversationState(callSessionId, deps);
-    return { ok: true, message: instance.id, appointments };
+    return await this.startWorkflow("cancel", input);
   }
 
   private async handleRescheduleStart(input: {
@@ -1163,6 +1105,27 @@ export class ConversationSession {
     phoneNumber?: string;
     message?: string;
   }): Promise<{
+    ok: boolean;
+    message?: string;
+    appointments?: Array<{
+      id: string;
+      date: string;
+      timeWindow: string;
+      addressSummary: string;
+    }>;
+  }> {
+    return await this.startWorkflow("reschedule", input);
+  }
+
+  private async startWorkflow(
+    kind: "cancel" | "reschedule",
+    input: {
+      callSessionId?: string;
+      customerId?: string;
+      phoneNumber?: string;
+      message?: string;
+    },
+  ): Promise<{
     ok: boolean;
     message?: string;
     appointments?: Array<{
@@ -1181,13 +1144,24 @@ export class ConversationSession {
     const phoneNumber =
       input.phoneNumber ?? this.sessionState.lastPhoneNumber ?? null;
     if (!phoneNumber) {
-      return { ok: false, message: "Phone number is required to reschedule." };
-    }
-    await this.ensureCallSession(deps, callSessionId, phoneNumber);
-    if (!deps.workflows.reschedule) {
       return {
         ok: false,
-        message: "Rescheduling is temporarily unavailable.",
+        message:
+          kind === "cancel"
+            ? "Phone number is required to cancel."
+            : "Phone number is required to reschedule.",
+      };
+    }
+    await this.ensureCallSession(deps, callSessionId, phoneNumber);
+    const workflowBinding =
+      kind === "cancel" ? deps.workflows.cancel : deps.workflows.reschedule;
+    if (!workflowBinding) {
+      return {
+        ok: false,
+        message:
+          kind === "cancel"
+            ? "Cancellation is temporarily unavailable."
+            : "Rescheduling is temporarily unavailable.",
       };
     }
     const customerId =
@@ -1197,20 +1171,30 @@ export class ConversationSession {
     if (!customerId) {
       return {
         ok: false,
-        message: "Customer verification is required before rescheduling.",
+        message:
+          kind === "cancel"
+            ? "Customer verification is required before cancelling."
+            : "Customer verification is required before rescheduling.",
       };
     }
     // Emit status immediately to give user feedback while we fetch data
     this.emitEvent({
       type: "status",
-      text: "Sure - I'm pulling your upcoming appointments now so we can pick the right one to reschedule.",
+      text:
+        kind === "cancel"
+          ? "Sure - I'm pulling your upcoming appointments now so we can pick the right one to cancel."
+          : "Sure - I'm pulling your upcoming appointments now so we can pick the right one to reschedule.",
     });
-    const instance = await deps.workflows.reschedule.create({
+    const instance = await workflowBinding.create({
       params: {
         callSessionId,
         customerId,
-        intent: "reschedule",
-        message: input.message ?? "Reschedule my appointment.",
+        intent: kind,
+        message:
+          input.message ??
+          (kind === "cancel"
+            ? "Cancel my appointment."
+            : "Reschedule my appointment."),
       },
     });
     const appointments = await listUpcomingAppointments(
@@ -1226,7 +1210,12 @@ export class ConversationSession {
     );
     this.sessionState = {
       ...this.sessionState,
-      rescheduleWorkflowId: instance.id,
+      rescheduleWorkflowId:
+        kind === "reschedule"
+          ? instance.id
+          : this.sessionState.rescheduleWorkflowId,
+      cancelWorkflowId:
+        kind === "cancel" ? instance.id : this.sessionState.cancelWorkflowId,
       availableSlots: undefined,
     };
     await this.state.storage.put("state", this.sessionState);
@@ -1299,13 +1288,12 @@ export class ConversationSession {
     const turns = await deps.calls.getRecentTurns({ callSessionId, limit: 10 });
     const messages = turns
       .filter((turn) => {
-        // Include customer, agent, and status messages (status is what the bot said as acknowledgement)
-        // Status messages are stored as speaker: "system" with kind: "status"
+        // Include customer and agent messages, but drop system/status messages
+        // for the tool model to avoid “already answered” bias.
         const kind = (turn.meta as { kind?: string } | undefined)?.kind;
         const isStatus = kind === "status";
-        // Include: customer messages, agent messages, and status messages
         return (
-          turn.speaker === "customer" || turn.speaker === "agent" || isStatus
+          (turn.speaker === "customer" || turn.speaker === "agent") && !isStatus
         );
       })
       .map((turn) => {
@@ -1411,7 +1399,7 @@ export class ConversationSession {
           addressSummary: "Unknown",
         },
         hasContext: Boolean(input.callSessionId),
-        context: this.buildModelContext(),
+        context: buildModelContext(this.sessionState),
         messages: await this.getRecentMessages(
           deps,
           input.callSessionId ?? crypto.randomUUID(),
@@ -1434,6 +1422,11 @@ export class ConversationSession {
     deps: ReturnType<typeof createDependencies>,
     streamId: number,
   ): Promise<AgentMessageOutput | null> {
+    // Verification flow:
+    // 1) If already verified: skip.
+    // 2) Lookup customer by phone; if no single match or no ZIP in input: ask for ZIP and stash pending intent.
+    // 3) If ZIP present and customer found: verify; on success, mark verified, clear pending intent, and continue.
+    //    On failure, ask for ZIP again with an invalid ZIP prompt.
     const state = this.sessionState.conversation ?? initialConversationState();
     if (state.verification.verified) {
       return null;
@@ -1493,13 +1486,6 @@ export class ConversationSession {
       };
       return response;
     }
-    await this.emitNarratorStatus(
-      input,
-      deps,
-      streamId,
-      "Thanks, I'll check that ZIP code now.",
-      "Acknowledge that you're checking the ZIP code in a warm, conversational tone.",
-    );
     const ok = await verifyAccount(deps.crm, customer.id, zipCode);
     if (ok) {
       await this.updateIdentitySummary(
@@ -1514,6 +1500,8 @@ export class ConversationSession {
           type: "verified",
           customerId: customer.id,
         }),
+        lastVerifiedAt: Date.now(),
+        lastVerifiedTurnId: this.activeTurnId ?? undefined,
         pendingIntent: undefined,
       };
       await this.state.storage.put("state", this.sessionState);
@@ -1580,14 +1568,6 @@ export class ConversationSession {
     };
     await this.state.storage.put("state", this.sessionState);
     return response;
-  }
-
-  // NOTE: Removed regex-based intent detection. The model will determine
-  // intents through tool calls after verification is complete.
-  private inferPendingIntent(
-    _text: string,
-  ): SessionState["pendingIntent"] | null {
-    return null;
   }
 
   private async handlePendingIntent(
@@ -1911,12 +1891,14 @@ export class ConversationSession {
       this.sessionState.conversation?.appointments ?? ([] as const);
     const appointmentOptions = appointments.map((appointment) => ({
       id: appointment.id,
-      label: formatAppointmentLabel(appointment),
+      label: appointment.addressSummary
+        ? `${appointment.date} ${appointment.timeWindow} @ ${appointment.addressSummary}`
+        : `${appointment.date} ${appointment.timeWindow}`,
     }));
     const availableSlots = this.sessionState.availableSlots ?? [];
     const slotOptions = availableSlots.map((slot) => ({
       id: slot.id,
-      label: formatSlotLabel(slot),
+      label: `${slot.date} ${slot.timeWindow}`,
     }));
     const confirmationOptions = [
       { id: "confirm", label: "Yes, confirm" },
@@ -2305,6 +2287,33 @@ export class ConversationSession {
     if (!state.verification.verified || !state.verification.customerId) {
       return null;
     }
+    // Guard: if the user only sent a ZIP (or nothing) immediately after verification,
+    // bypass the tool model and ask what they want to do next. This avoids empty finals
+    // when there's no intent signal beyond the ZIP.
+    const rawText = input.text?.trim() ?? "";
+    const isBareZip = /^\d{5}(?:-\d{4})?$/.test(rawText);
+    const hasWorkflow =
+      Boolean(this.sessionState.pendingIntent) ||
+      Boolean(this.sessionState.rescheduleWorkflowId) ||
+      Boolean(this.sessionState.cancelWorkflowId);
+    const justVerified =
+      this.sessionState.lastVerifiedTurnId !== undefined &&
+      this.sessionState.lastVerifiedTurnId === this.activeTurnId;
+    if (justVerified && !hasWorkflow && (rawText.length === 0 || isBareZip)) {
+      const callSessionId = input.callSessionId ?? crypto.randomUUID();
+      const replyText = await this.narrateText(
+        input,
+        deps,
+        streamId,
+        "You're all set. What would you like to do next?",
+        "You're already verified; offer help or ask what they want to do next.",
+      );
+      return {
+        callSessionId,
+        replyText,
+        actions: [],
+      };
+    }
     const callSessionId = input.callSessionId ?? crypto.randomUUID();
     // Parallelize pre-work: model adapter, customer context, and recent messages
     const preWorkStart = Date.now();
@@ -2321,7 +2330,25 @@ export class ConversationSession {
       this.turnTimings.customerContextMs = preWorkMs;
       this.turnTimings.recentMessagesMs = preWorkMs;
     }
-    const context = this.buildModelContext();
+    const context = buildModelContext(this.sessionState);
+    // If intent is obvious, handle it deterministically before calling the tool model.
+    const quickIntent = detectActionIntent(input.text);
+    if (quickIntent) {
+      const intentReply = await this.handlePendingIntent(
+        quickIntent,
+        { ...input, callSessionId },
+        deps,
+        streamId,
+      );
+      if (intentReply) {
+        return {
+          callSessionId,
+          replyText: intentReply,
+          actions: [],
+          debug: { reason: "intent_handled_pre_model" },
+        };
+      }
+    }
     this.turnModelMessages = messages;
     this.turnModelContext = context;
     try {
@@ -2391,7 +2418,24 @@ export class ConversationSession {
         finalLength: decision.type === "final" ? decision.text.length : 0,
       };
       if (decision.type === "final") {
-        // Model decided not to call any tools - respect its decision
+        // If intent is clearly actionable, do not accept a tool-less final.
+        const derivedIntent = detectActionIntent(input.text);
+        if (derivedIntent) {
+          const intentReply = await this.handlePendingIntent(
+            derivedIntent,
+            { ...input, callSessionId },
+            deps,
+            streamId,
+          );
+          if (intentReply) {
+            return {
+              callSessionId,
+              replyText: intentReply,
+              actions: [],
+              debug: { reason: "intent_forced_after_final" },
+            };
+          }
+        }
         const decisionText = decision.text.trim();
         const replyText = decisionText || INTERPRET_FALLBACK_TEXT;
         if (!decisionText) {
@@ -2563,28 +2607,6 @@ export class ConversationSession {
       );
       return null;
     }
-  }
-
-  private buildModelContext(): string {
-    const state = this.sessionState.conversation ?? initialConversationState();
-    const lines = [
-      `Identity status: ${state.verification.verified ? "verified" : "unknown"}`,
-    ];
-    if (state.appointments.length) {
-      const summary = state.appointments
-        .map((appointment, index) => {
-          return `${index + 1}) ${formatAppointmentLabel(appointment)}`;
-        })
-        .join(" ");
-      lines.push(`Cached appointments: ${summary}`);
-    }
-    if (this.sessionState.availableSlots?.length) {
-      const summary = this.sessionState.availableSlots
-        .map((slot, index) => `${index + 1}) ${formatSlotLabel(slot)}`)
-        .join(" ");
-      lines.push(`Cached available slots: ${summary}`);
-    }
-    return lines.join("\n");
   }
 
   private async executeToolCall(
@@ -4263,7 +4285,7 @@ export class ConversationSession {
       if (this.turnMetrics?.firstTokenAt !== null || this.statusSequence > 0) {
         return;
       }
-      const context = this.buildModelContext();
+      const context = buildModelContext(this.sessionState);
       this.recordModelCall("status", model);
       this.logger.info(
         {
@@ -4330,7 +4352,7 @@ export class ConversationSession {
     const messages = callSessionId
       ? await this.getRecentMessages(deps, callSessionId)
       : [];
-    const context = this.buildModelContext();
+    const context = buildModelContext(this.sessionState);
     let statusText = fallback;
     try {
       const statusStart = Date.now();
