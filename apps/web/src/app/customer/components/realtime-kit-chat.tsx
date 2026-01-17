@@ -12,6 +12,7 @@ type RealtimeKitClient = Meeting & {
   leave: () => Promise<void>;
   self?: { userId?: string };
   chat?: RealtimeKitChat;
+  participants?: RealtimeKitParticipants;
   ai?: {
     on?: (
       event: "transcript",
@@ -46,6 +47,14 @@ type RealtimeKitChat = {
   ) => void;
 };
 
+type RealtimeKitParticipants = {
+  addListener: (event: string, handler: (...args: unknown[]) => void) => void;
+  removeListener: (
+    event: string,
+    handler: (...args: unknown[]) => void,
+  ) => void;
+};
+
 type RealtimeKitTranscriptEvent = {
   id?: string;
   userId?: string;
@@ -61,7 +70,7 @@ declare global {
         authToken: string;
         defaults?: { audio?: boolean; video?: boolean };
         modules?: RTKClientOptions["modules"];
-      }) => Promise<RealtimeKitClient>;
+      }) => Promise<unknown>;
     };
   }
 }
@@ -97,12 +106,14 @@ export function RealtimeKitChatPanel({
     status: "Waiting for session...",
   });
   const [meeting, setMeeting] = useState<RealtimeKitClient | null>(null);
+  const [meetingReady, setMeetingReady] = useState(false);
   const meetingRef = useRef<RealtimeKitClient | null>(null);
   const chatElementRef = useRef<HTMLRtkChatElement | null>(null);
   const micToggleRef = useRef<HTMLRtkMicToggleElement | null>(null);
   const sentMessageIds = useRef(new Set<string>());
   const retryTimerRef = useRef<number | null>(null);
   const chatReadyTimerRef = useRef<number | null>(null);
+  const uiReadyTimerRef = useRef<number | null>(null);
   const assistantBuffersRef = useRef(new Map<string, string>());
   const ttsEnabledRef = useRef(enableTts);
   const [partialTranscript, setPartialTranscript] = useState<string | null>(
@@ -168,6 +179,7 @@ export function RealtimeKitChatPanel({
         meetingRef.current = null;
       }
       setMeeting(null);
+      setMeetingReady(false);
       if (retryTimerRef.current) {
         window.clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
@@ -175,6 +187,10 @@ export function RealtimeKitChatPanel({
       if (chatReadyTimerRef.current) {
         window.clearTimeout(chatReadyTimerRef.current);
         chatReadyTimerRef.current = null;
+      }
+      if (uiReadyTimerRef.current) {
+        window.clearTimeout(uiReadyTimerRef.current);
+        uiReadyTimerRef.current = null;
       }
     };
 
@@ -213,11 +229,11 @@ export function RealtimeKitChatPanel({
         throw new Error("RealtimeKit SDK unavailable");
       }
       setStatus({ status: "Joining realtime meeting..." });
-      const client = await RealtimeKit.init({
+      const client = (await RealtimeKit.init({
         authToken,
         defaults: { audio: true, video: false },
         modules: { chat: true, participant: true },
-      });
+      })) as RealtimeKitClient;
       await client.join();
       if (cancelled) {
         await client.leave();
@@ -225,6 +241,7 @@ export function RealtimeKitChatPanel({
       }
       meetingRef.current = client;
       setMeeting(client);
+      setMeetingReady(false);
       if (retryTimerRef.current) {
         window.clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
@@ -272,6 +289,46 @@ export function RealtimeKitChatPanel({
 
   useEffect(() => {
     if (!meeting || !sessionId || !customer) {
+      setMeetingReady(false);
+      return;
+    }
+    let cancelled = false;
+    const isEmitterReady = (candidate: unknown) => {
+      if (!candidate || typeof candidate !== "object") {
+        return false;
+      }
+      const emitter = candidate as { _events?: unknown };
+      return typeof emitter._events !== "undefined";
+    };
+    const checkReady = () => {
+      if (cancelled) {
+        return;
+      }
+      const chat = meeting.chat;
+      const participants = meeting.participants;
+      if (
+        chat &&
+        participants &&
+        isEmitterReady(chat) &&
+        isEmitterReady(participants)
+      ) {
+        setMeetingReady(true);
+        return;
+      }
+      uiReadyTimerRef.current = window.setTimeout(checkReady, 100);
+    };
+    checkReady();
+    return () => {
+      cancelled = true;
+      if (uiReadyTimerRef.current) {
+        window.clearTimeout(uiReadyTimerRef.current);
+        uiReadyTimerRef.current = null;
+      }
+    };
+  }, [meeting, sessionId, customer]);
+
+  useEffect(() => {
+    if (!meeting || !meetingReady || !sessionId || !customer) {
       return;
     }
     let cancelled = false;
@@ -302,11 +359,17 @@ export function RealtimeKitChatPanel({
         return;
       }
       const chat = meeting.chat;
-      if (!chat?.addListener || !chat?.removeListener) {
+      const emitterReady =
+        chat && typeof (chat as { _events?: unknown })._events !== "undefined";
+      if (!chat || !emitterReady) {
         chatReadyTimerRef.current = window.setTimeout(attachChatListener, 100);
         return;
       }
-      chat.addListener("chatUpdate", handleChatUpdate);
+      try {
+        chat.addListener("chatUpdate", handleChatUpdate);
+      } catch {
+        chatReadyTimerRef.current = window.setTimeout(attachChatListener, 100);
+      }
     };
 
     attachChatListener();
@@ -321,10 +384,10 @@ export function RealtimeKitChatPanel({
         chatReadyTimerRef.current = null;
       }
     };
-  }, [meeting, sessionId, customer, sendToConversation]);
+  }, [meeting, meetingReady, sessionId, customer, sendToConversation]);
 
   useEffect(() => {
-    if (!meeting || !sessionId || !customer) {
+    if (!meeting || !meetingReady || !sessionId || !customer) {
       return;
     }
     const ai = meeting.ai;
@@ -358,7 +421,7 @@ export function RealtimeKitChatPanel({
     return () => {
       aiOff("transcript", handleTranscript);
     };
-  }, [meeting, sessionId, customer, sendToConversation]);
+  }, [meeting, meetingReady, sessionId, customer, sendToConversation]);
 
   useEffect(() => {
     if (!sessionId || !customer) {
@@ -416,38 +479,38 @@ export function RealtimeKitChatPanel({
 
   useEffect(() => {
     const element = chatElementRef.current;
-    if (!element || !meeting) {
+    if (!element || !meeting || !meetingReady) {
       return;
     }
     element.meeting = meeting;
-  }, [meeting]);
+  }, [meeting, meetingReady]);
 
   useEffect(() => {
     const element = micToggleRef.current;
-    if (!element || !meeting) {
+    if (!element || !meeting || !meetingReady) {
       return;
     }
     element.meeting = meeting;
-  }, [meeting]);
+  }, [meeting, meetingReady]);
 
   const handleChatRef = useCallback(
     (element: HTMLRtkChatElement | null) => {
       chatElementRef.current = element;
-      if (element && meeting) {
+      if (element && meeting && meetingReady) {
         element.meeting = meeting;
       }
     },
-    [meeting],
+    [meeting, meetingReady],
   );
 
   const handleMicToggleRef = useCallback(
     (element: HTMLRtkMicToggleElement | null) => {
       micToggleRef.current = element;
-      if (element && meeting) {
+      if (element && meeting && meetingReady) {
         element.meeting = meeting;
       }
     },
-    [meeting],
+    [meeting, meetingReady],
   );
 
   return (
@@ -455,7 +518,9 @@ export function RealtimeKitChatPanel({
       <div className="flex items-center justify-between border-b border-ink-100 px-4 py-3">
         <div className="flex items-center gap-3">
           <h3 className="text-sm font-semibold text-ink">RealtimeKit chat</h3>
-          {meeting && <rtk-mic-toggle ref={handleMicToggleRef} size="sm" />}
+          {meetingReady && (
+            <rtk-mic-toggle ref={handleMicToggleRef} size="sm" />
+          )}
         </div>
         <span className="text-xs text-ink/70" title={status.error ?? undefined}>
           {status.status}
@@ -478,7 +543,7 @@ export function RealtimeKitChatPanel({
         </div>
       )}
       <div className="h-[360px] bg-sand-50">
-        {meeting ? (
+        {meetingReady ? (
           <div className="h-full">
             <rtk-chat
               ref={handleChatRef}
