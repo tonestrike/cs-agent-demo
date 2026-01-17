@@ -441,18 +441,46 @@ export class ConversationSession {
       return new Response("Method not allowed", { status: 405 });
     }
     const deps = createDependencies(this.env);
-    const customerId = this.sessionState.conversation?.verification.customerId;
-    if (!customerId) {
-      return Response.json(
-        { ok: false, error: "Customer verification required." },
-        { status: 400 },
-      );
+    const verifiedCustomerId =
+      this.sessionState.conversation?.verification.customerId;
+    let customer: CustomerCache | null = null;
+    if (verifiedCustomerId) {
+      customer = await deps.customers.get(verifiedCustomerId);
     }
-    const customer = await deps.customers.get(customerId);
+    if (!customer) {
+      const phoneNumber = this.sessionState.lastPhoneNumber;
+      if (!phoneNumber) {
+        return Response.json(
+          { ok: false, error: "Customer lookup required." },
+          { status: 400 },
+        );
+      }
+      const matches = await deps.crm.lookupCustomerByPhone(phoneNumber);
+      const match =
+        Array.isArray(matches) && matches.length === 1 ? matches[0] : null;
+      if (!match) {
+        return Response.json(
+          { ok: false, error: "Customer lookup required." },
+          { status: 400 },
+        );
+      }
+      const existing = await deps.customers.get(match.id);
+      customer = {
+        id: match.id,
+        crmCustomerId: match.id,
+        displayName: match.displayName,
+        phoneE164: match.phoneE164,
+        addressSummary: match.addressSummary ?? null,
+        zipCode: match.zipCode ?? null,
+        participantId: existing?.participantId ?? null,
+        updatedAt: new Date().toISOString(),
+      };
+      await deps.customers.upsert(customer);
+    }
     if (!customer) {
       return Response.json(
-        { ok: false, error: "Customer not found." },
-        { status: 404 },
+        { ok: false, error: "Customer lookup required." },
+        { status: 400 },
       );
     }
     try {
