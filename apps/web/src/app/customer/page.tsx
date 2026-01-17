@@ -375,7 +375,7 @@ export default function CustomerPage() {
 
   return (
     <main className="grid-dots min-h-screen px-6 py-10">
-      <div className="mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-[1.3fr_0.7fr]">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
         <Card className="flex flex-col gap-6 animate-rise">
           <div className="flex items-start justify-between">
             <div>
@@ -409,94 +409,14 @@ export default function CustomerPage() {
             </div>
           </div>
 
-          <div
-            ref={listRef}
-            className="scroll-area flex h-[min(60vh,520px)] flex-col gap-4 overflow-y-auto rounded-3xl border border-ink/10 bg-white/70 p-4 shadow-[inset_0_0_0_1px_rgba(12,27,31,0.04)]"
-            onScroll={(event) => {
-              const target = event.currentTarget;
-              const distanceFromBottom =
-                target.scrollHeight - target.scrollTop - target.clientHeight;
-              shouldAutoScroll.current = distanceFromBottom < 24;
-            }}
-          >
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`animate-rise max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                  message.role === "customer"
-                    ? "ml-auto bg-ink text-sand shadow-soft"
-                    : "bg-sand text-ink shadow-soft"
-                }`}
-              >
-                <p className="text-xs uppercase tracking-wide opacity-60">
-                  {message.role === "customer" ? "You" : "PestCall"}
-                </p>
-                <p className="mt-1">{message.text}</p>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex flex-col gap-3">
-            <label
-              htmlFor="customer-phone"
-              className="text-xs uppercase tracking-wide text-ink/60"
-            >
-              Phone Number
-            </label>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <select
-                id="customer-phone"
-                className="flex-1 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                value={phoneNumber}
-                onChange={(event) => resetSession(event.target.value)}
-              >
-                {customers.map((option) => (
-                  <option key={option.id} value={option.phoneE164}>
-                    {option.displayName} ({option.phoneE164})
-                  </option>
-                ))}
-              </select>
-              <Button type="button" onClick={() => resetSession()}>
-                New session
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            <label
-              htmlFor="customer-message"
-              className="text-xs uppercase tracking-wide text-ink/60"
-            >
-              Message
-            </label>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <input
-                id="customer-message"
-                className="flex-1 rounded-2xl border border-ink/15 bg-white/80 px-4 py-2 text-sm shadow-soft"
-                placeholder="Ask about appointments or billing..."
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    handleSend();
-                  }
-                }}
-              />
-              <Button onClick={handleSend}>Send</Button>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="flex flex-col gap-5 animate-rise">
-          <Badge className="w-fit">Customer Details</Badge>
-          {selectedCustomer ? (
+          <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
             <div className="space-y-4 text-sm text-ink/70">
               <div>
                 <p className="text-xs uppercase tracking-wide text-ink/50">
                   Name
                 </p>
                 <p className="mt-1 text-sm font-semibold text-ink">
-                  {selectedCustomer.displayName}
+                  {selectedCustomer?.displayName ?? "Unknown"}
                 </p>
               </div>
               <div>
@@ -504,7 +424,7 @@ export default function CustomerPage() {
                   Phone
                 </p>
                 <p className="mt-1 text-sm text-ink">
-                  {selectedCustomer.phoneE164}
+                  {selectedCustomer?.phoneE164 ?? "Unknown"}
                 </p>
               </div>
               <div>
@@ -512,75 +432,147 @@ export default function CustomerPage() {
                   ZIP code
                 </p>
                 <p className="mt-1 text-sm text-ink">
-                  {selectedCustomer.zipCode ?? "Unknown"}
+                  {selectedCustomer?.zipCode ?? "Unknown"}
                 </p>
-                {selectedCustomer.zipCode ? (
-                  <Button
-                    className="mt-2"
-                    type="button"
-                    onClick={() => sendMessage(selectedCustomer.zipCode ?? "")}
-                  >
-                    Send ZIP
-                  </Button>
-                ) : null}
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wide text-ink/50">
                   Address
                 </p>
                 <p className="mt-1 text-sm text-ink">
-                  {selectedCustomer.addressSummary ?? "Unknown"}
+                  {selectedCustomer?.addressSummary ?? "Unknown"}
                 </p>
               </div>
             </div>
-          ) : (
-            <p className="text-sm text-ink/60">No customers found yet.</p>
-          )}
-        </Card>
-        <Card className="flex flex-col gap-5 animate-rise">
-          <Badge className="w-fit">Tips</Badge>
-          <div className="space-y-4 text-sm text-ink/70">
-            <p>Try: “When is my next appointment?” or “Do I owe anything?”</p>
-            <p>
-              For billing, the agent will ask for your ZIP before sharing
-              balances.
-            </p>
-            <p>
-              Use the same session to continue the conversation and test
-              follow-ups like “reschedule it.”
-            </p>
+            <div className="flex flex-col gap-3">
+              <label
+                htmlFor="customer-phone"
+                className="text-xs uppercase tracking-wide text-ink/60"
+              >
+                Phone Number
+              </label>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <select
+                  id="customer-phone"
+                  className="flex-1 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                  value={phoneNumber}
+                  onChange={(event) => resetSession(event.target.value)}
+                >
+                  {customers.map((option) => (
+                    <option key={option.id} value={option.phoneE164}>
+                      {option.displayName} ({option.phoneE164})
+                    </option>
+                  ))}
+                </select>
+                <Button type="button" onClick={() => resetSession()}>
+                  New session
+                </Button>
+              </div>
+              <p className="text-xs text-ink/50">
+                Keep the same session when testing follow-ups like “reschedule
+                it.”
+              </p>
+            </div>
           </div>
         </Card>
-        <Card className="flex flex-col gap-5 animate-rise">
-          <div className="flex items-center justify-between">
-            <Badge className="w-fit">Client Log</Badge>
-            <button
-              type="button"
-              onClick={copyClientLogs}
-              className="text-xs font-semibold uppercase tracking-wide text-ink/50 hover:text-ink"
+
+        <div className="grid gap-8 lg:grid-cols-[1.3fr_0.7fr]">
+          <Card className="flex flex-col gap-6 animate-rise">
+            <Badge className="w-fit">Conversation</Badge>
+            <div
+              ref={listRef}
+              className="scroll-area flex h-[min(60vh,520px)] flex-col gap-4 overflow-y-auto rounded-3xl border border-ink/10 bg-white/70 p-4 shadow-[inset_0_0_0_1px_rgba(12,27,31,0.04)]"
+              onScroll={(event) => {
+                const target = event.currentTarget;
+                const distanceFromBottom =
+                  target.scrollHeight - target.scrollTop - target.clientHeight;
+                shouldAutoScroll.current = distanceFromBottom < 24;
+              }}
             >
-              {logsCopied ? "Copied" : "Copy Logs"}
-            </button>
-          </div>
-          <div className="max-h-72 space-y-3 overflow-auto rounded-2xl border border-ink/10 bg-white/70 p-4 text-xs text-ink/70">
-            {logs.length === 0 ? (
-              <p className="text-ink/50">No client events yet.</p>
-            ) : (
-              logs.map((entry) => (
-                <div key={entry.id} className="space-y-1">
-                  <p className="font-semibold text-ink">
-                    {entry.ts} — {entry.message}
+              {messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`animate-rise max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                    message.role === "customer"
+                      ? "ml-auto bg-ink text-sand shadow-soft"
+                      : "bg-sand text-ink shadow-soft"
+                  }`}
+                >
+                  <p className="text-xs uppercase tracking-wide opacity-60">
+                    {message.role === "customer" ? "You" : "PestCall"}
                   </p>
-                  {entry.data ? (
-                    <pre className="whitespace-pre-wrap text-[11px] text-ink/70">
-                      {JSON.stringify(entry.data, null, 2)}
-                    </pre>
+                  <p className="mt-1">{message.text}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <label
+                htmlFor="customer-message"
+                className="text-xs uppercase tracking-wide text-ink/60"
+              >
+                Message
+              </label>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <input
+                  id="customer-message"
+                  className="flex-1 rounded-2xl border border-ink/15 bg-white/80 px-4 py-2 text-sm shadow-soft"
+                  placeholder="Ask about appointments or billing..."
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      handleSend();
+                    }
+                  }}
+                />
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <Button onClick={handleSend}>Send</Button>
+                  {selectedCustomer?.zipCode ? (
+                    <Button
+                      type="button"
+                      onClick={() =>
+                        sendMessage(selectedCustomer.zipCode ?? "")
+                      }
+                    >
+                      Send ZIP
+                    </Button>
                   ) : null}
                 </div>
-              ))
-            )}
-          </div>
-        </Card>
+              </div>
+            </div>
+          </Card>
+          <Card className="flex flex-col gap-5 animate-rise">
+            <div className="flex items-center justify-between">
+              <Badge className="w-fit">Client Log</Badge>
+              <button
+                type="button"
+                onClick={copyClientLogs}
+                className="text-xs font-semibold uppercase tracking-wide text-ink/50 hover:text-ink"
+              >
+                {logsCopied ? "Copied" : "Copy Logs"}
+              </button>
+            </div>
+            <div className="max-h-[min(60vh,520px)] space-y-3 overflow-auto rounded-2xl border border-ink/10 bg-white/70 p-4 text-xs text-ink/70">
+              {logs.length === 0 ? (
+                <p className="text-ink/50">No client events yet.</p>
+              ) : (
+                logs.map((entry) => (
+                  <div key={entry.id} className="space-y-1">
+                    <p className="font-semibold text-ink">
+                      {entry.ts} — {entry.message}
+                    </p>
+                    {entry.data ? (
+                      <pre className="whitespace-pre-wrap text-[11px] text-ink/70">
+                        {JSON.stringify(entry.data, null, 2)}
+                      </pre>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+        </div>
       </div>
     </main>
   );
