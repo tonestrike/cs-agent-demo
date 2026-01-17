@@ -80,6 +80,47 @@ export const getRealtimeKitConfigSummary = (env: Env) => {
   };
 };
 
+export const createRealtimeKitMeeting = async (
+  env: Env,
+  logger: Logger,
+): Promise<string> => {
+  const config = ensureRealtimeKitConfig(env);
+  const url = `${config.baseUrl}/client/v4/accounts/${config.accountId}/realtime/kit/${config.appId}/meetings`;
+  logger.info({ action: "create_meeting", url }, "realtimekit.request");
+  const response = await fetch(url, {
+    method: "POST",
+    headers: realtimeKitHeaders(config),
+    body: JSON.stringify({ presetName: config.presetName ?? "default" }),
+  });
+  const payload = (await response.json().catch(() => null)) as {
+    success?: boolean;
+    errors?: Array<{ message?: string }>;
+    message?: string;
+    result?: { meeting_id?: string; meetingId?: string };
+  } | null;
+  logger.info(
+    {
+      action: "create_meeting",
+      url,
+      status: response.status,
+      ok: response.ok,
+      payload: sanitizeRealtimeKitPayload(payload),
+    },
+    "realtimekit.response",
+  );
+  const meetingId =
+    (payload?.result?.meeting_id as string | undefined) ??
+    (payload?.result?.meetingId as string | undefined);
+  if (!response.ok || !meetingId) {
+    throw new Error(
+      payload?.message ||
+        payload?.errors?.[0]?.message ||
+        "Failed to create meeting",
+    );
+  }
+  return meetingId;
+};
+
 const sanitizeRealtimeKitPayload = (
   payload: {
     success?: boolean;
@@ -108,7 +149,7 @@ const parseRealtimeKitResponse = async (
   response: Response,
   config: RealtimeKitConfig,
   logger: Logger,
-  context: { action: string; url: string },
+  context: { action: string; url: string; meetingId: string },
 ): Promise<RealtimeKitTokenPayload> => {
   const payload = (await response.json().catch(() => null)) as {
     success?: boolean;
@@ -162,14 +203,15 @@ const parseRealtimeKitResponse = async (
   if (!authToken) {
     throw new Error("RealtimeKit missing auth token");
   }
+  const meetingId =
+    (result as { meeting_id?: string }).meeting_id ??
+    (result as { meetingId?: string }).meetingId ??
+    context.meetingId;
   logger.info(
     {
       action: context.action,
       participantId,
-      meetingId:
-        (result as { meeting_id?: string }).meeting_id ??
-        (result as { meetingId?: string }).meetingId ??
-        config.meetingId,
+      meetingId,
       expiresAt:
         (result as { expires_at?: string }).expires_at ??
         (result as { expiresAt?: string }).expiresAt ??
@@ -180,10 +222,7 @@ const parseRealtimeKitResponse = async (
   return {
     authToken,
     participantId,
-    meetingId:
-      (result as { meeting_id?: string }).meeting_id ??
-      (result as { meetingId?: string }).meetingId ??
-      config.meetingId,
+    meetingId,
     presetName:
       (result as { preset_name?: string }).preset_name ??
       (result as { presetName?: string }).presetName ??
@@ -206,9 +245,7 @@ export const addRealtimeKitParticipant = async (
   logger: Logger,
   options?: { meetingId?: string },
 ): Promise<RealtimeKitTokenPayload> => {
-  const config = ensureRealtimeKitConfig(env, {
-    meetingId: options?.meetingId,
-  });
+  const config = ensureRealtimeKitConfig(env, { meetingId: options?.meetingId });
   const url = `${config.baseUrl}/client/v4/accounts/${config.accountId}/realtime/kit/${config.appId}/meetings/${config.meetingId}/participants`;
   const presetName = config.presetName;
   const body = {
@@ -237,6 +274,7 @@ export const addRealtimeKitParticipant = async (
   return parseRealtimeKitResponse(response, config, logger, {
     action: "add_participant",
     url,
+    meetingId: config.meetingId,
   });
 };
 
@@ -246,9 +284,7 @@ export const addRealtimeKitGuestParticipant = async (
   logger: Logger,
   options?: { meetingId?: string },
 ): Promise<RealtimeKitTokenPayload> => {
-  const config = ensureRealtimeKitConfig(env, {
-    meetingId: options?.meetingId,
-  });
+  const config = ensureRealtimeKitConfig(env, { meetingId: options?.meetingId });
   const url = `${config.baseUrl}/client/v4/accounts/${config.accountId}/realtime/kit/${config.appId}/meetings/${config.meetingId}/participants`;
   const presetName = config.presetName;
   const body = {
@@ -277,6 +313,7 @@ export const addRealtimeKitGuestParticipant = async (
   return parseRealtimeKitResponse(response, config, logger, {
     action: "add_guest_participant",
     url,
+    meetingId: config.meetingId,
   });
 };
 
@@ -286,9 +323,7 @@ export const refreshRealtimeKitToken = async (
   logger: Logger,
   options?: { meetingId?: string },
 ): Promise<RealtimeKitTokenPayload> => {
-  const config = ensureRealtimeKitConfig(env, {
-    meetingId: options?.meetingId,
-  });
+  const config = ensureRealtimeKitConfig(env, { meetingId: options?.meetingId });
   const url = `${config.baseUrl}/client/v4/accounts/${config.accountId}/realtime/kit/${config.appId}/meetings/${config.meetingId}/participants/${encodeURIComponent(
     participantId,
   )}/token/refresh`;
@@ -310,5 +345,6 @@ export const refreshRealtimeKitToken = async (
   return parseRealtimeKitResponse(response, config, logger, {
     action: "refresh_token",
     url,
+    meetingId: config.meetingId,
   });
 };

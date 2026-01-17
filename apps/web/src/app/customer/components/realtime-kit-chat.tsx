@@ -149,6 +149,7 @@ export function RealtimeKitChatPanel({
   const micToggleRef = useRef<HTMLRtkMicToggleElement | null>(null);
   const sentMessageIds = useRef(new Set<string>());
   const assistantBuffers = useRef(new Map<string, string>());
+  const postedAssistantMessageIds = useRef(new Set<string>());
   const ttsEnabled = useRef(enableTts);
   const meetingReadyRef = useRef(false);
   const timers = useRef<{
@@ -432,6 +433,7 @@ export function RealtimeKitChatPanel({
     setPartialTranscript(null);
     setLastActivity(null);
     setStatusError(undefined);
+    postedAssistantMessageIds.current.clear();
   }, [sessionId]);
 
   // Listen for chat messages from the local user
@@ -565,6 +567,65 @@ export function RealtimeKitChatPanel({
     };
   }, [meeting, meetingReady, sendToConversation, log]);
 
+  const appendAssistantChatMessage = useCallback(
+    (messageId: string | null | undefined, text: string | undefined) => {
+      const chat = meetingRef.current?.chat as
+        | (RealtimeKitChat & {
+            messages?: ChatMessage[];
+            emit?: (event: string, payload: unknown) => void;
+          })
+        | undefined;
+      if (!chat || !isEmitterReady(chat)) {
+        log("assistant.chat.skip", { reason: "chat_unavailable" });
+        return;
+      }
+      const trimmed = text?.trim();
+      if (!trimmed) return;
+      const id = messageId ? `assistant-${messageId}` : crypto.randomUUID();
+      if (postedAssistantMessageIds.current.has(id)) {
+        log("assistant.chat.skip", { reason: "duplicate", id });
+        return;
+      }
+      const now = Date.now();
+      const message: ChatMessage & {
+        displayName?: string;
+        time?: Date;
+        timeMs?: number;
+      } = {
+        id,
+        type: "text",
+        userId: "assistant",
+        displayName: "Bot",
+        message: trimmed,
+        time: new Date(now),
+        timeMs: now,
+      };
+      const messages = Array.isArray(chat.messages)
+        ? [...chat.messages, message]
+        : [message];
+      (chat as { messages: ChatMessage[] }).messages = messages;
+      postedAssistantMessageIds.current.add(id);
+      try {
+        chat.emit?.("chatUpdate", {
+          action: "add",
+          message,
+          messages,
+        });
+        log("assistant.chat.added", {
+          id,
+          preview: trimmed.slice(0, 60),
+        });
+      } catch (err) {
+        log(
+          "assistant.chat.error",
+          { error: err instanceof Error ? err.message : "unknown" },
+          "warn",
+        );
+      }
+    },
+    [log],
+  );
+
   // WebSocket for TTS playback of assistant responses
   useEffect(() => {
     if (!sessionId || !customer?.id) {
@@ -671,6 +732,7 @@ export function RealtimeKitChatPanel({
             utterance.onerror = () => setIsSpeaking(false);
             window.speechSynthesis.speak(utterance);
           }
+          appendAssistantChatMessage(messageId, text);
         }
       } catch {
         // Ignore malformed messages
@@ -681,7 +743,7 @@ export function RealtimeKitChatPanel({
       socket.close();
       setWsConnected(false);
     };
-  }, [sessionId, customer?.id]);
+  }, [sessionId, customer?.id, appendAssistantChatMessage]);
 
   // Assign meeting to RTK web components with retry logic
   useEffect(() => {

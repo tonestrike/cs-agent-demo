@@ -33,6 +33,7 @@ import {
   type RealtimeKitTokenPayload,
   addRealtimeKitGuestParticipant,
   addRealtimeKitParticipant,
+  createRealtimeKitMeeting,
   getRealtimeKitConfigSummary,
   refreshRealtimeKitToken,
 } from "../realtime-kit";
@@ -488,9 +489,8 @@ export class ConversationSession {
       url.searchParams.get("callSessionId") ??
       this.sessionState.lastCallSessionId;
     const meetingId =
-      currentCallSessionId ??
       this.sessionState.rtkMeetingId ??
-      this.state.id.toString();
+      (await createRealtimeKitMeeting(this.env, this.logger));
     const storedRtkCallSessionId = this.sessionState.rtkCallSessionId;
     const storedMeetingId = this.sessionState.rtkMeetingId;
     const needsFreshParticipant =
@@ -598,6 +598,10 @@ export class ConversationSession {
     customer: CustomerCache,
     options?: { forceNewParticipant?: boolean; meetingId?: string },
   ): Promise<RealtimeKitTokenPayload> {
+    const meetingId =
+      options?.meetingId ??
+      this.sessionState.rtkMeetingId ??
+      (await createRealtimeKitMeeting(this.env, this.logger));
     let token: RealtimeKitTokenPayload;
     if (customer.participantId && !options?.forceNewParticipant) {
       try {
@@ -605,7 +609,7 @@ export class ConversationSession {
           this.env,
           customer.participantId,
           this.logger,
-          { meetingId: options?.meetingId },
+          { meetingId },
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : "unknown";
@@ -617,15 +621,16 @@ export class ConversationSession {
           this.env,
           customer,
           this.logger,
-          {
-            meetingId: options?.meetingId,
-          },
+          { meetingId },
         );
       }
     } else {
-      token = await addRealtimeKitParticipant(this.env, customer, this.logger, {
-        meetingId: options?.meetingId,
-      });
+      token = await addRealtimeKitParticipant(
+        this.env,
+        customer,
+        this.logger,
+        { meetingId },
+      );
     }
     const updatedCustomer: CustomerCache = {
       ...customer,
