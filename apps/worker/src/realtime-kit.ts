@@ -137,7 +137,8 @@ const parseRealtimeKitResponse = async (
     throw new Error(errorDetail);
   }
   const result =
-    (payload.result ?? (payload as { data?: Record<string, unknown> }).data) ??
+    payload.result ??
+    (payload as { data?: Record<string, unknown> }).data ??
     {};
   const participantId =
     (result as { participant_id?: string }).participant_id ??

@@ -466,8 +466,7 @@ export class ConversationSession {
           );
           return Response.json({ ok: true, ...token });
         } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "unknown";
+          const message = error instanceof Error ? error.message : "unknown";
           this.logger.warn(
             { error: message, participantId: guestParticipantId },
             "conversation.session.rtk_guest_refresh_failed",
@@ -529,13 +528,16 @@ export class ConversationSession {
           this.logger,
         );
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "unknown";
+        const message = error instanceof Error ? error.message : "unknown";
         this.logger.warn(
           { error: message, participantId: customer.participantId },
           "conversation.session.rtk_refresh_failed",
         );
-        token = await addRealtimeKitParticipant(this.env, customer, this.logger);
+        token = await addRealtimeKitParticipant(
+          this.env,
+          customer,
+          this.logger,
+        );
       }
     } else {
       token = await addRealtimeKitParticipant(this.env, customer, this.logger);
