@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
 import type { ClientLog } from "../types";
 
 type ClientLogsPanelProps = {
@@ -18,6 +19,9 @@ export function ClientLogsPanel({
 }: ClientLogsPanelProps) {
   const [copiedLogs, setCopiedLogs] = useState(false);
   const [copiedConvo, setCopiedConvo] = useState(false);
+  const [summaryMarkdown, setSummaryMarkdown] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const copyLogs = async () => {
     const payload = { callSessionId, phoneNumber, logs };
@@ -30,6 +34,42 @@ export function ClientLogsPanel({
     await onCopyConversation();
     setCopiedConvo(true);
     setTimeout(() => setCopiedConvo(false), 2000);
+  };
+
+  const fetchSummary = async () => {
+    if (!callSessionId || summaryLoading) {
+      return;
+    }
+    setSummaryLoading(true);
+    setSummaryError(null);
+    try {
+      const base = apiBaseUrl || window.location.origin;
+      const url = new URL(`/api/conversations/${callSessionId}/summary`, base);
+      const response = await fetch(url, {
+        method: "GET",
+        headers: demoAuthToken ? { "x-demo-auth": demoAuthToken } : undefined,
+      });
+      if (!response.ok) {
+        throw new Error("Summary request failed");
+      }
+      const payload = (await response.json()) as {
+        summary?: string;
+      };
+      setSummaryMarkdown(payload.summary ?? null);
+    } catch (error) {
+      setSummaryError(
+        error instanceof Error ? error.message : "Summary request failed",
+      );
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
+  const copySummary = async () => {
+    if (!summaryMarkdown) {
+      return;
+    }
+    await navigator.clipboard.writeText(summaryMarkdown);
   };
 
   return (
@@ -67,6 +107,40 @@ export function ClientLogsPanel({
           <p className="mt-1 font-mono text-sm text-ink">{callSessionId}</p>
         </div>
       )}
+
+      {/* Summary */}
+      <div className="mb-4 rounded-lg border border-ink-200 bg-white p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={fetchSummary}
+            disabled={!callSessionId || summaryLoading}
+            className="rounded-lg border border-ink-200 bg-sand-100 px-3 py-2 text-xs font-semibold text-ink-700 transition hover:bg-sand-200 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {summaryLoading ? "Loading summary…" : "Load Summary"}
+          </button>
+          <button
+            type="button"
+            onClick={copySummary}
+            disabled={!summaryMarkdown}
+            className="rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-semibold text-ink-700 transition hover:bg-sand-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Copy Summary
+          </button>
+        </div>
+        {summaryError && (
+          <p className="mt-2 text-xs text-amber-700">{summaryError}</p>
+        )}
+        {summaryMarkdown ? (
+          <pre className="mt-3 max-h-64 overflow-y-auto rounded bg-sand-50 p-3 text-xs text-ink-700">
+            {summaryMarkdown}
+          </pre>
+        ) : (
+          <p className="mt-3 text-xs text-ink-400">
+            Generate a markdown summary of this conversation.
+          </p>
+        )}
+      </div>
 
       {/* Logs list */}
       <div className="flex-1 overflow-y-auto rounded-lg border border-ink-200 bg-sand-100">
