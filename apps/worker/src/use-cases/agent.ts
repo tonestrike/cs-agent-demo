@@ -61,21 +61,21 @@ type AgentMessageOptions = {
   onToken?: (token: string) => void;
 };
 
-const DEFAULT_TOOL_STATUS_MESSAGE = "Let me check that for you.";
+const DEFAULT_TOOL_STATUS_MESSAGE = "Give me a moment while I look into that.";
 
 const TOOL_STATUS_MESSAGES: Partial<Record<AgentToolName, string>> = {
-  "crm.verifyAccount": "Checking that ZIP code now.",
-  "crm.getNextAppointment": "Let me check your next appointment.",
-  "crm.listUpcomingAppointments": "Looking up your upcoming appointments.",
-  "crm.getAppointmentById": "Looking up that appointment.",
-  "crm.getOpenInvoices": "Checking your balance now.",
-  "crm.getAvailableSlots": "Checking available time slots.",
-  "crm.rescheduleAppointment": "Rescheduling your appointment now.",
-  "crm.cancelAppointment": "Cancelling your appointment now.",
-  "crm.createAppointment": "Scheduling that appointment now.",
-  "crm.getServicePolicy": "Looking up the policy now.",
-  "crm.escalate": "Connecting you with a specialist.",
-  "agent.escalate": "Connecting you with a specialist.",
+  "crm.verifyAccount": "Thanks, I'll check that ZIP for you.",
+  "crm.getNextAppointment": "Let me pull up your next appointment.",
+  "crm.listUpcomingAppointments": "Let me pull up your upcoming appointments.",
+  "crm.getAppointmentById": "Let me pull up that appointment.",
+  "crm.getOpenInvoices": "Let me check your balance.",
+  "crm.getAvailableSlots": "Let me check the available time slots.",
+  "crm.rescheduleAppointment": "I'll work on rescheduling that now.",
+  "crm.cancelAppointment": "I'll take care of that cancellation now.",
+  "crm.createAppointment": "I'll get that appointment set up now.",
+  "crm.getServicePolicy": "Let me pull up that policy.",
+  "crm.escalate": "I'll connect you with a specialist.",
+  "agent.escalate": "I'll connect you with a specialist.",
 };
 
 const statusMessageForTool = (toolName: AgentToolName) =>
@@ -475,10 +475,10 @@ const buildVerificationPrompt = (
   },
 ) => {
   const baseRequest = input.invalidZip
-    ? "Please share the 5-digit ZIP code on your account."
+    ? "That ZIP does not match our records. Could you share the 5-digit ZIP code on the account?"
     : input.zipAttempts > 0
-      ? "That ZIP doesn't match our records. Please share the 5-digit ZIP code on your account."
-      : "To get started, please share the 5-digit ZIP code on your account.";
+      ? "That ZIP does not match our records. Could you share the 5-digit ZIP code on the account?"
+      : "Thanks for reaching out. Can you share the 5-digit ZIP code on your account so I can pull up your details?";
   if (!input.includeGreeting) {
     return baseRequest;
   }

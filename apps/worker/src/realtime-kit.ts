@@ -10,6 +10,11 @@ export type RealtimeKitTokenPayload = {
   expiresAt?: string | null;
 };
 
+export type RealtimeKitParticipantInput = {
+  displayName: string;
+  customParticipantId: string;
+};
+
 type RealtimeKitConfig = {
   accountId: string;
   appId: string;
@@ -21,6 +26,14 @@ type RealtimeKitConfig = {
 
 const HARDCODED_API_TOKEN = "d8e165d3-6d87-483f-bc5a-55ff3a5bcaae";
 const HARDCODED_MEETING_ID = "bbb58ddd-1416-4812-aceb-7e078e61c78b";
+
+const hashToken = (value: string) => {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 33) ^ value.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+};
 
 const ensureRealtimeKitConfig = (env: Env): RealtimeKitConfig => {
   const accountId = env.REALTIMEKIT_ACCOUNT_ID?.trim();
@@ -39,6 +52,24 @@ const ensureRealtimeKitConfig = (env: Env): RealtimeKitConfig => {
     apiToken,
     presetName: env.REALTIMEKIT_PRESET_NAME ?? null,
     baseUrl: baseUrl.replace(/\/$/, ""),
+  };
+};
+
+export const getRealtimeKitConfigSummary = (env: Env) => {
+  const accountId = env.REALTIMEKIT_ACCOUNT_ID?.trim() ?? null;
+  const appId = env.REALTIMEKIT_APP_ID?.trim() ?? null;
+  const meetingId = env.REALTIMEKIT_MEETING_ID?.trim() ?? HARDCODED_MEETING_ID;
+  const apiToken = env.REALTIMEKIT_API_TOKEN?.trim() ?? HARDCODED_API_TOKEN;
+  const baseUrl =
+    env.REALTIMEKIT_API_BASE_URL?.trim() ?? "https://api.cloudflare.com";
+  return {
+    accountId,
+    appId,
+    meetingId,
+    presetName: env.REALTIMEKIT_PRESET_NAME ?? null,
+    baseUrl: baseUrl.replace(/\/$/, ""),
+    apiTokenLength: apiToken.length,
+    apiTokenFingerprint: hashToken(apiToken),
   };
 };
 
@@ -109,6 +140,25 @@ export const addRealtimeKitParticipant = async (
   const body = {
     name: customer.displayName,
     custom_participant_id: customer.id,
+    ...(config.presetName ? { preset_name: config.presetName } : {}),
+  };
+  const response = await fetch(url, {
+    method: "POST",
+    headers: realtimeKitHeaders(config),
+    body: JSON.stringify(body),
+  });
+  return parseRealtimeKitResponse(response, config);
+};
+
+export const addRealtimeKitGuestParticipant = async (
+  env: Env,
+  input: RealtimeKitParticipantInput,
+): Promise<RealtimeKitTokenPayload> => {
+  const config = ensureRealtimeKitConfig(env);
+  const url = `${config.baseUrl}/client/v4/accounts/${config.accountId}/realtime/kit/${config.appId}/meetings/${config.meetingId}/participants`;
+  const body = {
+    name: input.displayName,
+    custom_participant_id: input.customParticipantId,
     ...(config.presetName ? { preset_name: config.presetName } : {}),
   };
   const response = await fetch(url, {

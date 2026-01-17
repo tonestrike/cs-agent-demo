@@ -27,6 +27,7 @@ import type {
 import { actionPlanSchema } from "../models/types";
 import {
   type RealtimeKitTokenPayload,
+  addRealtimeKitGuestParticipant,
   addRealtimeKitParticipant,
   refreshRealtimeKitToken,
 } from "../realtime-kit";
@@ -80,6 +81,8 @@ type SessionState = {
   cancelWorkflowId?: string;
   rescheduleWorkflowId?: string;
   availableSlots?: Array<{ id: string; date: string; timeWindow: string }>;
+  rtkGuestParticipantId?: string;
+  rtkGuestCustomId?: string;
   pendingIntent?: {
     kind:
       | "appointments"
@@ -448,34 +451,33 @@ export class ConversationSession {
       customer = await deps.customers.get(verifiedCustomerId);
     }
     if (!customer) {
+      const guestParticipantId = this.sessionState.rtkGuestParticipantId;
+      if (guestParticipantId) {
+        const token = await refreshRealtimeKitToken(
+          this.env,
+          guestParticipantId,
+        );
+        return Response.json({ ok: true, ...token });
+      }
       const phoneNumber = this.sessionState.lastPhoneNumber;
-      if (!phoneNumber) {
-        return Response.json(
-          { ok: false, error: "Customer lookup required." },
-          { status: 400 },
-        );
-      }
-      const matches = await deps.crm.lookupCustomerByPhone(phoneNumber);
-      const match =
-        Array.isArray(matches) && matches.length === 1 ? matches[0] : null;
-      if (!match) {
-        return Response.json(
-          { ok: false, error: "Customer lookup required." },
-          { status: 400 },
-        );
-      }
-      const existing = await deps.customers.get(match.id);
-      customer = {
-        id: match.id,
-        crmCustomerId: match.id,
-        displayName: match.displayName,
-        phoneE164: match.phoneE164,
-        addressSummary: match.addressSummary ?? null,
-        zipCode: match.zipCode ?? null,
-        participantId: existing?.participantId ?? null,
-        updatedAt: new Date().toISOString(),
+      const rawCustomId =
+        this.sessionState.lastCallSessionId ?? this.state.id.toString();
+      const customParticipantId =
+        this.sessionState.rtkGuestCustomId ?? `session:${rawCustomId}`;
+      const displayName = phoneNumber
+        ? `Caller ${phoneNumber}`
+        : "Caller";
+      const token = await addRealtimeKitGuestParticipant(this.env, {
+        displayName,
+        customParticipantId,
+      });
+      this.sessionState = {
+        ...this.sessionState,
+        rtkGuestParticipantId: token.participantId,
+        rtkGuestCustomId: customParticipantId,
       };
-      await deps.customers.upsert(customer);
+      await this.state.storage.put("state", this.sessionState);
+      return Response.json({ ok: true, ...token });
     }
     if (!customer) {
       return Response.json(
@@ -1142,8 +1144,8 @@ export class ConversationSession {
         input,
         deps,
         streamId,
-        "To get started, please share the 5-digit ZIP code on your account.",
-        "Ask for the 5-digit ZIP code to verify the account.",
+        "Thanks for reaching out. Can you share the 5-digit ZIP code on your account so I can pull up your details?",
+        "Ask for the 5-digit ZIP code to verify the account in a friendly, conversational tone.",
       );
       const response: AgentMessageOutput = {
         callSessionId,
@@ -1167,8 +1169,8 @@ export class ConversationSession {
         input,
         deps,
         streamId,
-        "To get started, please share the 5-digit ZIP code on your account.",
-        "Ask for the 5-digit ZIP code to verify the account.",
+        "Thanks for reaching out. Can you share the 5-digit ZIP code on your account so I can pull up your details?",
+        "Ask for the 5-digit ZIP code to verify the account in a friendly, conversational tone.",
       );
       const response: AgentMessageOutput = {
         callSessionId,
@@ -1181,8 +1183,8 @@ export class ConversationSession {
       input,
       deps,
       streamId,
-      "Checking that ZIP code now.",
-      "Acknowledge that you're checking the ZIP code.",
+      "Thanks, I'll check that ZIP code now.",
+      "Acknowledge that you're checking the ZIP code in a warm, conversational tone.",
     );
     const ok = await verifyAccount(deps.crm, customer.id, zipCode);
     if (ok) {
@@ -1194,8 +1196,8 @@ export class ConversationSession {
       );
     }
     const verificationText = ok
-      ? "Thanks, you're verified. What would you like to do next?"
-      : "That ZIP does not match our records. Please share the 5-digit ZIP code on your account.";
+      ? "Thanks, I've got your account. What would you like to do next?"
+      : "That ZIP does not match our records. Could you share the 5-digit ZIP code on the account?";
     let followupText: string | null = null;
     if (ok && this.sessionState.pendingIntent) {
       const pending = this.sessionState.pendingIntent;

@@ -182,6 +182,7 @@ The Worker forwards the DO event stream to the client unchanged.
 - Acknowledgements are narrator-generated and streamed before tool calls.
 - Status events supplement, never replace, acknowledgement text.
 - ActionPlan validation gates all model‑proposed tool calls.
+- Sessions can start without a verified customer; pre-verification realtime participants are allowed and should be keyed to the session, then linked to the customer after verification.
 
 ## Decisions (open)
 - RealtimeKit text adoption: keep custom UI for typed chat; revisit only if we need a unified voice+text session UI.
