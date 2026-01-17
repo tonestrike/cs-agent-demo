@@ -129,12 +129,10 @@ export function RealtimeKitChatPanel({
   const [, setStatusError] = useState<string | undefined>();
   const [meeting, setMeeting] = useState<RealtimeKitClient | null>(null);
   const [meetingReady, setMeetingReady] = useState(false);
-  const [, setPartialTranscript] = useState<string | null>(
-    null,
+  const [, setPartialTranscript] = useState<string | null>(null);
+  const [, setFinalTranscripts] = useState<Array<{ id: string; text: string }>>(
+    [],
   );
-  const [, setFinalTranscripts] = useState<
-    Array<{ id: string; text: string }>
-  >([]);
 
   // Visual indicator states
   const [, setWsConnected] = useState(false);
