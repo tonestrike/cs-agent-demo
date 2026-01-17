@@ -327,6 +327,7 @@ export function RealtimeKitChatPanel({
   }, [meeting]);
 
   // Clear sent message IDs when session changes to avoid stale deduplication
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId triggers clearing stale IDs on session change
   useEffect(() => {
     sentMessageIds.current.clear();
   }, [sessionId]);
