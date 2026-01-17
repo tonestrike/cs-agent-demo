@@ -244,7 +244,7 @@ export function RealtimeKitChatPanel({
         });
       }
     },
-    [phoneE164, sessionId],
+    [phoneE164, sessionId, log],
   );
 
   // Clear all timers
@@ -369,7 +369,7 @@ export function RealtimeKitChatPanel({
       cancelled = true;
       cleanup();
     };
-  }, [sessionId, customer?.id, clearTimers]);
+  }, [sessionId, customer?.id, clearTimers, log]);
 
   // Wait for meeting emitters to be ready before enabling UI
   useEffect(() => {
@@ -406,7 +406,7 @@ export function RealtimeKitChatPanel({
         timers.current.uiReady = undefined;
       }
     };
-  }, [meeting]);
+  }, [meeting, log]);
 
   // Clear all local state when session changes to avoid stale data from previous sessions
   // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId triggers full state reset on session change
@@ -501,7 +501,7 @@ export function RealtimeKitChatPanel({
         // Ignore cleanup errors
       }
     };
-  }, [meeting, meetingReady, sendToConversation]);
+  }, [meeting, meetingReady, sendToConversation, log]);
 
   // Listen for voice transcripts
   useEffect(() => {
@@ -548,7 +548,7 @@ export function RealtimeKitChatPanel({
         // Ignore cleanup errors
       }
     };
-  }, [meeting, meetingReady, sendToConversation]);
+  }, [meeting, meetingReady, sendToConversation, log]);
 
   // WebSocket for TTS playback of assistant responses
   useEffect(() => {
@@ -697,15 +697,15 @@ export function RealtimeKitChatPanel({
       }
     };
 
-    window.setTimeout(() => {
-      assign(chatElementRef.current, "rtk-chat");
-      assign(micToggleRef.current, "rtk-mic-toggle");
-    }, 0);
+      window.setTimeout(() => {
+        assign(chatElementRef.current, "rtk-chat");
+        assign(micToggleRef.current, "rtk-mic-toggle");
+      }, 0);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [meeting, meetingReady]);
+      return () => {
+        cancelled = true;
+      };
+  }, [meeting, meetingReady, log]);
 
   const handleChatRef = useCallback((el: HTMLRtkChatElement | null) => {
     chatElementRef.current = el;

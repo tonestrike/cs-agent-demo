@@ -1,9 +1,7 @@
 import { type CustomerCache, normalizePhoneE164 } from "@pestcall/core";
-import { z } from "zod";
 
 import { createDependencies } from "../context";
 import {
-  type ConversationState,
   applyIntent,
   conversationStateSchema,
   initialConversationState,
@@ -21,8 +19,6 @@ import {
   getToolStatusConfig,
 } from "../models/tool-status";
 import type {
-  ActionPlan,
-  ActionPrecondition,
   AgentModelInput,
   AgentResponseInput,
   SelectionOption,
@@ -62,86 +58,25 @@ import {
   RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
 } from "../workflows/constants";
 
-type ConversationEventType =
-  | "token"
-  | "status"
-  | "final"
-  | "error"
-  | "resync"
-  | "speaking";
-
-type ConversationEvent = {
-  id: number;
-  seq: number;
-  type: ConversationEventType;
-  text?: string;
-  data?: unknown;
-  turnId?: number | null;
-  messageId?: string | null;
-  role?: "assistant" | "system";
-  correlationId?: string;
-  at: string;
-};
-
-type SessionState = {
-  lastPhoneNumber?: string;
-  lastCallSessionId?: string;
-  conversation?: ConversationState;
-  cancelWorkflowId?: string;
-  rescheduleWorkflowId?: string;
-  availableSlots?: Array<{ id: string; date: string; timeWindow: string }>;
-  rtkGuestParticipantId?: string;
-  rtkGuestCustomId?: string;
-  rtkCallSessionId?: string;
-  pendingIntent?: {
-    kind:
-      | "appointments"
-      | "cancel"
-      | "reschedule"
-      | "schedule"
-      | "billing"
-      | "escalate";
-    text: string;
-  };
-  /** Active selection state - tracks which selection type we're waiting for */
-  activeSelection?: {
-    kind: "appointment" | "slot" | "confirmation";
-    options: Array<{ id: string; label: string }>;
-    presentedAt: number;
-    workflowType: "cancel" | "reschedule";
-  };
-};
-
-type ClientMessage =
-  | { type: "barge_in" }
-  | { type: "resync"; lastEventId?: number }
-  | { type: "confirm_cancel"; confirmed: boolean; callSessionId?: string }
-  | {
-      type: "start_cancel";
-      customerId?: string;
-      callSessionId?: string;
-      message?: string;
-    }
-  | {
-      type: "final_transcript" | "message";
-      text?: string;
-      phoneNumber?: string;
-      callSessionId?: string;
-    };
-
-const toolAcknowledgementSchema = z.enum([
-  "crm.listUpcomingAppointments",
-  "crm.getNextAppointment",
-  "crm.cancelAppointment",
-  "crm.rescheduleAppointment",
-  "crm.getAvailableSlots",
-  "crm.createAppointment",
-  "crm.getOpenInvoices",
-  "crm.getServicePolicy",
-]);
-
-const MAX_EVENT_BUFFER = 200;
-const FILLER_TIMEOUT_MS = 400;
+// Extracted modules
+import {
+  type ConversationEvent,
+  type SessionState,
+  type ClientMessage,
+  MAX_EVENT_BUFFER,
+  FILLER_TIMEOUT_MS,
+  toolAcknowledgementSchema,
+  formatAppointmentLabel,
+  formatAppointmentsResponse,
+  formatSlotLabel,
+  formatAvailableSlotsResponse,
+  formatInvoicesResponse,
+  formatConversationSummary,
+  sanitizeNarratorOutput,
+  normalizeToolArgs,
+  getActionPreconditions,
+  evaluateActionPlan,
+} from "./conversation-session/index";
 
 export class ConversationSession {
   private connections = new Set<WebSocket>();
@@ -376,7 +311,22 @@ export class ConversationSession {
     };
     const validated = agentMessageInputSchema.safeParse(candidate);
 
-    this.logger.info({ validated }, "resolveInput");
+    this.logger.info(
+      {
+        inputCallSessionId: input.callSessionId ?? null,
+        inputPhone: input.phoneNumber ?? null,
+        stateCallSessionId: this.sessionState.lastCallSessionId ?? null,
+        statePhone: this.sessionState.lastPhoneNumber ?? null,
+        validated: validated.success
+          ? {
+              callSessionId: validated.data.callSessionId,
+              phoneNumber: validated.data.phoneNumber,
+              textLength: validated.data.text.length,
+            }
+          : { error: validated.error.format() },
+      },
+      "conversation.session.resolve_input",
+    );
 
     return validated.success ? validated.data : null;
   }
@@ -473,7 +423,7 @@ export class ConversationSession {
         { status: 404 },
       );
     }
-    const summary = this.formatConversationSummary(
+    const summary = formatConversationSummary(
       record.session,
       record.turns,
     );
@@ -663,6 +613,9 @@ export class ConversationSession {
         cancelWorkflowId: this.sessionState.cancelWorkflowId ?? null,
         rescheduleWorkflowId: this.sessionState.rescheduleWorkflowId ?? null,
         availableSlotsCount: this.sessionState.availableSlots?.length ?? 0,
+        verifiedCustomerId:
+          this.sessionState.conversation?.verification.customerId ?? null,
+        lastPhoneNumber: this.sessionState.lastPhoneNumber ?? null,
       },
       "conversation.session.state.snapshot",
     );
@@ -674,6 +627,8 @@ export class ConversationSession {
         textLength: input.text?.length ?? 0,
         text: input.text ?? "",
         phoneNumber: input.phoneNumber,
+        verifiedCustomerId:
+          this.sessionState.conversation?.verification.customerId ?? null,
       },
       "conversation.session.turn.start",
     );
@@ -1536,7 +1491,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: appointments.length
-              ? this.formatAppointmentsResponse(appointments)
+              ? formatAppointmentsResponse(appointments)
               : "I couldn't find any upcoming appointments. Would you like to schedule one?",
             contextHint: "The customer asked about upcoming appointments.",
           },
@@ -1590,7 +1545,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: slots.length
-              ? this.formatAvailableSlotsResponse(
+              ? formatAvailableSlotsResponse(
                   slots,
                   "Is this for the same address we have on file?",
                 )
@@ -1628,7 +1583,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: appointments.length
-              ? this.formatAppointmentsResponse(appointments)
+              ? formatAppointmentsResponse(appointments)
               : "I couldn't find any upcoming appointments to cancel.",
             contextHint: "Ask which appointment to cancel using the list.",
           },
@@ -1678,7 +1633,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: appointments.length
-              ? `${this.formatAppointmentsResponse(appointments)} Which one would you like to reschedule?`
+              ? `${formatAppointmentsResponse(appointments)} Which one would you like to reschedule?`
               : "I couldn't find any upcoming appointments to reschedule.",
             contextHint: "Ask which appointment to reschedule using the list.",
           },
@@ -1712,7 +1667,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: invoices.length
-              ? this.formatInvoicesResponse(invoices)
+              ? formatInvoicesResponse(invoices)
               : "You're all set. I don't see any open invoices right now.",
             contextHint: "Provide billing balance details.",
           },
@@ -1802,12 +1757,12 @@ export class ConversationSession {
       this.sessionState.conversation?.appointments ?? ([] as const);
     const appointmentOptions = appointments.map((appointment) => ({
       id: appointment.id,
-      label: this.formatAppointmentLabel(appointment),
+      label: formatAppointmentLabel(appointment),
     }));
     const availableSlots = this.sessionState.availableSlots ?? [];
     const slotOptions = availableSlots.map((slot) => ({
       id: slot.id,
-      label: this.formatSlotLabel(slot),
+      label: formatSlotLabel(slot),
     }));
     const confirmationOptions = [
       { id: "confirm", label: "Yes, confirm" },
@@ -1984,7 +1939,7 @@ export class ConversationSession {
             input,
             deps,
             streamId,
-            fallback: this.formatAppointmentsResponse(appointments),
+            fallback: formatAppointmentsResponse(appointments),
             contextHint: "Ask which appointment to cancel using the list.",
           },
         );
@@ -2042,7 +1997,7 @@ export class ConversationSession {
               deps,
               streamId,
               fallback: slots.length
-                ? this.formatAvailableSlotsResponse(
+                ? formatAvailableSlotsResponse(
                     slots,
                     "Which one works best?",
                   )
@@ -2143,7 +2098,7 @@ export class ConversationSession {
             input,
             deps,
             streamId,
-            fallback: this.formatAvailableSlotsResponse(
+            fallback: formatAvailableSlotsResponse(
               availableSlots,
               "Which one works best?",
             ),
@@ -2174,7 +2129,7 @@ export class ConversationSession {
             input,
             deps,
             streamId,
-            fallback: this.formatAppointmentsResponse(appointments),
+            fallback: formatAppointmentsResponse(appointments),
             contextHint: "Ask which appointment to reschedule using the list.",
           },
         );
@@ -2350,7 +2305,7 @@ export class ConversationSession {
         kind: "tool",
         toolName: decision.toolName,
         arguments: decision.arguments ?? {},
-        required: this.getActionPreconditions(decision.toolName),
+        required: getActionPreconditions(decision.toolName),
       });
       if (!actionPlan.success) {
         this.logger.warn(
@@ -2369,7 +2324,7 @@ export class ConversationSession {
         );
         return { callSessionId, replyText, actions: [] };
       }
-      const policyGate = this.evaluateActionPlan(actionPlan.data);
+      const policyGate = evaluateActionPlan(actionPlan.data, this.sessionState);
       if (!policyGate.ok) {
         const replyText = await this.narrateText(
           input,
@@ -2416,111 +2371,20 @@ export class ConversationSession {
     if (state.appointments.length) {
       const summary = state.appointments
         .map((appointment, index) => {
-          return `${index + 1}) ${this.formatAppointmentLabel(appointment)}`;
+          return `${index + 1}) ${formatAppointmentLabel(appointment)}`;
         })
         .join(" ");
       lines.push(`Cached appointments: ${summary}`);
     }
     if (this.sessionState.availableSlots?.length) {
       const summary = this.sessionState.availableSlots
-        .map((slot, index) => `${index + 1}) ${this.formatSlotLabel(slot)}`)
+        .map((slot, index) => `${index + 1}) ${formatSlotLabel(slot)}`)
         .join(" ");
       lines.push(`Cached available slots: ${summary}`);
     }
     return lines.join("\n");
   }
 
-  private normalizeToolArgs(
-    toolName: string,
-    args: Record<string, unknown>,
-  ): Record<string, unknown> {
-    const state = this.sessionState.conversation ?? initialConversationState();
-    const next: Record<string, unknown> & { customerId?: string } = {
-      ...args,
-    };
-    if (!state.verification.verified || !state.verification.customerId) {
-      return next;
-    }
-    switch (toolName) {
-      case "crm.listUpcomingAppointments":
-      case "crm.getNextAppointment":
-      case "crm.getOpenInvoices":
-      case "crm.getAvailableSlots":
-      case "crm.createAppointment":
-        if (!("customerId" in next)) {
-          next.customerId = state.verification.customerId;
-        }
-        break;
-      case "crm.verifyAccount":
-        if (!("customerId" in next)) {
-          next.customerId = state.verification.customerId;
-        }
-        break;
-      default:
-        break;
-    }
-    return next;
-  }
-
-  private getActionPreconditions(
-    toolName: ActionPlan["toolName"],
-  ): ActionPrecondition[] {
-    switch (toolName) {
-      case "crm.verifyAccount":
-      case "crm.lookupCustomerByPhone":
-      case "crm.lookupCustomerByNameAndZip":
-      case "crm.lookupCustomerByEmail":
-      case "agent.escalate":
-      case "agent.fallback":
-        return [];
-      default:
-        return ["verified"];
-    }
-  }
-
-  private evaluateActionPlan(plan: ActionPlan): {
-    ok: boolean;
-    message?: string;
-    contextHint?: string;
-  } {
-    const state = this.sessionState.conversation ?? initialConversationState();
-    const required = plan.required ?? [];
-    if (required.includes("verified") && !state.verification.verified) {
-      return {
-        ok: false,
-        message: "Please share the 5-digit ZIP code on your account first.",
-        contextHint: "Ask for the 5-digit ZIP code to verify the account.",
-      };
-    }
-    if (required.includes("has_appointments") && !state.appointments.length) {
-      return {
-        ok: false,
-        message: "Let me pull up your upcoming appointments first.",
-        contextHint: "Acknowledge and say you're fetching appointments.",
-      };
-    }
-    if (
-      required.includes("has_available_slots") &&
-      !(this.sessionState.availableSlots?.length ?? 0)
-    ) {
-      return {
-        ok: false,
-        message: "Let me check the available times first.",
-        contextHint: "Acknowledge and say you're checking availability.",
-      };
-    }
-    if (
-      required.includes("pending_cancellation") &&
-      !state.pendingCancellationId
-    ) {
-      return {
-        ok: false,
-        message: "Which appointment would you like to cancel?",
-        contextHint: "Ask which appointment should be canceled.",
-      };
-    }
-    return { ok: true };
-  }
 
   private async executeToolCall(
     toolName: string,
@@ -2531,7 +2395,11 @@ export class ConversationSession {
     acknowledgementText?: string,
   ): Promise<AgentMessageOutput> {
     const callSessionId = input.callSessionId ?? crypto.randomUUID();
-    const normalizedArgs = this.normalizeToolArgs(toolName, args) as {
+    const normalizedArgs = normalizeToolArgs(
+      toolName,
+      args,
+      this.sessionState.conversation,
+    ) as {
       appointmentId?: string;
       slotId?: string;
       reason?: string;
@@ -2596,7 +2464,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: appointments.length
-              ? this.formatAppointmentsResponse(appointments)
+              ? formatAppointmentsResponse(appointments)
               : "I couldn't find any upcoming appointments to cancel.",
             contextHint: "Ask which appointment to cancel using the list.",
             priorAcknowledgement: acknowledgementText,
@@ -2690,7 +2558,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: appointments.length
-              ? `${this.formatAppointmentsResponse(appointments)} Which one would you like to reschedule?`
+              ? `${formatAppointmentsResponse(appointments)} Which one would you like to reschedule?`
               : "I couldn't find any upcoming appointments to reschedule.",
             contextHint: "Ask which appointment to reschedule using the list.",
             priorAcknowledgement: acknowledgementText,
@@ -2762,7 +2630,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: slots.length
-              ? this.formatAvailableSlotsResponse(
+              ? formatAvailableSlotsResponse(
                   slots,
                   "Which one works best?",
                 )
@@ -2866,7 +2734,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: appointments.length
-              ? this.formatAppointmentsResponse(appointments)
+              ? formatAppointmentsResponse(appointments)
               : "I couldn't find any upcoming appointments. Would you like to schedule one?",
             contextHint: "Share upcoming appointments and ask next step.",
             priorAcknowledgement: acknowledgementText,
@@ -2919,7 +2787,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: appointment
-              ? this.formatAppointmentsResponse([
+              ? formatAppointmentsResponse([
                   {
                     id: appointment.id,
                     date: appointment.date,
@@ -2961,7 +2829,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: appointment
-              ? this.formatAppointmentsResponse([
+              ? formatAppointmentsResponse([
                   {
                     id: appointment.id,
                     date: appointment.date,
@@ -3009,7 +2877,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: invoices.length
-              ? this.formatInvoicesResponse(invoices)
+              ? formatInvoicesResponse(invoices)
               : "You're all set. I don't see any open invoices right now.",
             contextHint: "Share the balance and invoice status.",
             priorAcknowledgement: acknowledgementText,
@@ -3056,7 +2924,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: slots.length
-              ? this.formatAvailableSlotsResponse(
+              ? formatAvailableSlotsResponse(
                   slots,
                   "Which one works best?",
                 )
@@ -3351,9 +3219,10 @@ export class ConversationSession {
     _input: AgentMessageInput,
     deps: ReturnType<typeof createDependencies>,
   ): Promise<{ toolName: string; result: ToolResult | null; error?: string }> {
-    const normalizedArgs = this.normalizeToolArgs(
+    const normalizedArgs = normalizeToolArgs(
       call.toolName,
       call.arguments ?? {},
+      this.sessionState.conversation,
     ) as {
       customerId?: string;
       appointmentId?: string;
@@ -3908,7 +3777,7 @@ export class ConversationSession {
               },
               "conversation.session.narrate.stream.end",
             );
-            return this.sanitizeNarratorOutput(combined.trim()) || fallback;
+            return sanitizeNarratorOutput(combined.trim()) || fallback;
           }
           combined += token;
           if (!checkedForJson) {
@@ -3937,7 +3806,7 @@ export class ConversationSession {
             this.emitEvent({ type: "token", text: token });
           }
         }
-        const sanitized = this.sanitizeNarratorOutput(combined.trim());
+        const sanitized = sanitizeNarratorOutput(combined.trim());
         if (waitingForJson && sanitized) {
           this.emitNarratorTokens(sanitized, streamId);
         }
@@ -3957,7 +3826,7 @@ export class ConversationSession {
         if (!tokenCount && !sanitized) {
           try {
             const directText = await model.respond(respondInput);
-            const trimmed = this.sanitizeNarratorOutput(directText.trim());
+            const trimmed = sanitizeNarratorOutput(directText.trim());
             if (trimmed) {
               this.emitNarratorTokens(trimmed, streamId);
               this.logger.info(
@@ -3980,7 +3849,7 @@ export class ConversationSession {
         return sanitized || fallback;
       }
       const text = await model.respond(respondInput);
-      const trimmed = this.sanitizeNarratorOutput(text.trim());
+      const trimmed = sanitizeNarratorOutput(text.trim());
       this.logger.info(
         {
           callSessionId,
@@ -4003,52 +3872,6 @@ export class ConversationSession {
       this.emitNarratorTokens(fallback, streamId);
       return fallback;
     }
-  }
-
-  private sanitizeNarratorOutput(text: string): string {
-    const trimmed = text.trim();
-    if (!trimmed) {
-      return "";
-    }
-    // If entire text is JSON, try to extract the answer field
-    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-      try {
-        const parsed = JSON.parse(trimmed) as
-          | { answer?: string }
-          | Array<{ answer?: string }>;
-        if (Array.isArray(parsed)) {
-          const first = parsed.find((entry) => entry?.answer);
-          if (first?.answer) {
-            return String(first.answer).trim();
-          }
-        } else if (parsed.answer) {
-          return String(parsed.answer).trim();
-        }
-      } catch {
-        // Fall through to regex extraction for malformed JSON.
-      }
-      const match = trimmed.match(/"answer"\s*:\s*"([^"]*)"/);
-      if (match?.[1]) {
-        return match[1].replace(/\\"/g, '"').trim();
-      }
-    }
-    // Strip embedded JSON objects (function calls, tool calls) from anywhere in text
-    // Match patterns like {"name": ...} or {"arguments": ...}
-    const sanitized = trimmed
-      .replace(/\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}/g, "")
-      .replace(/\{[^{}]*"arguments"\s*:\s*[^{}]*\}/g, "")
-      .replace(/\{[^{}]*"tool"\s*:\s*"[^"]*"[^{}]*\}/g, "")
-      // Also strip markdown code blocks with JSON
-      .replace(/```json[\s\S]*?```/g, "")
-      .replace(/```[\s\S]*?```/g, "")
-      // Clean up any double spaces or trailing punctuation issues
-      .replace(/\s{2,}/g, " ")
-      .trim();
-    // If stripping left nothing meaningful, return empty
-    if (!sanitized || sanitized.length < 3) {
-      return "";
-    }
-    return sanitized;
   }
 
   private async selectOption(
@@ -4274,7 +4097,7 @@ export class ConversationSession {
       if (this.turnMetrics?.firstTokenAt !== null || this.statusSequence > 0) {
         return;
       }
-      const trimmed = this.sanitizeNarratorOutput(statusText).trim();
+      const trimmed = sanitizeNarratorOutput(statusText).trim();
       if (!trimmed) {
         return;
       }
@@ -4350,7 +4173,7 @@ export class ConversationSession {
         "conversation.session.status.failed",
       );
     }
-    const trimmed = this.sanitizeNarratorOutput(statusText).trim();
+    const trimmed = sanitizeNarratorOutput(statusText).trim();
     if (!trimmed) {
       return null;
     }
@@ -4399,162 +4222,6 @@ export class ConversationSession {
         },
       });
     }
-  }
-
-  private formatAppointmentsResponse(
-    appointments: Array<{
-      id: string;
-      date: string;
-      timeWindow: string;
-      addressSummary: string;
-    }>,
-  ): string {
-    const intro =
-      appointments.length === 1
-        ? "Here is your upcoming appointment:"
-        : "Here are your upcoming appointments:";
-    const lines = appointments.map((appointment, index) => {
-      const dateLabel = appointment.date;
-      const timeLabel = appointment.timeWindow;
-      return `${index + 1}) ${dateLabel} ${timeLabel} at ${appointment.addressSummary}`;
-    });
-    return [intro, ...lines].join(" ");
-  }
-
-  private formatAppointmentLabel(appointment: {
-    date: string;
-    timeWindow: string;
-    addressSummary: string;
-  }): string {
-    return `${appointment.date} ${appointment.timeWindow} at ${appointment.addressSummary}`;
-  }
-
-  private formatSlotLabel(slot: { date: string; timeWindow: string }): string {
-    return `${slot.date} ${slot.timeWindow}`;
-  }
-
-  private formatAvailableSlotsResponse(
-    slots: Array<{ date: string; timeWindow: string }>,
-    prompt?: string,
-  ): string {
-    const intro =
-      slots.length === 1
-        ? "Here is the next available time:"
-        : "Here are the next available times:";
-    const lines = slots.map((slot, index) => {
-      return `${index + 1}) ${this.formatSlotLabel(slot)}`;
-    });
-    const base = [intro, ...lines].join(" ");
-    return prompt ? `${base} ${prompt}` : base;
-  }
-
-  private formatInvoicesResponse(
-    invoices: Array<{
-      id: string;
-      balanceCents: number;
-      balance?: string;
-      currency?: string;
-      dueDate: string;
-      status: "open" | "paid" | "overdue";
-    }>,
-  ): string {
-    const intro =
-      invoices.length === 1
-        ? "Here is your open invoice:"
-        : "Here are your open invoices:";
-    const lines = invoices.map((invoice, index) => {
-      const balance =
-        invoice.balance ?? (invoice.balanceCents / 100).toFixed(2);
-      const currency = invoice.currency ?? "USD";
-      const amount =
-        currency === "USD" ? `$${balance}` : `${balance} ${currency}`;
-      const status = invoice.status === "overdue" ? " (overdue)" : "";
-      return `${index + 1}) ${amount} due ${invoice.dueDate}${status}`;
-    });
-    return [intro, ...lines].join(" ");
-  }
-
-  private formatConversationSummary(
-    session: {
-      id: string;
-      startedAt: string;
-      endedAt: string | null;
-      phoneE164: string;
-      status: string;
-      transport: string;
-      summary: string | null;
-      callSummary: string | null;
-      customer?: {
-        id: string;
-        displayName: string;
-        phoneE164: string;
-        addressSummary: string | null;
-        zipCode?: string | null;
-      };
-    },
-    turns: Array<{
-      id: string;
-      ts: string;
-      speaker: string;
-      text: string;
-      meta?: Record<string, unknown>;
-    }>,
-  ): string {
-    const lines: string[] = [];
-    lines.push(`# Conversation ${session.id}`);
-    lines.push("");
-    lines.push("## Session");
-    lines.push(`- Phone: ${session.phoneE164}`);
-    lines.push(`- Status: ${session.status}`);
-    lines.push(`- Transport: ${session.transport}`);
-    lines.push(`- Started: ${session.startedAt}`);
-    lines.push(`- Ended: ${session.endedAt ?? "in progress"}`);
-    if (session.customer) {
-      lines.push(
-        `- Customer: ${session.customer.displayName} (${session.customer.phoneE164})`,
-      );
-      if (session.customer.addressSummary) {
-        lines.push(`- Address: ${session.customer.addressSummary}`);
-      }
-      if (session.customer.zipCode) {
-        lines.push(`- ZIP: ${session.customer.zipCode}`);
-      }
-    }
-    if (session.callSummary) {
-      lines.push("");
-      lines.push("## Call summary");
-      lines.push(session.callSummary);
-    }
-    if (session.summary) {
-      lines.push("");
-      lines.push("## Raw session summary");
-      lines.push("```json");
-      lines.push(session.summary);
-      lines.push("```");
-    }
-    lines.push("");
-    lines.push("## Turns");
-    turns.forEach((turn, index) => {
-      const role =
-        turn.speaker === "system" ||
-        (turn.meta as { kind?: string } | undefined)?.kind === "status"
-          ? "System"
-          : turn.speaker === "agent"
-            ? "Assistant"
-            : "Customer";
-      lines.push("");
-      lines.push(`### Turn ${index + 1} (${role})`);
-      lines.push(`- Time: ${turn.ts}`);
-      lines.push(`- Text: ${turn.text}`);
-      if (turn.meta && Object.keys(turn.meta).length > 0) {
-        lines.push("");
-        lines.push("#### Meta");
-        lines.push("```json");
-        lines.push(JSON.stringify(turn.meta, null, 2));
-        lines.push("```");
-      }
-    });
-    return lines.join("\n");
   }
 
   private async handleBargeIn(): Promise<void> {
