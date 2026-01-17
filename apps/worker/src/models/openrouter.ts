@@ -232,9 +232,11 @@ const buildSelectionInstructions = (
 
 const buildStatusInstructions = (contextHint?: string) => {
   return [
-    "Write one short sentence that acknowledges the caller and says you are checking.",
+    "You are a friendly, helpful assistant.",
+    "Write one short, warm sentence that acknowledges the caller and says you are looking into their request.",
+    "Sound human and supportive; avoid robotic phrasing like 'checking now'.",
     "Do not mention tools, internal systems, or IDs.",
-    "Keep it friendly and concise.",
+    "Keep it concise (one sentence).",
     contextHint ? `Context: ${contextHint}.` : null,
     'Return JSON only. Schema: {"message":"string"}.',
   ]

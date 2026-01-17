@@ -490,7 +490,7 @@ export class ConversationSession {
       const message =
         error instanceof Error ? error.message : "RealtimeKit token failed.";
       this.logger.error(
-        { error: message, customerId },
+        { error: message, customerId: customer.id },
         "conversation.session.rtk_token_failed",
       );
       return Response.json({ ok: false, error: message }, { status: 500 });
