@@ -55,6 +55,10 @@ type SessionState = {
   conversation?: ConversationState;
   cancelWorkflowId?: string;
   rescheduleWorkflowId?: string;
+  pendingIntent?: {
+    kind: "appointments" | "cancel" | "reschedule" | "billing" | "escalate";
+    text: string;
+  };
 };
 
 type ClientMessage =
@@ -319,6 +323,7 @@ export class ConversationSession {
       const verificationResponse = await this.handleVerificationGate(
         input,
         deps,
+        streamId,
       );
       if (verificationResponse) {
         this.emitEvent({ type: "final", data: verificationResponse });
@@ -808,6 +813,7 @@ export class ConversationSession {
   private async handleVerificationGate(
     input: AgentMessageInput,
     deps: ReturnType<typeof createDependencies>,
+    streamId: number,
   ): Promise<AgentMessageOutput | null> {
     const state = this.sessionState.conversation ?? initialConversationState();
     if (state.verification.verified) {
@@ -819,12 +825,21 @@ export class ConversationSession {
     const zipMatch = input.text.match(/\b(\d{5})\b/);
     const callSessionId = input.callSessionId ?? crypto.randomUUID();
     if (!zipMatch || !customer) {
+      const pendingIntent = this.inferPendingIntent(input.text);
+      if (pendingIntent) {
+        this.sessionState = {
+          ...this.sessionState,
+          pendingIntent,
+        };
+        await this.state.storage.put("state", this.sessionState);
+      }
       const response: AgentMessageOutput = {
         callSessionId,
         replyText:
           "To get started, please share the 5-digit ZIP code on your account.",
         actions: [],
       };
+      this.emitNarratorTokens(response.replyText, streamId);
       this.sessionState = {
         ...this.sessionState,
         conversation: applyIntent(state, {
@@ -838,12 +853,14 @@ export class ConversationSession {
 
     const zipCode = zipMatch[1];
     if (!zipCode) {
-      return {
+      const response: AgentMessageOutput = {
         callSessionId,
         replyText:
           "To get started, please share the 5-digit ZIP code on your account.",
         actions: [],
       };
+      this.emitNarratorTokens(response.replyText, streamId);
+      return response;
     }
     this.emitEvent({ type: "status", text: "Checking that ZIP code now." });
     const ok = await verifyAccount(deps.crm, customer.id, zipCode);
@@ -855,11 +872,36 @@ export class ConversationSession {
         customer.id,
       );
     }
+    const verificationText = ok
+      ? "Thanks, you're verified. What would you like to do next?"
+      : "That ZIP does not match our records. Please share the 5-digit ZIP code on your account.";
+    let followupText: string | null = null;
+    if (ok && this.sessionState.pendingIntent) {
+      const pending = this.sessionState.pendingIntent;
+      this.sessionState = {
+        ...this.sessionState,
+        pendingIntent: undefined,
+      };
+      await this.state.storage.put("state", this.sessionState);
+      followupText = await this.handlePendingIntent(
+        pending,
+        {
+          ...input,
+          callSessionId,
+        },
+        deps,
+        streamId,
+      );
+    }
+    this.emitNarratorTokens(verificationText, streamId);
+    if (followupText) {
+      this.emitNarratorTokens(followupText, streamId);
+    }
     const response: AgentMessageOutput = {
       callSessionId,
-      replyText: ok
-        ? "Thanks, you're verified. What would you like to do next?"
-        : "That ZIP does not match our records. Please share the 5-digit ZIP code on your account.",
+      replyText: followupText
+        ? `${verificationText} ${followupText}`.trim()
+        : verificationText,
       actions: [],
     };
     this.sessionState = {
@@ -876,6 +918,140 @@ export class ConversationSession {
     };
     await this.state.storage.put("state", this.sessionState);
     return response;
+  }
+
+  private inferPendingIntent(
+    text: string,
+  ): SessionState["pendingIntent"] | null {
+    const lowered = text.toLowerCase();
+    if (/\bcancel\b/.test(lowered)) {
+      return { kind: "cancel", text };
+    }
+    if (/\breschedul(e|ing)\b/.test(lowered)) {
+      return { kind: "reschedule", text };
+    }
+    if (/\b(change|move)\b.*\bappointment\b/.test(lowered)) {
+      return { kind: "reschedule", text };
+    }
+    if (
+      /\b(appointment|appointments|schedule|scheduled|when)\b/.test(lowered)
+    ) {
+      return { kind: "appointments", text };
+    }
+    if (
+      /\b(bill|billing|invoice|payment|pay|balance|owe|owed)\b/.test(lowered)
+    ) {
+      return { kind: "billing", text };
+    }
+    if (
+      /\b(agent|human|representative|manager|supervisor|complaint|escalate)\b/.test(
+        lowered,
+      )
+    ) {
+      return { kind: "escalate", text };
+    }
+    return null;
+  }
+
+  private async handlePendingIntent(
+    intent: NonNullable<SessionState["pendingIntent"]>,
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+    _streamId: number,
+  ): Promise<string | null> {
+    const callSessionId = input.callSessionId ?? crypto.randomUUID();
+    if (!this.sessionState.conversation?.verification.customerId) {
+      return null;
+    }
+    switch (intent.kind) {
+      case "appointments": {
+        this.emitEvent({
+          type: "status",
+          text: "Looking up your appointments now.",
+        });
+        const appointments = await listUpcomingAppointments(
+          deps.crm,
+          this.sessionState.conversation.verification.customerId,
+          3,
+        );
+        await this.updateAppointmentSummary(
+          deps,
+          callSessionId,
+          input.phoneNumber,
+          appointments,
+        );
+        const replyText = appointments.length
+          ? this.formatAppointmentsResponse(appointments)
+          : "I couldn't find any upcoming appointments. Would you like to schedule one?";
+        const state =
+          this.sessionState.conversation ?? initialConversationState();
+        this.sessionState = {
+          ...this.sessionState,
+          conversation: applyIntent(state, {
+            type: "appointments_loaded",
+            appointments: appointments.map((appointment) => ({
+              id: appointment.id,
+              date: appointment.date,
+              timeWindow: appointment.timeWindow,
+              addressSummary: appointment.addressSummary,
+            })),
+          }),
+        };
+        await this.state.storage.put("state", this.sessionState);
+        return replyText;
+      }
+      case "cancel": {
+        const result = await this.handleCancelStart({
+          callSessionId,
+          customerId: this.sessionState.conversation.verification.customerId,
+          phoneNumber: input.phoneNumber,
+          message: intent.text,
+        });
+        if (!result.ok) {
+          return result.message ?? "Cancellation is temporarily unavailable.";
+        }
+        const appointments = result.appointments ?? [];
+        return appointments.length
+          ? `${this.formatAppointmentsResponse(appointments)} Reply with the appointment id you'd like to cancel.`
+          : "I couldn't find any upcoming appointments to cancel.";
+      }
+      case "reschedule": {
+        const result = await this.handleRescheduleStart({
+          callSessionId,
+          customerId: this.sessionState.conversation.verification.customerId,
+          phoneNumber: input.phoneNumber,
+          message: intent.text,
+        });
+        if (!result.ok) {
+          return result.message ?? "Rescheduling is temporarily unavailable.";
+        }
+        const appointments = result.appointments ?? [];
+        return appointments.length
+          ? `${this.formatAppointmentsResponse(appointments)} Reply with the appointment id you'd like to change.`
+          : "I couldn't find any upcoming appointments to reschedule.";
+      }
+      case "billing": {
+        const invoices = await getOpenInvoices(
+          deps.crm,
+          this.sessionState.conversation.verification.customerId,
+        );
+        return invoices.length
+          ? this.formatInvoicesResponse(invoices)
+          : "You're all set. I don't see any open invoices right now.";
+      }
+      case "escalate": {
+        const result = await deps.crm.escalate({
+          reason: "customer_request",
+          summary: intent.text,
+          customerId: this.sessionState.conversation.verification.customerId,
+        });
+        return result.ok
+          ? `I've asked a specialist to reach out. Your ticket ID is ${result.ticketId ?? "on file"}.`
+          : "I'm sorry, I couldn't start an escalation right now. Please try again in a moment.";
+      }
+      default:
+        return null;
+    }
   }
 
   private async handleEscalationFlow(
@@ -1092,6 +1268,12 @@ export class ConversationSession {
     const confirmation = this.parseConfirmation(text);
     const appointmentIdMatch = text.match(/^appt_[\w-]+$/i);
     const slotIdMatch = text.match(/^slot_[\w-]+$/i);
+    const appointments =
+      this.sessionState.conversation?.appointments ?? ([] as const);
+    const resolvedAppointmentId = this.resolveAppointmentSelection(
+      text,
+      appointments,
+    );
 
     if (this.sessionState.cancelWorkflowId) {
       if (appointmentIdMatch) {
@@ -1110,6 +1292,34 @@ export class ConversationSession {
             conversation: applyIntent(state, {
               type: "cancel_requested",
               appointmentId: appointmentIdMatch[0],
+            }),
+          };
+          await this.state.storage.put("state", this.sessionState);
+          const replyText = "Confirm cancelling this appointment? (yes or no)";
+          this.emitNarratorTokens(replyText, streamId);
+          return {
+            callSessionId,
+            replyText,
+            actions: [],
+          };
+        }
+      }
+      if (resolvedAppointmentId) {
+        const instance = await deps.workflows.cancel?.get(
+          this.sessionState.cancelWorkflowId,
+        );
+        if (instance) {
+          await instance.sendEvent({
+            type: CANCEL_WORKFLOW_EVENT_SELECT_APPOINTMENT,
+            payload: { appointmentId: resolvedAppointmentId },
+          });
+          const state =
+            this.sessionState.conversation ?? initialConversationState();
+          this.sessionState = {
+            ...this.sessionState,
+            conversation: applyIntent(state, {
+              type: "cancel_requested",
+              appointmentId: resolvedAppointmentId,
             }),
           };
           await this.state.storage.put("state", this.sessionState);
@@ -1151,6 +1361,15 @@ export class ConversationSession {
           };
         }
       }
+      if (appointments.length) {
+        const replyText = `${this.formatAppointmentsResponse(appointments)} Reply with the appointment id you'd like to cancel.`;
+        this.emitNarratorTokens(replyText, streamId);
+        return {
+          callSessionId,
+          replyText,
+          actions: [],
+        };
+      }
     }
 
     if (this.sessionState.rescheduleWorkflowId) {
@@ -1162,6 +1381,25 @@ export class ConversationSession {
           await instance.sendEvent({
             type: RESCHEDULE_WORKFLOW_EVENT_SELECT_APPOINTMENT,
             payload: { appointmentId: appointmentIdMatch[0] },
+          });
+          const replyText =
+            "Got it. Which new time works best? (share a slot id)";
+          this.emitNarratorTokens(replyText, streamId);
+          return {
+            callSessionId,
+            replyText,
+            actions: [],
+          };
+        }
+      }
+      if (resolvedAppointmentId) {
+        const instance = await deps.workflows.reschedule?.get(
+          this.sessionState.rescheduleWorkflowId,
+        );
+        if (instance) {
+          await instance.sendEvent({
+            type: RESCHEDULE_WORKFLOW_EVENT_SELECT_APPOINTMENT,
+            payload: { appointmentId: resolvedAppointmentId },
           });
           const replyText =
             "Got it. Which new time works best? (share a slot id)";
@@ -1211,6 +1449,15 @@ export class ConversationSession {
           };
         }
       }
+      if (appointments.length) {
+        const replyText = `${this.formatAppointmentsResponse(appointments)} Reply with the appointment id you'd like to change.`;
+        this.emitNarratorTokens(replyText, streamId);
+        return {
+          callSessionId,
+          replyText,
+          actions: [],
+        };
+      }
     }
 
     return null;
@@ -1222,6 +1469,67 @@ export class ConversationSession {
     }
     if (/^(no|nope|nah)\b/i.test(value)) {
       return false;
+    }
+    return null;
+  }
+
+  private resolveAppointmentSelection(
+    text: string,
+    appointments: Array<{
+      id: string;
+      date: string;
+      timeWindow: string;
+      addressSummary: string;
+    }>,
+  ): string | null {
+    if (!appointments.length) {
+      return null;
+    }
+    const lowered = text.toLowerCase();
+    const indexMatch = lowered.match(/\b(1|2|3|first|second|third)\b/);
+    if (indexMatch) {
+      const token = indexMatch[1];
+      const index =
+        token === "1" || token === "first"
+          ? 0
+          : token === "2" || token === "second"
+            ? 1
+            : 2;
+      const selected = appointments[index];
+      return selected?.id ?? null;
+    }
+    const dateMatch = lowered.match(
+      /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})\b/,
+    );
+    if (dateMatch) {
+      const monthToken = dateMatch[1];
+      if (!monthToken) {
+        return null;
+      }
+      const day = dateMatch[2]?.padStart(2, "0") ?? "";
+      const monthMap: Record<string, string> = {
+        jan: "01",
+        feb: "02",
+        mar: "03",
+        apr: "04",
+        may: "05",
+        jun: "06",
+        jul: "07",
+        aug: "08",
+        sep: "09",
+        oct: "10",
+        nov: "11",
+        dec: "12",
+      };
+      const month = monthMap[monthToken];
+      if (month && day) {
+        const match = appointments.find(
+          (appointment) => appointment.date.slice(5) === `${month}-${day}`,
+        );
+        if (match) {
+          return match.id;
+        }
+      }
     }
     return null;
   }

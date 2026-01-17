@@ -50,11 +50,12 @@ export default function CustomerPage() {
 
   return (
     <div className="fixed inset-0 top-[57px] flex overflow-hidden bg-sand-200">
-      {/* Sidebar - wider and more spacious */}
+      {/* Sidebar - full screen on mobile, fixed width on desktop */}
       <aside
         className={`
-          fixed inset-y-0 left-0 top-[57px] z-30 w-80 flex-shrink-0 transform border-r border-ink-200 bg-white transition-transform duration-200 ease-in-out
-          lg:w-96 md:relative md:top-0 md:translate-x-0
+          fixed bottom-0 left-0 right-0 top-[57px] z-30 transform bg-white transition-transform duration-200 ease-in-out
+          md:relative md:right-auto md:top-0 md:w-80 md:flex-shrink-0 md:border-r md:border-ink-200 md:translate-x-0
+          lg:w-96
           ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
         `}
       >
