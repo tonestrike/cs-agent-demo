@@ -20,7 +20,7 @@ export function ChatMessages({ messages }: ChatMessagesProps) {
   return (
     <div
       ref={listRef}
-      className="scroll-area flex h-full flex-col gap-3 overflow-y-auto bg-sand-200 p-4 sm:p-6"
+      className="scroll-area flex h-full flex-col gap-3 overflow-y-auto bg-sand-200 pt-4 pr-4 pb-0 pl-4 sm:pt-6 sm:pr-6 sm:pb-0 sm:pl-6"
       onScroll={(event) => {
         const target = event.currentTarget;
         const distanceFromBottom =
