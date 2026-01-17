@@ -279,10 +279,15 @@ type ConversationFlowState = {
 - This triggers a new token request, which creates a new participant
 - The `needsFreshParticipant` logic in `handleRealtimeTokenRequest` creates new participant when `callSessionId` differs from `storedRtkCallSessionId`
 
-**Potential fixes**:
-- Persist RTK participant ID on the customer record (for verified customers)
-- Use a stable session identifier that doesn't change across component remounts
-- Add debouncing or guards against rapid reconnection cycles
+**Applied fix**:
+- Added `meetingSessionRef` to track which session/customer the current meeting was created for
+- Effect now checks if a meeting already exists for the exact same session before recreating
+- This prevents unnecessary meeting recreation when the effect runs multiple times with the same session
+
+**Further investigation needed**:
+- If component is unmounting/remounting due to parent re-renders, meetings will still be recreated (unavoidable)
+- Consider persisting RTK participant ID on customer record for verified customers
+- Add React DevTools investigation to understand if component remounting is the issue
 
 ### Prior Conversations Populating
 
