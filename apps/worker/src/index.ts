@@ -132,7 +132,9 @@ export default {
               callSessionId: body.callSessionId,
             },
           );
-          return withCors(Response.json({ ok: true, voiceEnabled: result.voiceEnabled }));
+          return withCors(
+            Response.json({ ok: true, voiceEnabled: result.voiceEnabled }),
+          );
         }
         if (action === "deinit" && request.method === "POST") {
           await stub.deinit();
