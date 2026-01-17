@@ -29,6 +29,10 @@ class_name = "PestCallAgent"
 name = "CONVERSATION_HUB"
 class_name = "ConversationHub"
 
+[[durable_objects.bindings]]
+name = "CONVERSATION_SESSION"
+class_name = "ConversationSession"
+
 [[workflows]]
 name = "pestcall-reschedule"
 binding = "RESCHEDULE_WORKFLOW"
@@ -51,6 +55,10 @@ new_sqlite_classes = ["PestCallAgent"]
 [[migrations]]
 tag = "v2"
 new_classes = ["ConversationHub"]
+
+[[migrations]]
+tag = "v3"
+new_classes = ["ConversationSession"]
 
 [observability]
 

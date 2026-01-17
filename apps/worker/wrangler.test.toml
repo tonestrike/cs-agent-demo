@@ -17,6 +17,14 @@ migrations_dir = "migrations"
 name = "CONVERSATION_HUB"
 class_name = "ConversationHub"
 
+[[durable_objects.bindings]]
+name = "CONVERSATION_SESSION"
+class_name = "ConversationSession"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["ConversationHub", "ConversationSession"]
+
 [[workflows]]
 name = "pestcall-reschedule"
 binding = "RESCHEDULE_WORKFLOW"

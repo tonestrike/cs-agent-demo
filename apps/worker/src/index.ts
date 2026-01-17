@@ -10,6 +10,7 @@ import { router } from "./router";
 export { PestCallAgent } from "./agents/pestcall";
 export { CancelWorkflow } from "./workflows/cancel";
 export { ConversationHub } from "./durable-objects/conversation-hub";
+export { ConversationSession } from "./durable-objects/conversation-session";
 export { RescheduleWorkflow } from "./workflows/reschedule";
 export { VerificationWorkflow } from "./workflows/verification";
 
@@ -36,6 +37,36 @@ const handler = new RPCHandler(router, {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    const conversationMatch = url.pathname.match(
+      /^\/api\/conversations\/([^/]+)\/(socket|message|resync)$/,
+    );
+    if (conversationMatch) {
+      if (!env.CONVERSATION_SESSION) {
+        return new Response("Conversation session not configured", {
+          status: 500,
+        });
+      }
+      const token =
+        request.headers.get("x-demo-auth") ??
+        request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
+        url.searchParams.get("token") ??
+        "";
+      if (env.DEMO_AUTH_TOKEN && token !== env.DEMO_AUTH_TOKEN) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      const conversationId = conversationMatch[1] ?? "";
+      const action = conversationMatch[2] ?? "";
+      if (!conversationId) {
+        return new Response("Conversation id required", { status: 400 });
+      }
+      const id = env.CONVERSATION_SESSION.idFromName(conversationId);
+      const stub = env.CONVERSATION_SESSION.get(id);
+      if (action === "socket") {
+        return stub.fetch(request);
+      }
+      const target = `https://conversation-session/${action}`;
+      return stub.fetch(new Request(target, request));
+    }
     if (url.pathname.startsWith("/ws/conversations/")) {
       if (!env.CONVERSATION_HUB) {
         return new Response("Conversation hub not configured", {

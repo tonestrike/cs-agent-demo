@@ -33,6 +33,7 @@ export const envSchema = z.object({
   OPENROUTER_BASE_URL: z.string().optional(),
   PestCallAgent: z.custom<DurableObjectNamespace>().optional(),
   CONVERSATION_HUB: z.custom<DurableObjectNamespace>().optional(),
+  CONVERSATION_SESSION: z.custom<DurableObjectNamespace>().optional(),
   RESCHEDULE_WORKFLOW: z.custom<Workflow>().optional(),
   VERIFY_WORKFLOW: z.custom<Workflow>().optional(),
   CANCEL_WORKFLOW: z.custom<Workflow>().optional(),

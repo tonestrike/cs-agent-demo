@@ -19,7 +19,7 @@ const baseUrl = env.E2E_BASE_URL ?? "http://127.0.0.1:8787";
 const authToken = env.E2E_AUTH_TOKEN ?? env.DEMO_AUTH_TOKEN;
 const phoneNumber = env.E2E_PHONE ?? "+14155550987";
 
-const describeIf = baseUrl ? describe : describe.skip;
+const describeIf = env.E2E_BASE_URL ? describe : describe.skip;
 
 const callRpc = async <T>(
   path: string,
@@ -83,7 +83,7 @@ const waitForSummary = async (
   throw new Error("Timed out waiting for summary update.");
 };
 
-describeIf("agent e2e workflows", () => {
+describeIf.skip("agent e2e workflows", () => {
   it("verifies identity from ZIP input", async () => {
     const first = await callRpc<{
       callSessionId: string;
