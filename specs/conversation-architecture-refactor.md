@@ -269,6 +269,7 @@ Not started:
 - RealtimeKit transcript wiring for voice.
 - Prefetch strategies (appointments/slots) to reduce perceived latency.
 - Documentation updates for RealtimeKit setup + transcript mapping.
+ - Known issues list for RealtimeKit UI tab.
 
 ### Parallelizable workstreams
 Workstream A: RealtimeKit UI + text transport (frontend)
@@ -277,6 +278,13 @@ Workstream A: RealtimeKit UI + text transport (frontend)
   - [x] Instantiate the RealtimeKit meeting that uses the chat config and render `<rtk-chat>` inside the existing chat page/layout.
   - [x] Issue RTK auth tokens from `/api/conversations/:id/rtk-token` so verified customers can join the meeting with their persistent participant id.
   - [x] Hook chat events to hit `/api/conversations/:id/message` (oRPC) and keep the doc’s task list in sync whenever we finish a step; this area is isolated to Workstream A so others can update their sections independently.
+  - [x] Split classic + realtime UI into separate views so state does not leak across tabs.
+  - [x] Register RealtimeKit web components with `defineCustomElements`.
+  - [x] Send RealtimeKit chat updates and transcript events to the DO (typed + mic input).
+  - [ ] Resolve RealtimeKit UI teardown errors during rapid tab/session switches.
+  - [ ] Verify that `meeting.chat` and `meeting.participants` are always present before RTK chat mounts.
+  - [ ] Confirm transcript events fire with the current preset in production.
+  - [ ] Document remaining RTK UI caveats + finalize the Workstream A checklist.
 
 Workstream B: DO streaming loop + latency (backend)
 - Emit immediate narrator token on turn start (first-token-fast).
@@ -304,7 +312,21 @@ M1: First-token-fast + reduced model round trips (A/B) — in progress
 M2: RealtimeKit text chat wired to DO (A) — in progress
   - Done: register web components, init meeting, mount `<rtk-chat>`.
   - Done: bridge chat events to `/api/conversations/:id/message`.
+  - Done: separate realtime UI tab state + hooks.
   - Remaining: keep realtime docs updated.
+  - Remaining: resolve RTK UI teardown errors and confirm transcript events in prod.
+
+### Known issues (RealtimeKit UI)
+- RTK UI can throw `Cannot read properties of null (reading 'self')` during
+  `rtk-chat` teardown when the meeting is unset quickly (likely on rapid tab or
+  session switches). Need to confirm root cause and best fix.
+- RTK UI can throw `Cannot read properties of undefined (reading '_events')`
+  when event listeners attach before `meeting.chat` is ready. We now request
+  chat/participant modules, but need to validate consistently.
+- Transcript events depend on RealtimeKit preset configuration; verify the
+  configured preset enables AI transcription in production.
+- Reference docs for RTK UI components:
+  [`docs/cloudflare/realtime-components.md`](../docs/cloudflare/realtime-components.md).
 M3: Voice transcripts wired to DO (C) — not started
   - Remaining: map `meeting.ai` transcripts to DO events; use final transcript for tool calls.
 M4: Quality and prompt tuning complete (D) — in progress

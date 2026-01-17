@@ -150,7 +150,10 @@ export function RealtimeKitChatPanel({
     const cleanup = () => {
       const client = meetingRef.current;
       if (client) {
-        client.leave().catch(() => {});
+        // Allow RTK web components to detach listeners before tearing down.
+        window.setTimeout(() => {
+          client.leave().catch(() => {});
+        }, 0);
         meetingRef.current = null;
       }
       setMeeting(null);

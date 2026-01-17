@@ -218,6 +218,17 @@ export class ConversationSession {
     firstTokenAt: number | null;
     firstStatusAt: number | null;
   } | null = null;
+  private turnTimings: {
+    verificationMs?: number;
+    workflowSelectionMs?: number;
+    toolFlowMs?: number;
+    agentMessageMs?: number;
+    totalMs?: number;
+    modelAdapterMs?: number;
+    customerContextMs?: number;
+    recentMessagesMs?: number;
+    modelGenerateMs?: number;
+  } | null = null;
 
   constructor(
     private state: DurableObjectState,
@@ -615,6 +626,7 @@ export class ConversationSession {
     this.turnDecision = null;
     this.turnToolCalls = [];
     this.turnStatusTexts = [];
+    this.turnTimings = {};
     this.canceledStreamIds.delete(streamId);
     await this.setSpeaking(true);
     let lastStatus = "";
@@ -624,6 +636,19 @@ export class ConversationSession {
       firstTokenAt: null,
       firstStatusAt: null,
     };
+    this.logger.info(
+      {
+        callSessionId,
+        turnId: this.activeTurnId,
+        streamId,
+        conversation: this.sessionState.conversation,
+        pendingIntent: this.sessionState.pendingIntent ?? null,
+        cancelWorkflowId: this.sessionState.cancelWorkflowId ?? null,
+        rescheduleWorkflowId: this.sessionState.rescheduleWorkflowId ?? null,
+        availableSlotsCount: this.sessionState.availableSlots?.length ?? 0,
+      },
+      "conversation.session.state.snapshot",
+    );
     this.logger.info(
       {
         callSessionId,
@@ -670,10 +695,24 @@ export class ConversationSession {
     };
     scheduleFiller();
     try {
+      const verificationStart = Date.now();
       const verificationResponse = await this.handleVerificationGate(
         activeInput,
         deps,
         streamId,
+      );
+      const verificationMs = Date.now() - verificationStart;
+      if (this.turnTimings) {
+        this.turnTimings.verificationMs = verificationMs;
+      }
+      this.logger.info(
+        {
+          callSessionId,
+          turnId: this.activeTurnId,
+          verificationMs,
+          handled: Boolean(verificationResponse),
+        },
+        "conversation.session.step.verification",
       );
 
       if (verificationResponse) {
@@ -689,10 +728,24 @@ export class ConversationSession {
       }
 
       // Handle workflow selection
+      const workflowStart = Date.now();
       const selectionResponse = await this.handleWorkflowSelection(
         activeInput,
         deps,
         streamId,
+      );
+      const workflowMs = Date.now() - workflowStart;
+      if (this.turnTimings) {
+        this.turnTimings.workflowSelectionMs = workflowMs;
+      }
+      this.logger.info(
+        {
+          callSessionId,
+          turnId: this.activeTurnId,
+          workflowSelectionMs: workflowMs,
+          handled: Boolean(selectionResponse),
+        },
+        "conversation.session.step.workflow_selection",
       );
       if (selectionResponse) {
         this.emitEvent({ type: "final", data: selectionResponse });
@@ -702,10 +755,24 @@ export class ConversationSession {
         await this.recordTurns(deps, activeInput, selectionResponse, meta);
         return selectionResponse;
       }
+      const toolFlowStart = Date.now();
       const toolResponse = await this.handleToolCallingFlow(
         activeInput,
         deps,
         streamId,
+      );
+      const toolFlowMs = Date.now() - toolFlowStart;
+      if (this.turnTimings) {
+        this.turnTimings.toolFlowMs = toolFlowMs;
+      }
+      this.logger.info(
+        {
+          callSessionId,
+          turnId: this.activeTurnId,
+          toolFlowMs,
+          handled: Boolean(toolResponse),
+        },
+        "conversation.session.step.tool_flow",
       );
       if (toolResponse) {
         this.emitEvent({ type: "final", data: toolResponse });
@@ -715,6 +782,7 @@ export class ConversationSession {
         await this.recordTurns(deps, activeInput, toolResponse, meta);
         return toolResponse;
       }
+      const agentStart = Date.now();
       const response = await handleAgentMessage(deps, input, undefined, {
         onStatus: (status) => {
           const text = status.text.trim();
@@ -738,6 +806,18 @@ export class ConversationSession {
           this.emitEvent({ type: "token", text: token });
         },
       });
+      const agentMs = Date.now() - agentStart;
+      if (this.turnTimings) {
+        this.turnTimings.agentMessageMs = agentMs;
+      }
+      this.logger.info(
+        {
+          callSessionId,
+          turnId: this.activeTurnId,
+          agentMessageMs: agentMs,
+        },
+        "conversation.session.step.agent_message",
+      );
       if (!this.canceledStreamIds.has(streamId)) {
         this.emitEvent({ type: "final", data: response });
         await this.updateSessionState(input, response);
@@ -763,6 +843,10 @@ export class ConversationSession {
       }
       return fallback;
     } finally {
+      if (this.turnMetrics && this.turnTimings) {
+        this.turnTimings.totalMs =
+          Date.now() - (this.turnMetrics.startedAt ?? Date.now());
+      }
       const metrics = this.turnMetrics;
       const firstTokenMs =
         metrics?.firstTokenAt === null
@@ -777,6 +861,7 @@ export class ConversationSession {
           callSessionId,
           first_token_ms: firstTokenMs,
           time_to_status_ms: firstStatusMs,
+          total_ms: this.turnTimings?.totalMs ?? null,
         },
         "conversation.session.turn.latency",
       );
@@ -1136,6 +1221,7 @@ export class ConversationSession {
     deps: ReturnType<typeof createDependencies>,
     callSessionId: string,
   ): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
+    const start = Date.now();
     const turns = await deps.calls.getRecentTurns({ callSessionId, limit: 8 });
     const messages = turns
       .map((turn) => {
@@ -1149,6 +1235,7 @@ export class ConversationSession {
     this.logger.info(
       {
         callSessionId,
+        durationMs: Date.now() - start,
         messageCount: chronological.length,
         messages: chronological,
       },
@@ -1663,6 +1750,19 @@ export class ConversationSession {
     if (!callSessionId) {
       return null;
     }
+    this.logger.info(
+      {
+        callSessionId,
+        turnId: this.activeTurnId,
+        cancelWorkflowId: this.sessionState.cancelWorkflowId ?? null,
+        rescheduleWorkflowId: this.sessionState.rescheduleWorkflowId ?? null,
+        appointmentsCount:
+          this.sessionState.conversation?.appointments.length ?? 0,
+        availableSlotsCount: this.sessionState.availableSlots?.length ?? 0,
+        inputText: input.text,
+      },
+      "conversation.session.workflow.selection",
+    );
     if (
       !this.sessionState.cancelWorkflowId &&
       !this.sessionState.rescheduleWorkflowId
@@ -2012,10 +2112,25 @@ export class ConversationSession {
       return null;
     }
     const callSessionId = input.callSessionId ?? crypto.randomUUID();
+    const modelStart = Date.now();
     const model = await this.getModelAdapter(deps);
+    const modelMs = Date.now() - modelStart;
+    if (this.turnTimings) {
+      this.turnTimings.modelAdapterMs = modelMs;
+    }
+    const customerStart = Date.now();
     const customer = await this.getCustomerContext(deps, input);
+    const customerMs = Date.now() - customerStart;
+    if (this.turnTimings) {
+      this.turnTimings.customerContextMs = customerMs;
+    }
     const context = this.buildModelContext();
+    const messagesStart = Date.now();
     const messages = await this.getRecentMessages(deps, callSessionId);
+    const messagesMs = Date.now() - messagesStart;
+    if (this.turnTimings) {
+      this.turnTimings.recentMessagesMs = messagesMs;
+    }
     try {
       this.recordModelCall("generate", model);
       this.logger.info(
@@ -2032,11 +2147,15 @@ export class ConversationSession {
         {
           callSessionId,
           turnId: this.activeTurnId,
+          modelMs,
+          customerMs,
+          messagesMs,
           messageCount: messages.length,
           messages,
         },
         "conversation.session.generate.input",
       );
+      const generateStart = Date.now();
       const decision = await model.generate({
         text: input.text,
         customer,
@@ -2044,10 +2163,15 @@ export class ConversationSession {
         context,
         messages,
       });
+      const generateMs = Date.now() - generateStart;
+      if (this.turnTimings) {
+        this.turnTimings.modelGenerateMs = generateMs;
+      }
       this.logger.info(
         {
           callSessionId,
           turnId: this.activeTurnId,
+          generateMs,
           decisionType: decision.type,
           toolName: "toolName" in decision ? decision.toolName : null,
           argKeys:
@@ -3191,6 +3315,8 @@ export class ConversationSession {
       "conversation.session.narrate.input",
     );
     try {
+      const respondStart = Date.now();
+      let firstTokenMs: number | null = null;
       if (model.respondStream) {
         let combined = "";
         let waitingForJson = false;
@@ -3205,6 +3331,8 @@ export class ConversationSession {
                 tokenCount,
                 combinedLength: combined.length,
                 waitingForJson,
+                respondMs: Date.now() - respondStart,
+                firstTokenMs,
                 canceled: true,
               },
               "conversation.session.narrate.stream.end",
@@ -3222,6 +3350,9 @@ export class ConversationSession {
           }
           if (!waitingForJson) {
             tokenCount += 1;
+            if (firstTokenMs === null) {
+              firstTokenMs = Date.now() - respondStart;
+            }
             this.emitEvent({ type: "token", text: token });
           }
         }
@@ -3237,6 +3368,8 @@ export class ConversationSession {
             combinedLength: combined.length,
             waitingForJson,
             sanitizedLength: sanitized.length,
+            respondMs: Date.now() - respondStart,
+            firstTokenMs,
           },
           "conversation.session.narrate.stream.end",
         );
@@ -3244,6 +3377,15 @@ export class ConversationSession {
       }
       const text = await model.respond(respondInput);
       const trimmed = this.sanitizeNarratorOutput(text.trim());
+      this.logger.info(
+        {
+          callSessionId,
+          toolName: toolResult.toolName,
+          respondMs: Date.now() - respondStart,
+          textLength: trimmed.length,
+        },
+        "conversation.session.narrate.complete",
+      );
       if (trimmed) {
         this.emitNarratorTokens(trimmed, streamId);
         return trimmed;
@@ -3437,6 +3579,7 @@ export class ConversationSession {
       decision: this.turnDecision,
       toolCalls: [...this.turnToolCalls],
       statusTexts: [...this.turnStatusTexts],
+      timings: this.turnTimings ? { ...this.turnTimings } : null,
       latency: {
         firstTokenMs,
         firstStatusMs,
@@ -3464,6 +3607,7 @@ export class ConversationSession {
     const context = this.buildModelContext();
     let statusText = fallback;
     try {
+      const statusStart = Date.now();
       this.recordModelCall("status", model);
       this.logger.info(
         {
@@ -3489,6 +3633,14 @@ export class ConversationSession {
         context,
         messages,
       });
+      this.logger.info(
+        {
+          callSessionId,
+          statusMs: Date.now() - statusStart,
+          statusLength: statusText?.length ?? 0,
+        },
+        "conversation.session.status.complete",
+      );
     } catch (error) {
       this.logger.error(
         { error: error instanceof Error ? error.message : "unknown" },
