@@ -163,9 +163,10 @@ export function RealtimeKitChatPanel({
   }, [enableTts]);
 
   // Send message to conversation API
+  const phoneE164 = customer?.phoneE164;
   const sendToConversation = useCallback(
     async (text: string, source: string) => {
-      if (!sessionId || !customer) return;
+      if (!sessionId || !phoneE164) return;
       setLastActivity({
         type: "send",
         text: `[${source}] ${text.slice(0, 50)}`,
@@ -178,7 +179,7 @@ export function RealtimeKitChatPanel({
             method: "POST",
             headers: getApiHeaders(),
             body: JSON.stringify({
-              phoneNumber: customer.phoneE164,
+              phoneNumber: phoneE164,
               text,
               callSessionId: sessionId,
               source,
@@ -203,7 +204,7 @@ export function RealtimeKitChatPanel({
         });
       }
     },
-    [customer, sessionId],
+    [phoneE164, sessionId],
   );
 
   // Clear all timers
@@ -229,7 +230,7 @@ export function RealtimeKitChatPanel({
       clearTimers();
     };
 
-    if (!sessionId || !customer) {
+    if (!sessionId || !customer?.id) {
       cleanup();
       setStatus("Waiting for conversation session...");
       return;
@@ -291,9 +292,6 @@ export function RealtimeKitChatPanel({
       cancelled = true;
       cleanup();
     };
-    // Use customer.id instead of customer object to avoid re-running when
-    // React Query returns new object reference with same data
-    // biome-ignore lint/correctness/useExhaustiveDependencies: customer.id is stable identifier
   }, [sessionId, customer?.id, clearTimers]);
 
   // Wait for meeting emitters to be ready before enabling UI
@@ -469,7 +467,7 @@ export function RealtimeKitChatPanel({
 
   // WebSocket for TTS playback of assistant responses
   useEffect(() => {
-    if (!sessionId || !customer) {
+    if (!sessionId || !customer?.id) {
       setWsConnected(false);
       return;
     }
@@ -583,9 +581,6 @@ export function RealtimeKitChatPanel({
       socket.close();
       setWsConnected(false);
     };
-    // Use customer?.id instead of customer object to avoid reconnecting when
-    // React Query returns new object reference with same data
-    // biome-ignore lint/correctness/useExhaustiveDependencies: customer?.id is stable identifier
   }, [sessionId, customer?.id]);
 
   // Assign meeting to RTK web components with retry logic
