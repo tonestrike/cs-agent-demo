@@ -213,36 +213,36 @@ export function RealtimeChatView({
           </span>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-hidden flex flex-col">
-          <div className="flex-1 overflow-hidden px-4 pb-6">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-ink-200 pb-3">
-              <div className="space-y-1">
-                <p className="text-xs text-ink-500">
-                  Start an incoming call session (runs verification before the
-                  customer replies).
-                </p>
-                <p className="text-[11px] text-ink-400">
-                  Mic + live transcripts stream here; bot voice is optional.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTtsEnabled((prev) => !prev)}
-                  className="rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-semibold text-ink-600 transition hover:bg-sand-50"
-                >
-                  {ttsEnabled ? "Bot voice on" : "Bot voice off"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleStartCall}
-                  disabled={!selectedCustomer || startingCall}
-                  className="rounded-lg border border-ink-200 bg-white px-4 py-2 text-xs font-semibold text-ink-600 transition hover:bg-sand-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {startingCall ? "Starting..." : "Start call"}
-                </button>
-              </div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4">
+          <div className="mb-3 flex flex-shrink-0 flex-wrap items-center justify-between gap-3 border-b border-ink-200 pb-3">
+            <div className="space-y-1">
+              <p className="text-xs text-ink-500">
+                Start an incoming call session (runs verification before the
+                customer replies).
+              </p>
+              <p className="text-[11px] text-ink-400">
+                Mic + live transcripts stream here; bot voice is optional.
+              </p>
             </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setTtsEnabled((prev) => !prev)}
+                className="rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-semibold text-ink-600 transition hover:bg-sand-50"
+              >
+                {ttsEnabled ? "Bot voice on" : "Bot voice off"}
+              </button>
+              <button
+                type="button"
+                onClick={handleStartCall}
+                disabled={!selectedCustomer || startingCall}
+                className="rounded-lg border border-ink-200 bg-white px-4 py-2 text-xs font-semibold text-ink-600 transition hover:bg-sand-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {startingCall ? "Starting..." : "Start call"}
+              </button>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1">
             <RealtimeKitChatPanel
               sessionId={callSessionId}
               customer={selectedCustomer}

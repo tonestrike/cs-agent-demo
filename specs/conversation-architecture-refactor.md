@@ -188,6 +188,8 @@ The Worker forwards the DO event stream to the client unchanged.
 ## Decisions (open)
 - RealtimeKit text adoption: keep custom UI for typed chat; revisit only if we need a unified voice+text session UI.
 - Prefetch strategy: pull appointments/slots after verification to reduce perceived latency.
+- Provider split: narrator streaming on most reliable direct provider; interpreter/decision on cheaper model.
+- Streaming fallback policy: when to switch to non-streamed respond and/or alternate provider.
 
 ## Streaming requirements (must-haves)
 - Acknowledgement first token is streamed for reschedule/cancel/appointments/billing intents.
@@ -195,6 +197,25 @@ The Worker forwards the DO event stream to the client unchanged.
 - Narrator streaming must work even when workflow-driven or tool results are pending.
 - Per-turn latency (`first_token_ms`, `time_to_status_ms`) is logged with `callSessionId`.
 - Provide a human-readable markdown summary per conversation including model/tool details and latency.
+
+## Plan (current work)
+1) Streaming diagnostics
+   - Log `content-type`, `cache-control`, `transfer-encoding` for OpenRouter streams.
+   - Record `firstChunkMs`, `lineCount`, `eventCount`, `deltaCount`, `emptyDeltaCount`, and key histograms.
+   - Sample first/last SSE line for each stream.
+2) Streaming robustness
+   - Expand SSE parsing to accept multiple delta/message shapes.
+   - Fallback emit: if a stream ends with zero deltas but has a final message, emit that content.
+   - Optional future: timeout fallback to `respond` when no tokens in N ms.
+3) Status guidance centralization
+   - Single shared tool-status config for fallback text + instruction hints.
+   - Remove duplicated status/ack maps from per-call sites.
+4) Context hygiene
+   - Keep status turns in storage for audit but exclude from model context.
+   - Enforce consistent ordering (chronological) for model input.
+5) Provider strategy (next)
+   - A/B: Workers AI for `status` + `respond`, OpenRouter for `generate`.
+   - If streaming still fails, move narrator streaming to direct SDK path.
 
 
 ## API surface

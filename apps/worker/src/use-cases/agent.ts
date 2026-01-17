@@ -29,6 +29,11 @@ import {
   VERIFY_WORKFLOW_EVENT_ZIP,
 } from "../workflows/constants";
 import {
+  DEFAULT_TOOL_STATUS_MESSAGE,
+  DEFAULT_TOOL_STATUS_HINT,
+  getToolStatusConfig,
+} from "../models/tool-status";
+import {
   cancelAppointment as cancelAppointmentUseCase,
   rescheduleAppointment as rescheduleAppointmentUseCase,
 } from "./appointments";
@@ -61,41 +66,11 @@ type AgentMessageOptions = {
   onToken?: (token: string) => void;
 };
 
-const DEFAULT_TOOL_STATUS_MESSAGE = "Give me a moment while I look into that.";
-
-const TOOL_STATUS_MESSAGES: Partial<Record<AgentToolName, string>> = {
-  "crm.verifyAccount": "Thanks, I'll check that ZIP for you.",
-  "crm.getNextAppointment": "Let me pull up your next appointment.",
-  "crm.listUpcomingAppointments": "Let me pull up your upcoming appointments.",
-  "crm.getAppointmentById": "Let me pull up that appointment.",
-  "crm.getOpenInvoices": "Let me check your balance.",
-  "crm.getAvailableSlots": "Let me check the available time slots.",
-  "crm.rescheduleAppointment": "I'll work on rescheduling that now.",
-  "crm.cancelAppointment": "I'll take care of that cancellation now.",
-  "crm.createAppointment": "I'll get that appointment set up now.",
-  "crm.getServicePolicy": "Let me pull up that policy.",
-  "crm.escalate": "I'll connect you with a specialist.",
-  "agent.escalate": "I'll connect you with a specialist.",
-};
-
 const statusMessageForTool = (toolName: AgentToolName) =>
-  TOOL_STATUS_MESSAGES[toolName] ?? DEFAULT_TOOL_STATUS_MESSAGE;
-
-const DEFAULT_TOOL_STATUS_HINT = "your request";
-
-const TOOL_STATUS_HINTS: Partial<Record<AgentToolName, string>> = {
-  "crm.getNextAppointment": "next appointment",
-  "crm.listUpcomingAppointments": "next appointment",
-  "crm.getAvailableSlots": "available time slots",
-  "crm.rescheduleAppointment": "rescheduling your appointment",
-  "crm.cancelAppointment": "cancelling your appointment",
-  "crm.getOpenInvoices": "your balance",
-  "crm.getServicePolicy": "service policy",
-  "crm.verifyAccount": "verification",
-};
+  getToolStatusConfig(toolName).fallback ?? DEFAULT_TOOL_STATUS_MESSAGE;
 
 const statusHintForTool = (toolName: AgentToolName) =>
-  TOOL_STATUS_HINTS[toolName] ?? DEFAULT_TOOL_STATUS_HINT;
+  getToolStatusConfig(toolName).statusHint ?? DEFAULT_TOOL_STATUS_HINT;
 
 const logModelCall = (logger: Logger, record: ModelCall) => {
   logger.debug({ modelCall: record }, "agent.model_call");

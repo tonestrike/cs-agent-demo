@@ -588,8 +588,8 @@ export function RealtimeKitChatPanel({
   );
 
   return (
-    <div className="rounded-xl border border-ink-200 bg-white shadow-soft">
-      <div className="flex items-center justify-between border-b border-ink-100 px-4 py-3">
+    <div className="flex h-full flex-col rounded-xl border border-ink-200 bg-white shadow-soft">
+      <div className="flex flex-shrink-0 items-center justify-between border-b border-ink-100 px-4 py-3">
         <div className="flex items-center gap-3">
           <h3 className="text-sm font-semibold text-ink">RealtimeKit chat</h3>
           {meetingReady && (
@@ -601,7 +601,7 @@ export function RealtimeKitChatPanel({
         </span>
       </div>
       {(partialTranscript || finalTranscripts.length > 0) && (
-        <div className="border-b border-ink-100 bg-sand-50 px-4 py-2 text-xs text-ink-600">
+        <div className="flex-shrink-0 border-b border-ink-100 bg-sand-50 px-4 py-2 text-xs text-ink-600">
           {finalTranscripts.length > 0 && (
             <div className="space-y-1">
               {finalTranscripts.map((line) => (
@@ -616,7 +616,7 @@ export function RealtimeKitChatPanel({
           )}
         </div>
       )}
-      <div className="h-[360px] bg-sand-50">
+      <div className="min-h-0 flex-1 bg-sand-50">
         {meetingReady ? (
           <div className="h-full">
             <rtk-chat

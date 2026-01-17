@@ -16,6 +16,10 @@ import type { Env } from "../env";
 import type { Logger } from "../logger";
 import { createLogger } from "../logger";
 import { validateToolArgs } from "../models/tool-definitions";
+import {
+  DEFAULT_TOOL_STATUS_MESSAGE,
+  getToolStatusConfig,
+} from "../models/tool-status";
 import type {
   ActionPlan,
   ActionPrecondition,
@@ -123,61 +127,6 @@ const toolAcknowledgementSchema = z.enum([
   "crm.getOpenInvoices",
   "crm.getServicePolicy",
 ]);
-
-type ToolAcknowledgementName = z.infer<typeof toolAcknowledgementSchema>;
-
-const toolAcknowledgements: Record<
-  ToolAcknowledgementName,
-  { fallback: string; status?: string; contextHint: string }
-> = {
-  "crm.listUpcomingAppointments": {
-    fallback: "Got it. I'm pulling your upcoming appointments now.",
-    status: "Loading appointments",
-    contextHint:
-      "Acknowledge the request and say you're fetching appointments.",
-  },
-  "crm.getNextAppointment": {
-    fallback: "Got it. I'm pulling your upcoming appointment now.",
-    status: "Loading appointments",
-    contextHint:
-      "Acknowledge the request and say you're fetching the next appointment.",
-  },
-  "crm.cancelAppointment": {
-    fallback: "Got it. I can help cancel an appointment.",
-    status: "Starting cancellation",
-    contextHint:
-      "Acknowledge the cancellation request and say you're getting details.",
-  },
-  "crm.rescheduleAppointment": {
-    fallback: "Got it. I can help reschedule an appointment.",
-    status: "Starting reschedule",
-    contextHint:
-      "Acknowledge the reschedule request and say you're getting details.",
-  },
-  "crm.getAvailableSlots": {
-    fallback: "Thanks. I'm checking the next available times.",
-    status: "Loading available times",
-    contextHint:
-      "Acknowledge the request and say you're checking available times.",
-  },
-  "crm.createAppointment": {
-    fallback: "Got it. I'm checking available times for a new appointment.",
-    status: "Checking availability",
-    contextHint:
-      "Acknowledge the scheduling request and say you're checking availability.",
-  },
-  "crm.getOpenInvoices": {
-    fallback: "Sure. Let me check your balance and invoices.",
-    status: "Loading billing details",
-    contextHint:
-      "Acknowledge the billing request and say you're checking invoices.",
-  },
-  "crm.getServicePolicy": {
-    fallback: "Okay. Let me pull the policy details.",
-    status: "Loading policy details",
-    contextHint: "Acknowledge and say you're pulling the policy details.",
-  },
-};
 
 const MAX_EVENT_BUFFER = 200;
 const FILLER_STATUS_TEXT = "Okay, checking.";
@@ -1078,7 +1027,7 @@ export class ConversationSession {
     await this.state.storage.put("state", this.sessionState);
     this.emitEvent({
       type: "status",
-      text: "I'm pulling your upcoming appointments now.",
+      text: "Sure - I'm pulling your upcoming appointments now so we can pick the right one to cancel.",
     });
     await this.syncConversationState(callSessionId, deps);
     return { ok: true, message: instance.id, appointments };
@@ -1154,7 +1103,7 @@ export class ConversationSession {
     await this.state.storage.put("state", this.sessionState);
     this.emitEvent({
       type: "status",
-      text: "I'm pulling your upcoming appointments now.",
+      text: "Sure - I'm pulling your upcoming appointments now so we can pick the right one to reschedule.",
     });
     await this.syncConversationState(callSessionId, deps);
     return { ok: true, message: instance.id, appointments };
@@ -2493,10 +2442,13 @@ export class ConversationSession {
       argKeys: Object.keys(normalizedArgs ?? {}),
     });
     const toolAck = toolAcknowledgementSchema.safeParse(toolName);
+    const toolAckConfig = toolAck.success
+      ? getToolStatusConfig(toolAck.data)
+      : null;
     const activeAcknowledgementText =
       acknowledgementText?.trim() ||
-      (toolAck.success ? toolAcknowledgements[toolAck.data].fallback : "") ||
-      "Got it. Give me a moment while I check.";
+      toolAckConfig?.fallback ||
+      DEFAULT_TOOL_STATUS_MESSAGE;
 
     if (toolName === "crm.cancelAppointment") {
       const appointmentId =
