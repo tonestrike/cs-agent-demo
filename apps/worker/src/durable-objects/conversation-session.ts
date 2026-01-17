@@ -221,7 +221,21 @@ export class ConversationSession {
         return;
       }
 
-      this.logger.info({ parsed }, `handleSocketMessage: ${parsed.type}`);
+      this.logger.info(
+        {
+          callSessionId:
+            this.activeCallSessionId ??
+            ("callSessionId" in parsed ? parsed.callSessionId : null) ??
+            null,
+          type: parsed.type,
+          textLength:
+            typeof (parsed as { text?: string }).text === "string"
+              ? ((parsed as { text: string }).text.length ?? 0)
+              : 0,
+          text: (parsed as { text?: string }).text ?? undefined,
+        },
+        "conversation.session.socket_message",
+      );
 
       if (parsed.type === "barge_in") {
         await this.handleBargeIn();
@@ -1371,6 +1385,39 @@ export class ConversationSession {
     });
   }
 
+  private async classifyPendingIntent(
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+  ): Promise<SessionState["pendingIntent"] | null> {
+    try {
+      const model = await this.getModelAdapter(deps);
+      const route = await model.route({
+        text: input.text,
+        customer: {
+          id: "unknown",
+          displayName: "Unknown caller",
+          phoneE164: input.phoneNumber,
+          addressSummary: "Unknown",
+        },
+        hasContext: Boolean(input.callSessionId),
+        context: this.buildModelContext(),
+        messages: await this.getRecentMessages(
+          deps,
+          input.callSessionId ?? crypto.randomUUID(),
+        ),
+      });
+      if (route.intent && route.intent !== "general") {
+        return { kind: route.intent, text: input.text };
+      }
+    } catch (error) {
+      this.logger.warn(
+        { error: error instanceof Error ? error.message : "unknown" },
+        "conversation.session.pending_intent.classify_failed",
+      );
+    }
+    return null;
+  }
+
   private async handleVerificationGate(
     input: AgentMessageInput,
     deps: ReturnType<typeof createDependencies>,
@@ -1386,7 +1433,9 @@ export class ConversationSession {
     const zipMatch = input.text.match(/\b(\d{5})\b/);
     const callSessionId = input.callSessionId ?? crypto.randomUUID();
     if (!zipMatch || !customer) {
-      const pendingIntent = this.inferPendingIntent(input.text);
+      const pendingIntent =
+        this.sessionState.pendingIntent ??
+        (await this.classifyPendingIntent(input, deps));
       if (pendingIntent) {
         this.sessionState = {
           ...this.sessionState,
@@ -1536,6 +1585,13 @@ export class ConversationSession {
     deps: ReturnType<typeof createDependencies>,
     streamId: number,
   ): Promise<string | null> {
+    this.logger.info(
+      {
+        callSessionId: input.callSessionId ?? this.activeCallSessionId ?? null,
+        pendingIntent: intent.kind,
+      },
+      "conversation.session.pending_intent.resume",
+    );
     const callSessionId = input.callSessionId ?? crypto.randomUUID();
     if (!this.sessionState.conversation?.verification.customerId) {
       return null;

@@ -21,5 +21,3 @@ export const toolAcknowledgementSchema = z.enum([
   "crm.getOpenInvoices",
   "crm.getServicePolicy",
 ]);
-
-export type ToolAcknowledgementName = z.infer<typeof toolAcknowledgementSchema>;

@@ -62,7 +62,7 @@ export function getActionPreconditions(
   }
 }
 
-export type ActionPlanEvalResult = {
+type ActionPlanEvalResult = {
   ok: boolean;
   message?: string;
   contextHint?: string;

@@ -2,7 +2,7 @@
  * Shared types for conversation session modules
  */
 
-export type ConversationEventType =
+type ConversationEventType =
   | "token"
   | "status"
   | "final"
@@ -41,6 +41,8 @@ export type SessionState = {
       | "reschedule"
       | "schedule"
       | "billing"
+      | "payment"
+      | "policy"
       | "escalate";
     text: string;
   };
