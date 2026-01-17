@@ -83,7 +83,7 @@ const waitForSummary = async (
   throw new Error("Timed out waiting for summary update.");
 };
 
-describeIf.skip("agent e2e workflows", () => {
+describe.skip("agent e2e workflows", () => {
   it("verifies identity from ZIP input", async () => {
     const first = await callRpc<{
       callSessionId: string;
