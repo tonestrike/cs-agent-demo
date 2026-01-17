@@ -575,13 +575,10 @@ export function RealtimeKitChatPanel({
     };
   }, [meeting, meetingReady]);
 
-  const handleChatRef = useCallback(
-    (element: HTMLRtkChatElement | null) => {
-      chatElementRef.current = element;
-      // Assignment is handled by the useEffect above to avoid race conditions.
-    },
-    [],
-  );
+  const handleChatRef = useCallback((element: HTMLRtkChatElement | null) => {
+    chatElementRef.current = element;
+    // Assignment is handled by the useEffect above to avoid race conditions.
+  }, []);
 
   const handleMicToggleRef = useCallback(
     (element: HTMLRtkMicToggleElement | null) => {
