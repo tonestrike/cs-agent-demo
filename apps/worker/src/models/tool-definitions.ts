@@ -74,7 +74,6 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: verifyAccountResultSchema,
     missingArgsMessage:
       "Please provide a 5-digit ZIP code to verify the account.",
-    acknowledgement: "Thanks—verifying your account now.",
   },
   "crm.getNextAppointment": {
     description: "Fetch the next scheduled appointment.",

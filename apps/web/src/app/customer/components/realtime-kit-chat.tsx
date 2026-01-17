@@ -643,6 +643,8 @@ export function RealtimeKitChatPanel({
     const url = new URL(getBaseUrl());
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     url.pathname = `/api/conversations/${sessionId}/socket`;
+    // Pass callSessionId so DO can detect new calls and reset greeting
+    url.searchParams.set("callSessionId", sessionId);
     if (demoAuthToken) url.searchParams.set("token", demoAuthToken);
 
     const socket = new WebSocket(url.toString());

@@ -79,6 +79,11 @@ Conversational e2e tests live under `apps/worker/src/*.e2e.test.ts`. They valida
 - [ ] Add model-routed off-domain handling with human-offer escalation for repeated unclear turns.
 - [ ] Improve DO logging and debug ergonomics (per-turn completion logs, easier filtering/fetching by session id).
 - [x] Add debug endpoint to fetch session state/events by callSessionId.
+- [ ] Implement real appointment management with D1 database:
+  - Schedule new appointments (create in DB)
+  - Reschedule existing appointments (cancel old, create new)
+  - Cancel appointments (mark as canceled in DB)
+  - List upcoming appointments (query from DB)
 
 ---
 
@@ -251,3 +256,16 @@ To test voice calls:
 2. Call the configured phone number
 3. Check logs for `session.v2.*` events
 4. Use debug endpoint: `GET /api/conversations/{id}/debug`
+
+## Future work
+
+### Simpler prompt/config UI
+
+The current prompt playground may be removed in favor of a simpler configuration UI:
+
+- **Show tool prompts**: Display the acknowledgement and description for each tool
+- **Greeting control**: Edit the greeting message and tone
+- **Sentiment/tone settings**: Adjust agent personality without code changes
+- **Protected fields**: Some config values (e.g., verification requirements, tool schemas) should not be editable at runtime
+
+Goal: Provide non-technical users a way to tune agent behavior without touching code, while keeping safety-critical config locked down.

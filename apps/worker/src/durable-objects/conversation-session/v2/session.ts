@@ -631,6 +631,8 @@ export class ConversationSessionV2 {
       parameters: tool.definition.parameters,
       function: async (args: Record<string, unknown>): Promise<string> => {
         // Queue acknowledgement prompt for aggregation
+        // Note: Tools that shouldn't have acknowledgements (like verification)
+        // should not define an acknowledgement in their tool definition
         if (tool.definition.acknowledgement) {
           turn.acknowledgementPrompts.push(tool.definition.acknowledgement);
         }

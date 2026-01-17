@@ -129,6 +129,8 @@ export function useConversationSession(phoneNumber: string) {
     const url = new URL(base);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     url.pathname = `/api/conversations/${sessionId}/socket`;
+    // Pass callSessionId so DO can detect new calls and reset greeting
+    url.searchParams.set("callSessionId", sessionId);
     if (demoAuthToken) {
       url.searchParams.set("token", demoAuthToken);
     }
