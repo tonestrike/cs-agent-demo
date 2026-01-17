@@ -60,22 +60,22 @@ import {
 
 // Extracted modules
 import {
-  type ConversationEvent,
-  type SessionState,
   type ClientMessage,
-  MAX_EVENT_BUFFER,
+  type ConversationEvent,
   FILLER_TIMEOUT_MS,
-  toolAcknowledgementSchema,
+  MAX_EVENT_BUFFER,
+  type SessionState,
+  evaluateActionPlan,
   formatAppointmentLabel,
   formatAppointmentsResponse,
-  formatSlotLabel,
   formatAvailableSlotsResponse,
-  formatInvoicesResponse,
   formatConversationSummary,
-  sanitizeNarratorOutput,
-  normalizeToolArgs,
+  formatInvoicesResponse,
+  formatSlotLabel,
   getActionPreconditions,
-  evaluateActionPlan,
+  normalizeToolArgs,
+  sanitizeNarratorOutput,
+  toolAcknowledgementSchema,
 } from "./conversation-session/index";
 
 export class ConversationSession {
@@ -423,10 +423,7 @@ export class ConversationSession {
         { status: 404 },
       );
     }
-    const summary = formatConversationSummary(
-      record.session,
-      record.turns,
-    );
+    const summary = formatConversationSummary(record.session, record.turns);
     return Response.json({ ok: true, callSessionId, summary });
   }
 
@@ -1997,10 +1994,7 @@ export class ConversationSession {
               deps,
               streamId,
               fallback: slots.length
-                ? formatAvailableSlotsResponse(
-                    slots,
-                    "Which one works best?",
-                  )
+                ? formatAvailableSlotsResponse(slots, "Which one works best?")
                 : "I couldn't find any available times right now. Would you like me to check again later?",
               contextHint:
                 "Offer available reschedule slots and ask which one they prefer.",
@@ -2385,7 +2379,6 @@ export class ConversationSession {
     return lines.join("\n");
   }
 
-
   private async executeToolCall(
     toolName: string,
     args: Record<string, unknown>,
@@ -2630,10 +2623,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: slots.length
-              ? formatAvailableSlotsResponse(
-                  slots,
-                  "Which one works best?",
-                )
+              ? formatAvailableSlotsResponse(slots, "Which one works best?")
               : "I couldn't find any available times right now. Would you like me to check again later?",
             contextHint:
               "Offer available reschedule slots and ask which one they prefer.",
@@ -2924,10 +2914,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: slots.length
-              ? formatAvailableSlotsResponse(
-                  slots,
-                  "Which one works best?",
-                )
+              ? formatAvailableSlotsResponse(slots, "Which one works best?")
               : "I couldn't find any available times right now. Would you like me to check again later?",
             contextHint:
               "Offer available times and confirm whether the on-file address is correct.",

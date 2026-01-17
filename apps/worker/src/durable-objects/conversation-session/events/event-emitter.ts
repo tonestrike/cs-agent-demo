@@ -2,10 +2,10 @@
  * Event emitter factory for conversation session events
  */
 
-import type { ConversationEvent, ConversationEventType } from "../types";
 import { initialConversationState } from "../../../conversation/state-machine";
 import type { ConversationState } from "../../../conversation/state-machine";
 import type { Logger } from "../../../logger";
+import type { ConversationEvent, ConversationEventType } from "../types";
 
 const MAX_EVENT_BUFFER = 200;
 

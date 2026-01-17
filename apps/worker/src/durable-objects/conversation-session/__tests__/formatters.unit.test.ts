@@ -1,13 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   formatAppointmentLabel,
   formatAppointmentsResponse,
 } from "../formatters/appointment-formatter";
-import {
-  formatSlotLabel,
-  formatAvailableSlotsResponse,
-} from "../formatters/slot-formatter";
 import { formatInvoicesResponse } from "../formatters/invoice-formatter";
+import {
+  formatAvailableSlotsResponse,
+  formatSlotLabel,
+} from "../formatters/slot-formatter";
 import { formatConversationSummary } from "../formatters/summary-formatter";
 
 describe("appointment-formatter", () => {

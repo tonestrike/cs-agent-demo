@@ -11,7 +11,10 @@ export const getLogger = (
   bindings?: Record<string, unknown>,
 ) =>
   component || bindings
-    ? baseLogger.child({ ...(bindings ?? {}), ...(component ? { component } : {}) })
+    ? baseLogger.child({
+        ...(bindings ?? {}),
+        ...(component ? { component } : {}),
+      })
     : baseLogger;
 
 export const logger = baseLogger;

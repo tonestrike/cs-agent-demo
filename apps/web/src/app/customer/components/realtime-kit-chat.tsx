@@ -697,14 +697,14 @@ export function RealtimeKitChatPanel({
       }
     };
 
-      window.setTimeout(() => {
-        assign(chatElementRef.current, "rtk-chat");
-        assign(micToggleRef.current, "rtk-mic-toggle");
-      }, 0);
+    window.setTimeout(() => {
+      assign(chatElementRef.current, "rtk-chat");
+      assign(micToggleRef.current, "rtk-mic-toggle");
+    }, 0);
 
-      return () => {
-        cancelled = true;
-      };
+    return () => {
+      cancelled = true;
+    };
   }, [meeting, meetingReady, log]);
 
   const handleChatRef = useCallback((el: HTMLRtkChatElement | null) => {

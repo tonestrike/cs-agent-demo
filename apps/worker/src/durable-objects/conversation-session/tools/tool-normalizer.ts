@@ -2,9 +2,9 @@
  * Tool argument normalization and action plan evaluation
  */
 
-import type { ActionPlan, ActionPrecondition } from "../../../models/types";
 import type { ConversationState } from "../../../conversation/state-machine";
 import { initialConversationState } from "../../../conversation/state-machine";
+import type { ActionPlan, ActionPrecondition } from "../../../models/types";
 import type { SessionState } from "../types";
 
 /**

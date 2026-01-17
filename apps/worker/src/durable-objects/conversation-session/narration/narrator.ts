@@ -4,9 +4,9 @@
 
 import type { Logger } from "../../../logger";
 import type {
-  ToolResult,
   AgentResponseInput,
   SelectionOption,
+  ToolResult,
 } from "../../../models/types";
 import { sanitizeNarratorOutput } from "./sanitizer";
 
