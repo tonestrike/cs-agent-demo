@@ -625,12 +625,9 @@ export class ConversationSession {
         );
       }
     } else {
-      token = await addRealtimeKitParticipant(
-        this.env,
-        customer,
-        this.logger,
-        { meetingId },
-      );
+      token = await addRealtimeKitParticipant(this.env, customer, this.logger, {
+        meetingId,
+      });
     }
     const updatedCustomer: CustomerCache = {
       ...customer,

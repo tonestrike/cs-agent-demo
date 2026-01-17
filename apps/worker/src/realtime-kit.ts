@@ -245,7 +245,9 @@ export const addRealtimeKitParticipant = async (
   logger: Logger,
   options?: { meetingId?: string },
 ): Promise<RealtimeKitTokenPayload> => {
-  const config = ensureRealtimeKitConfig(env, { meetingId: options?.meetingId });
+  const config = ensureRealtimeKitConfig(env, {
+    meetingId: options?.meetingId,
+  });
   const url = `${config.baseUrl}/client/v4/accounts/${config.accountId}/realtime/kit/${config.appId}/meetings/${config.meetingId}/participants`;
   const presetName = config.presetName;
   const body = {
@@ -284,7 +286,9 @@ export const addRealtimeKitGuestParticipant = async (
   logger: Logger,
   options?: { meetingId?: string },
 ): Promise<RealtimeKitTokenPayload> => {
-  const config = ensureRealtimeKitConfig(env, { meetingId: options?.meetingId });
+  const config = ensureRealtimeKitConfig(env, {
+    meetingId: options?.meetingId,
+  });
   const url = `${config.baseUrl}/client/v4/accounts/${config.accountId}/realtime/kit/${config.appId}/meetings/${config.meetingId}/participants`;
   const presetName = config.presetName;
   const body = {
@@ -323,7 +327,9 @@ export const refreshRealtimeKitToken = async (
   logger: Logger,
   options?: { meetingId?: string },
 ): Promise<RealtimeKitTokenPayload> => {
-  const config = ensureRealtimeKitConfig(env, { meetingId: options?.meetingId });
+  const config = ensureRealtimeKitConfig(env, {
+    meetingId: options?.meetingId,
+  });
   const url = `${config.baseUrl}/client/v4/accounts/${config.accountId}/realtime/kit/${config.appId}/meetings/${config.meetingId}/participants/${encodeURIComponent(
     participantId,
   )}/token/refresh`;
