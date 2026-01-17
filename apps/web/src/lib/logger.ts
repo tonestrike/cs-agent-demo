@@ -9,15 +9,9 @@ const baseLogger = pino({
 export const getLogger = (
   component?: string,
   bindings?: Record<string, unknown>,
-) => {
-  if (!component && !bindings) {
-    return baseLogger;
-  }
-  const payload = { ...(bindings ?? {}) };
-  if (component) {
-    payload.component = component;
-  }
-  return baseLogger.child(payload);
-};
+) =>
+  component || bindings
+    ? baseLogger.child({ ...(bindings ?? {}), ...(component ? { component } : {}) })
+    : baseLogger;
 
 export const logger = baseLogger;
