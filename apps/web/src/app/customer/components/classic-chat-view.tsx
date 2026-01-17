@@ -33,6 +33,7 @@ export function ClassicChatView({
     messages,
     status,
     logs,
+    turnMetrics,
     confirmedSessionId,
     callSessionId,
     sendMessage,
@@ -52,9 +53,16 @@ export function ClassicChatView({
   }, [resetSession]);
 
   const copyConversation = useCallback(async () => {
-    const payload = { callSessionId, phoneNumber, status, messages, logs };
+    const payload = {
+      callSessionId,
+      phoneNumber,
+      status,
+      messages,
+      logs,
+      turnMetrics,
+    };
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-  }, [callSessionId, phoneNumber, status, messages, logs]);
+  }, [callSessionId, phoneNumber, status, messages, logs, turnMetrics]);
 
   return (
     <div className="flex min-w-0 flex-1 overflow-hidden bg-sand-200">

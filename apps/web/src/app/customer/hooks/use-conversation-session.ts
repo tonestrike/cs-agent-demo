@@ -12,12 +12,50 @@ export function useConversationSession(phoneNumber: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [connectionStatus, setConnectionStatus] = useState("New session");
   const [logs, setLogs] = useState<ClientLog[]>([]);
+  const [turnMetrics, setTurnMetrics] = useState<
+    Array<{
+      turnId: number;
+      sessionId: string;
+      userText: string;
+      userTextLength: number;
+      startedAt: number;
+      firstTokenAt: number | null;
+      firstStatusAt: number | null;
+      finalAt: number | null;
+      firstTokenMs: number | null;
+      firstStatusMs: number | null;
+      totalMs: number | null;
+      statusTexts: string[];
+    }>
+  >([]);
 
   const socketRef = useRef<WebSocket | null>(null);
   const responseIdRef = useRef<string | null>(null);
   const sessionRef = useRef<string | null>(null);
   const hasDeltaRef = useRef(false);
   const autoZipTimerRef = useRef<number | null>(null);
+  const pendingTurnsRef = useRef<
+    Array<{ sessionId: string; startedAt: number; userText: string }>
+  >([]);
+  const turnMetricsRef = useRef(
+    new Map<
+      number,
+      {
+        turnId: number;
+        sessionId: string;
+        userText: string;
+        userTextLength: number;
+        startedAt: number;
+        firstTokenAt: number | null;
+        firstStatusAt: number | null;
+        finalAt: number | null;
+        firstTokenMs: number | null;
+        firstStatusMs: number | null;
+        totalMs: number | null;
+        statusTexts: string[];
+      }
+    >(),
+  );
 
   const clearAutoZipTimer = useCallback(() => {
     if (autoZipTimerRef.current !== null) {
@@ -44,6 +82,72 @@ export function useConversationSession(phoneNumber: string) {
       setLogs((prev) => [entry, ...prev].slice(0, 200));
     },
     [],
+  );
+
+  const syncTurnMetrics = useCallback(() => {
+    const items = Array.from(turnMetricsRef.current.values()).sort(
+      (a, b) => a.turnId - b.turnId,
+    );
+    setTurnMetrics(items);
+  }, []);
+
+  const ensureTurnMetric = useCallback(
+    (turnId: number, sessionId: string) => {
+      const existing = turnMetricsRef.current.get(turnId);
+      if (existing) {
+        return existing;
+      }
+      const pending = pendingTurnsRef.current.shift();
+      const startedAt = pending?.startedAt ?? Date.now();
+      const userText = pending?.userText ?? "";
+      const metric = {
+        turnId,
+        sessionId,
+        userText,
+        userTextLength: userText.length,
+        startedAt,
+        firstTokenAt: null,
+        firstStatusAt: null,
+        finalAt: null,
+        firstTokenMs: null,
+        firstStatusMs: null,
+        totalMs: null,
+        statusTexts: [],
+      };
+      turnMetricsRef.current.set(turnId, metric);
+      syncTurnMetrics();
+      return metric;
+    },
+    [syncTurnMetrics],
+  );
+
+  const updateTurnMetric = useCallback(
+    (
+      turnId: number,
+      sessionId: string,
+      updater: (
+        metric: {
+          turnId: number;
+          sessionId: string;
+          userText: string;
+          userTextLength: number;
+          startedAt: number;
+          firstTokenAt: number | null;
+          firstStatusAt: number | null;
+          finalAt: number | null;
+          firstTokenMs: number | null;
+          firstStatusMs: number | null;
+          totalMs: number | null;
+          statusTexts: string[];
+        },
+      ) => void,
+    ) => {
+      const metric = ensureTurnMetric(turnId, sessionId);
+      updater(metric);
+      turnMetricsRef.current.set(turnId, { ...metric });
+      syncTurnMetrics();
+    },
+    [ensureTurnMetric, syncTurnMetrics],
   );
 
   const buildWsUrl = useCallback((sessionId: string) => {
@@ -111,6 +215,8 @@ export function useConversationSession(phoneNumber: string) {
             type: payload.type ?? "unknown",
             textLength: payload.text?.length ?? 0,
             hasData: Boolean(payload.data),
+            turnId: payload.turnId,
+            messageId: payload.messageId,
           });
           if (payload.type === "status") {
             const text = payload.text ?? "";
@@ -119,6 +225,16 @@ export function useConversationSession(phoneNumber: string) {
                 const statusId = `status-${payload.seq ?? payload.id ?? crypto.randomUUID()}`;
                 return [...prev, { id: statusId, role: "status", text }];
               });
+              if (typeof payload.turnId === "number") {
+                updateTurnMetric(payload.turnId, sessionId, (metric) => {
+                  const now = Date.now();
+                  if (metric.firstStatusAt === null) {
+                    metric.firstStatusAt = now;
+                    metric.firstStatusMs = now - metric.startedAt;
+                  }
+                  metric.statusTexts = [...metric.statusTexts, text];
+                });
+              }
             }
             return;
           }
@@ -127,6 +243,15 @@ export function useConversationSession(phoneNumber: string) {
             const messageId = payload.messageId ?? responseIdRef.current;
             if (!messageId || !text) {
               return;
+            }
+            if (typeof payload.turnId === "number") {
+              updateTurnMetric(payload.turnId, sessionId, (metric) => {
+                const now = Date.now();
+                if (metric.firstTokenAt === null) {
+                  metric.firstTokenAt = now;
+                  metric.firstTokenMs = now - metric.startedAt;
+                }
+              });
             }
             hasDeltaRef.current = true;
             setMessages((prev) => {
@@ -165,6 +290,15 @@ export function useConversationSession(phoneNumber: string) {
             if (data?.callSessionId) {
               setCallSessionId(data.callSessionId);
               setConfirmedSessionId(data.callSessionId);
+            }
+            if (typeof payload.turnId === "number") {
+              updateTurnMetric(payload.turnId, sessionId, (metric) => {
+                const now = Date.now();
+                if (metric.finalAt === null) {
+                  metric.finalAt = now;
+                  metric.totalMs = now - metric.startedAt;
+                }
+              });
             }
             return;
           }
@@ -218,6 +352,9 @@ export function useConversationSession(phoneNumber: string) {
     hasDeltaRef.current = false;
     setMessages([]);
     setConnectionStatus("New session");
+    pendingTurnsRef.current = [];
+    turnMetricsRef.current.clear();
+    setTurnMetrics([]);
     socketRef.current?.close();
     socketRef.current = null;
     sessionRef.current = null;
@@ -249,6 +386,11 @@ export function useConversationSession(phoneNumber: string) {
           },
         ]);
       }
+      pendingTurnsRef.current.push({
+        sessionId,
+        startedAt: Date.now(),
+        userText: options?.userMessageText ?? trimmed,
+      });
 
       const responseId = crypto.randomUUID();
       responseIdRef.current = responseId;
@@ -333,6 +475,7 @@ export function useConversationSession(phoneNumber: string) {
     messages,
     status: connectionStatus,
     logs,
+    turnMetrics,
     confirmedSessionId,
     callSessionId,
     sendMessage,
