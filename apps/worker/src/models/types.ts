@@ -59,7 +59,8 @@ export const isSingleToolCall = (
 /** Type guard for multiple tool calls */
 export const isMultipleToolCalls = (
   output: AgentModelOutput,
-): output is z.infer<typeof agentToolCallsSchema> => output.type === "tool_calls";
+): output is z.infer<typeof agentToolCallsSchema> =>
+  output.type === "tool_calls";
 
 export const actionPreconditionSchema = z.enum([
   "verified",

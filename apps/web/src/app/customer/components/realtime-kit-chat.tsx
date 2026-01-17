@@ -687,7 +687,10 @@ export function RealtimeKitChatPanel({
         } else {
           log(
             "meeting.assign.failed",
-            { target: name, error: err instanceof Error ? err.message : "unknown" },
+            {
+              target: name,
+              error: err instanceof Error ? err.message : "unknown",
+            },
             "warn",
           );
         }

@@ -30,8 +30,8 @@ import type {
 } from "../models/types";
 import {
   actionPlanSchema,
-  isSingleToolCall,
   isMultipleToolCalls,
+  isSingleToolCall,
 } from "../models/types";
 import {
   type RealtimeKitTokenPayload,
@@ -1834,7 +1834,12 @@ export class ConversationSession {
     confirmation = this.parseConfirmation(text);
 
     // Only call LLM if we haven't resolved via direct matching and we have a clear expected kind
-    if (expectedKind && !appointmentIdMatch && !slotIdMatch && confirmation === null) {
+    if (
+      expectedKind &&
+      !appointmentIdMatch &&
+      !slotIdMatch &&
+      confirmation === null
+    ) {
       switch (expectedKind) {
         case "confirmation": {
           const confirmationSelection = await this.selectOption(
@@ -1860,21 +1865,37 @@ export class ConversationSession {
             );
             if (!resolvedAppointmentId) {
               // Fallback to text-based resolution
-              resolvedAppointmentId = this.resolveAppointmentSelection(text, appointments);
+              resolvedAppointmentId = this.resolveAppointmentSelection(
+                text,
+                appointments,
+              );
             }
           }
           break;
         }
         case "slot": {
           if (slotOptions.length) {
-            resolvedSlotId = await this.selectOption(input, deps, "slot", slotOptions);
+            resolvedSlotId = await this.selectOption(
+              input,
+              deps,
+              "slot",
+              slotOptions,
+            );
           }
           break;
         }
       }
-    } else if (!expectedKind && !appointmentIdMatch && !slotIdMatch && confirmation === null) {
+    } else if (
+      !expectedKind &&
+      !appointmentIdMatch &&
+      !slotIdMatch &&
+      confirmation === null
+    ) {
       // No clear expected kind from state - fallback to text-based resolution
-      resolvedAppointmentId = this.resolveAppointmentSelection(text, appointments);
+      resolvedAppointmentId = this.resolveAppointmentSelection(
+        text,
+        appointments,
+      );
     }
 
     if (this.sessionState.cancelWorkflowId) {
@@ -2298,7 +2319,8 @@ export class ConversationSession {
       // Handle single tool call (backwards compatible path)
       if (!isSingleToolCall(decision)) {
         // Should not reach here, but fallback for type safety
-        const replyText = "I could not interpret the request. Can you rephrase?";
+        const replyText =
+          "I could not interpret the request. Can you rephrase?";
         this.emitNarratorTokens(replyText, streamId);
         return { callSessionId, replyText, actions: [] };
       }
@@ -3215,7 +3237,10 @@ export class ConversationSession {
    * Only parallelizes read-only tools; mutating tools are executed sequentially.
    */
   private async executeMultipleToolCalls(
-    decision: { calls: Array<{ toolName: string; arguments?: Record<string, unknown> }>; acknowledgement?: string },
+    decision: {
+      calls: Array<{ toolName: string; arguments?: Record<string, unknown> }>;
+      acknowledgement?: string;
+    },
     input: AgentMessageInput,
     deps: ReturnType<typeof createDependencies>,
     streamId: number,
@@ -3254,7 +3279,11 @@ export class ConversationSession {
     );
 
     // Execute sequential/mutating tools one at a time
-    const sequentialResults: Array<{ toolName: string; result: ToolResult | null; error?: string }> = [];
+    const sequentialResults: Array<{
+      toolName: string;
+      result: ToolResult | null;
+      error?: string;
+    }> = [];
     for (const call of sequential) {
       try {
         const result = await this.executeSingleToolForMulti(call, input, deps);
@@ -3269,7 +3298,11 @@ export class ConversationSession {
     }
 
     // Combine all results
-    const allResults: Array<{ toolName: string; result: ToolResult | null; error?: string }> = [
+    const allResults: Array<{
+      toolName: string;
+      result: ToolResult | null;
+      error?: string;
+    }> = [
       ...parallelResults.map((settled, index) => {
         if (settled.status === "fulfilled") {
           return settled.value;
@@ -3278,7 +3311,10 @@ export class ConversationSession {
         return {
           toolName: call?.toolName ?? "unknown",
           result: null as ToolResult | null,
-          error: settled.reason instanceof Error ? settled.reason.message : "unknown error",
+          error:
+            settled.reason instanceof Error
+              ? settled.reason.message
+              : "unknown error",
         };
       }),
       ...sequentialResults,
@@ -3325,7 +3361,11 @@ export class ConversationSession {
 
     const validation = validateToolArgs(call.toolName as never, normalizedArgs);
     if (!validation.ok) {
-      return { toolName: call.toolName, result: null, error: validation.message };
+      return {
+        toolName: call.toolName,
+        result: null,
+        error: validation.message,
+      };
     }
 
     try {
@@ -3463,7 +3503,11 @@ export class ConversationSession {
    * Narrates combined results from multiple tool calls.
    */
   private async narrateMultiToolResults(
-    results: Array<{ toolName: string; result: ToolResult | null; error?: string }>,
+    results: Array<{
+      toolName: string;
+      result: ToolResult | null;
+      error?: string;
+    }>,
     input: AgentMessageInput,
     deps: ReturnType<typeof createDependencies>,
     streamId: number,
@@ -3576,17 +3620,14 @@ export class ConversationSession {
         actions: [],
       };
     }
-    const replyText = await this.narrateToolResult(
-      primaryResult.result,
-      {
-        input,
-        deps,
-        streamId,
-        fallback: fallbackText,
-        contextHint: `Summarize these combined results naturally: ${combinedResults}`,
-        priorAcknowledgement: acknowledgementText,
-      },
-    );
+    const replyText = await this.narrateToolResult(primaryResult.result, {
+      input,
+      deps,
+      streamId,
+      fallback: fallbackText,
+      contextHint: `Summarize these combined results naturally: ${combinedResults}`,
+      priorAcknowledgement: acknowledgementText,
+    });
 
     return {
       callSessionId,
@@ -3617,7 +3658,11 @@ export class ConversationSession {
    * Maps conversation status to the expected selection kind.
    * Returns null if no selection is expected in the current state.
    */
-  private getExpectedSelectionKind(): "appointment" | "slot" | "confirmation" | null {
+  private getExpectedSelectionKind():
+    | "appointment"
+    | "slot"
+    | "confirmation"
+    | null {
     const status = this.sessionState.conversation?.status;
     switch (status) {
       case "PresentingAppointments":
