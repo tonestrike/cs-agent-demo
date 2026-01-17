@@ -7,7 +7,7 @@ export type ToolStatusConfig = {
 };
 
 export const DEFAULT_TOOL_STATUS_MESSAGE =
-  "Give me a moment while I look into that.";
+  "I'm on it—give me a moment. If you'd prefer a person, I can loop one in.";
 
 export const DEFAULT_TOOL_STATUS_HINT = "your request";
 

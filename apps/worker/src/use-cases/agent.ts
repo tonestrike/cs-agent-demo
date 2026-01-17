@@ -6,6 +6,7 @@ import {
   normalizePhoneE164,
 } from "@pestcall/core";
 import { z } from "zod";
+import { buildCapabilitiesHelpText } from "../agents/capabilities";
 import type { Dependencies } from "../context";
 import type { Logger } from "../logger";
 import {
@@ -65,6 +66,22 @@ type AgentMessageOptions = {
   onStatus?: (status: AgentStatusUpdate) => void;
   onToken?: (token: string) => void;
 };
+
+const friendlyFallbackText = (scopeMessage?: string) =>
+  scopeMessage?.trim()
+    ? `I'm sorry, I didn't quite get that. ${scopeMessage} I can connect you with a person if you'd like.`
+    : "I'm sorry, I didn't quite get that. I can connect you with a person if you'd like.";
+
+const buildFallbackToolResult = (
+  kind: string,
+  details?: string,
+): ToolResult => ({
+  toolName: "agent.message",
+  result: {
+    kind,
+    details,
+  },
+});
 
 const statusMessageForTool = (toolName: AgentToolName) =>
   getToolStatusConfig(toolName).fallback ?? DEFAULT_TOOL_STATUS_MESSAGE;
@@ -175,6 +192,27 @@ const buildCustomerContext = (customer: {
   addressSummary: customer.addressSummary,
 });
 
+const coerceCustomerContext = (
+  customer:
+    | {
+        id: string;
+        displayName: string;
+        phoneE164?: string | null;
+        addressSummary?: string | null;
+      }
+    | null
+    | undefined,
+  fallbackPhone: string,
+) =>
+  customer
+    ? {
+        id: customer.id,
+        displayName: customer.displayName,
+        phoneE164: customer.phoneE164 ?? fallbackPhone,
+        addressSummary: customer.addressSummary ?? "Unknown",
+      }
+    : null;
+
 const upsertAppointmentSnapshot = async (
   deps: Dependencies,
   phoneE164: string,
@@ -237,6 +275,7 @@ type CallSessionSummary = {
     date: string;
     timeWindow: string;
   }> | null;
+  unclearTurns?: number | null;
   zipAttempts?: number | null;
   callSummary?: string | null;
 };
@@ -290,6 +329,7 @@ const parseSummary = (summary: string | null, logger: Logger) => {
             timeWindow: string;
           }>)
         : null,
+      unclearTurns: parsed.unclearTurns ?? 0,
       zipAttempts: parsed.zipAttempts ?? 0,
       callSummary: parsed.callSummary ?? null,
     };
@@ -317,6 +357,7 @@ const buildSummary = (summary: CallSessionSummary) =>
     lastAppointmentId: summary.lastAppointmentId ?? null,
     lastAppointmentOptions: summary.lastAppointmentOptions ?? null,
     lastAvailableSlots: summary.lastAvailableSlots ?? null,
+    unclearTurns: summary.unclearTurns ?? 0,
     zipAttempts: summary.zipAttempts ?? 0,
     callSummary: summary.callSummary ?? null,
   });
@@ -417,7 +458,14 @@ const redactToolResultForPrompt = (toolResult: ToolResult): ToolResult => {
     case "crm.getAvailableSlots":
       return {
         toolName: toolResult.toolName,
-        result: toolResult.result.map((slot) => ({
+        result: (
+          toolResult.result as Array<{
+            id?: string;
+            date: string;
+            timeWindow: string;
+          }>
+        ).map((slot) => ({
+          id: slot.id,
           date: slot.date,
           timeWindow: slot.timeWindow,
         })),
@@ -505,6 +553,33 @@ const formatSlotChoices = (
     .join(" ");
 };
 
+const formatSlotsDetailed = (
+  slots: Array<{ id?: string; date: string; timeWindow: string }>,
+) =>
+  slots
+    .slice(0, 3)
+    .map(
+      (slot, index) =>
+        `${index + 1}) ${formatDateForSpeech(slot.date)} ${formatTimeWindowForSpeech(slot.timeWindow)} [id: ${slot.id ?? `slot-${index + 1}`}]`,
+    )
+    .join("; ");
+
+const formatAppointmentsDetailed = (
+  appointments: Array<{
+    id: string;
+    date: string;
+    timeWindow: string;
+    addressSummary: string;
+  }>,
+) =>
+  appointments
+    .slice(0, 3)
+    .map(
+      (appt, index) =>
+        `${index + 1}) ${formatDateForSpeech(appt.date)} ${formatTimeWindowForSpeech(appt.timeWindow)} at ${appt.addressSummary} [id: ${appt.id}]`,
+    )
+    .join("; ");
+
 const formatDateForSpeech = (dateValue: string) => {
   const [yearRaw, monthRaw, dayRaw] = dateValue.split("-");
   const year = Number(yearRaw);
@@ -546,6 +621,26 @@ const formatTimeWindowForSpeech = (timeWindow: string) => {
     return timeWindow;
   }
   return `${formatTimeForSpeech(start)} to ${formatTimeForSpeech(end)}`;
+};
+
+const isUnclearResult = (toolResult: ToolResult) => {
+  if (toolResult.toolName !== "agent.message") {
+    return false;
+  }
+  const kind =
+    typeof (toolResult as { result?: { kind?: string } }).result?.kind ===
+    "string"
+      ? ((toolResult as { result?: { kind?: string } }).result?.kind as string)
+      : "";
+  return [
+    "fallback",
+    "empty_response",
+    "tool_result_invalid",
+    "missing_arguments",
+    "blocked_unverified",
+    "verification_pending",
+    "request_zip",
+  ].includes(kind);
 };
 
 const getMissingArgsDetails = (
@@ -777,11 +872,11 @@ export const handleAgentMessage = async (
   }
   const actions: string[] = [];
   const resolvedCustomer = matches.length === 1 ? matches[0] : null;
-  const verifiedCustomerId =
+  let verifiedCustomerId =
     summary.identityStatus === "verified"
       ? (summary.verifiedCustomerId ?? session?.customerCacheId ?? null)
       : null;
-  const verifiedCustomerProfile =
+  let verifiedCustomerProfile =
     summary.identityStatus === "verified"
       ? session?.customer?.id === verifiedCustomerId
         ? session.customer
@@ -789,11 +884,11 @@ export const handleAgentMessage = async (
           ? await deps.customers.get(verifiedCustomerId)
           : null
       : null;
-  const verifiedCustomer =
+  let verifiedCustomer =
     summary.identityStatus === "verified"
       ? (verifiedCustomerProfile ?? resolvedCustomer)
       : null;
-  const customer =
+  let customer =
     summary.identityStatus === "verified" && verifiedCustomer
       ? {
           id: verifiedCustomer.id,
@@ -808,31 +903,46 @@ export const handleAgentMessage = async (
           addressSummary: "Unknown",
         };
 
-  const systemContext = [
-    "System context:",
-    `Identity status: ${summary.identityStatus ?? "unknown"}`,
-    summary.verifiedCustomerId
-      ? `Verified customer: ${summary.verifiedCustomerId}`
-      : "Verified customer: none",
-    summary.pendingCustomerId
-      ? `Pending customer: ${summary.pendingCustomerId}`
-      : "Pending customer: none",
-    summary.workflowState
-      ? `Workflow state: ${summary.workflowState.kind}:${summary.workflowState.step}`
-      : "Workflow state: none",
-    `Phone lookup matches: ${matches.length}`,
-    summary.lastAppointmentId
-      ? `Last appointment id: ${summary.lastAppointmentId}`
-      : null,
-    summary.lastAvailableSlots?.length
-      ? `Last available slots: ${formatSlotChoices(summary.lastAvailableSlots)}`
-      : null,
-    summary.lastToolName ? `Last tool: ${summary.lastToolName}` : null,
-    summary.lastToolResult
-      ? `Last tool result: ${summary.lastToolResult}`
-      : null,
-  ];
-  const context = systemContext.filter(Boolean).join("\n");
+  const buildContext = () =>
+    [
+      "System context:",
+      `Identity status: ${summary.identityStatus ?? "unknown"}`,
+      summary.verifiedCustomerId
+        ? `Verified customer: ${summary.verifiedCustomerId}`
+        : "Verified customer: none",
+      summary.pendingCustomerId
+        ? `Pending customer: ${summary.pendingCustomerId}`
+        : "Pending customer: none",
+      summary.workflowState
+        ? `Workflow state: ${summary.workflowState.kind}:${summary.workflowState.step}`
+        : "Workflow state: none",
+      `Phone lookup matches: ${matches.length}`,
+      summary.lastAppointmentId
+        ? `Last appointment id: ${summary.lastAppointmentId}`
+        : null,
+      summary.lastAvailableSlots?.length
+        ? `Last available slots: ${formatSlotChoices(summary.lastAvailableSlots)}`
+        : null,
+      summary.lastToolName ? `Last tool: ${summary.lastToolName}` : null,
+      summary.lastToolResult
+        ? `Last tool result: ${summary.lastToolResult}`
+        : null,
+      summary.lastAppointmentOptions?.length
+        ? `Appointment options: ${formatAppointmentsDetailed(summary.lastAppointmentOptions)}`
+        : null,
+      summary.lastAvailableSlots?.length
+        ? `Slot options: ${formatSlotsDetailed(
+            summary.lastAvailableSlots.map((slot, index) => ({
+              ...slot,
+              id: slot.id ?? `slot-${index + 1}`,
+            })),
+          )}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+  let context = buildContext();
 
   logger.debug(
     {
@@ -843,6 +953,8 @@ export const handleAgentMessage = async (
     },
     "agent.message.start",
   );
+
+  const trimmedInput = input.text.trim();
 
   const messageHistory: Array<{ role: "user" | "assistant"; content: string }> =
     recentTurns
@@ -904,11 +1016,10 @@ export const handleAgentMessage = async (
     options?: Array<{ id: string; label: string }>;
   } | null = null;
   let statusOpen = true;
-  const trimmedInput = input.text.trim();
   const isZipInput = zipCodeSchema.safeParse(trimmedInput).success;
   const hasNumericInput = trimmedInput.length > 0 && /\d/.test(trimmedInput);
 
-  const activeCustomerId =
+  let activeCustomerId =
     verifiedCustomerId ??
     summary.verifiedCustomerId ??
     resolvedCustomer?.id ??
@@ -1127,6 +1238,7 @@ export const handleAgentMessage = async (
 
         const latestSummary = await waitForVerification();
         if (latestSummary?.identityStatus === "verified") {
+          summary = latestSummary;
           const verifiedId =
             latestSummary.verifiedCustomerId ??
             summary.verifiedCustomerId ??
@@ -1138,64 +1250,41 @@ export const handleAgentMessage = async (
           const verifiedCustomerForReply =
             verifiedProfile ??
             (resolvedCustomer?.id === verifiedId ? resolvedCustomer : null);
-          const verifiedCustomerContext = verifiedCustomerForReply
-            ? {
-                id: verifiedCustomerForReply.id,
-                displayName: verifiedCustomerForReply.displayName,
-                phoneE164: verifiedCustomerForReply.phoneE164 ?? phoneE164,
-                addressSummary:
-                  verifiedCustomerForReply.addressSummary ?? "Unknown",
-              }
-            : customer;
-          const replyText = await generateReply(
-            model,
-            input,
-            verifiedCustomerContext,
-            {
-              toolName: "crm.verifyAccount",
-              result: { ok: true },
-            },
-            agentConfig.scopeMessage,
-            context,
-            modelCalls,
-            messageHistory,
-            logger,
+          const normalizedCustomer =
+            coerceCustomerContext(verifiedCustomerForReply, phoneE164) ??
+            coerceCustomerContext(verifiedCustomer, phoneE164);
+          customer =
+            normalizedCustomer ??
+            ({
+              id: "unknown",
+              displayName: "Unknown caller",
+              phoneE164,
+              addressSummary: "Unknown",
+            } as const);
+          verifiedCustomerProfile =
+            verifiedProfile ?? verifiedCustomerProfile ?? null;
+          verifiedCustomer =
+            verifiedCustomerForReply ?? resolvedCustomer ?? verifiedCustomer;
+          verifiedCustomerId =
+            summary.identityStatus === "verified"
+              ? (summary.verifiedCustomerId ??
+                verifiedId ??
+                resolvedCustomer?.id ??
+                session?.customerCacheId ??
+                null)
+              : verifiedCustomerId;
+          activeCustomerId =
+            verifiedCustomerId ??
+            summary.verifiedCustomerId ??
+            resolvedCustomer?.id ??
+            session?.customerCacheId ??
+            null;
+          context = buildContext();
+          workflowState = summary.workflowState ?? workflowState;
+          await deps.calls.updateSessionSummary({
             callSessionId,
-            options?.onToken,
-          );
-          await updateCallSummary(replyText);
-          await deps.calls.addTurn({
-            id: crypto.randomUUID(),
-            callSessionId,
-            ts: new Date().toISOString(),
-            speaker: "agent",
-            text: replyText,
-            meta: {
-              intent: "final",
-              tools,
-              modelCalls,
-              customerId: verifiedId ?? customer.id,
-              contextUsed: Boolean(context),
-              contextTurns,
-              decisionSnapshot,
-              toolCallSource,
-              replyTextLength: replyText.length,
-              replyTextWasEmpty: !replyText.trim(),
-            },
+            summary: buildSummary(summary),
           });
-          logger.info(
-            {
-              callSessionId,
-              intent: "final",
-              toolCallSource,
-              toolCount: tools.length,
-              modelCallCount: modelCalls.length,
-              replyTextLength: replyText.length,
-              replyPreview: replyText.slice(0, 160),
-            },
-            "agent.message.complete",
-          );
-          return { callSessionId, replyText, actions };
         }
 
         if (latestSummary?.workflowState?.step === "escalate") {
@@ -1207,7 +1296,7 @@ export const handleAgentMessage = async (
               toolName: "agent.escalate",
               result: { escalated: true },
             },
-            agentConfig.scopeMessage,
+            friendlyFallbackText(agentConfig.scopeMessage),
             context,
             modelCalls,
             messageHistory,
@@ -1258,12 +1347,31 @@ export const handleAgentMessage = async (
         );
         modelCalls.push(statusCall.record);
         logModelCall(logger, statusCall.record);
-        // Sanitize model output and use empty fallback (all customer-facing text must be model-generated)
+        // If status text is empty, let the model craft a fallback with context
         const rawResult =
           statusCall.record.success && typeof statusCall.result === "string"
             ? statusCall.result
             : "";
-        const replyText = sanitizeModelOutput(rawResult) || "";
+        let replyText = sanitizeModelOutput(rawResult);
+        if (!replyText) {
+          const fallbackResult = buildFallbackToolResult(
+            "verification_pending",
+            "Still verifying identity; acknowledge and ask if they'd like a human.",
+          );
+          replyText = await generateReply(
+            model,
+            input,
+            customer,
+            fallbackResult,
+            friendlyFallbackText(agentConfig.scopeMessage),
+            context,
+            modelCalls,
+            messageHistory,
+            logger,
+            callSessionId,
+            options?.onToken,
+          );
+        }
         await updateCallSummary(replyText);
         await deps.calls.addTurn({
           id: crypto.randomUUID(),
@@ -1826,6 +1934,67 @@ export const handleAgentMessage = async (
             };
             toolCallSource = "routing";
             break;
+          case "general": {
+            const helpText = buildCapabilitiesHelpText();
+            const fallbackResult = buildFallbackToolResult(
+              "help",
+              `${helpText}\n\nYou can also ask to speak with a person at any time.`,
+            );
+            const replyText = await generateReply(
+              model,
+              input,
+              customer,
+              fallbackResult,
+              friendlyFallbackText(agentConfig.scopeMessage),
+              context,
+              modelCalls,
+              messageHistory,
+              logger,
+              callSessionId,
+              options?.onToken,
+            );
+            summary = {
+              ...summary,
+              callSummary: trimSummaryText(replyText),
+              unclearTurns: 0,
+            };
+            await deps.calls.updateSessionSummary({
+              callSessionId,
+              summary: buildSummary(summary),
+            });
+            await deps.calls.addTurn({
+              id: crypto.randomUUID(),
+              callSessionId,
+              ts: new Date().toISOString(),
+              speaker: "agent",
+              text: replyText,
+              meta: {
+                intent: "final",
+                tools,
+                modelCalls,
+                customerId: resolvedCustomer?.id ?? customer.id,
+                contextUsed: Boolean(context),
+                contextTurns,
+                decisionSnapshot,
+                toolCallSource: "routing",
+                replyTextLength: replyText.length,
+                replyTextWasEmpty: !replyText.trim(),
+              },
+            });
+            logger.info(
+              {
+                callSessionId,
+                intent: "final",
+                toolCallSource: "routing",
+                toolCount: tools.length,
+                modelCallCount: modelCalls.length,
+                replyTextLength: replyText.length,
+                replyPreview: replyText.slice(0, 160),
+              },
+              "agent.message.complete",
+            );
+            return { callSessionId, replyText, actions };
+          }
           default:
             break;
         }
@@ -2716,7 +2885,7 @@ export const handleAgentMessage = async (
               toolName: "agent.message",
               result: {
                 kind: "fallback",
-                details: agentConfig.scopeMessage,
+                details: friendlyFallbackText(agentConfig.scopeMessage),
               },
             };
             break;
@@ -2857,12 +3026,16 @@ export const handleAgentMessage = async (
       },
       "agent.tool.result",
     );
+    const nextUnclearTurns = isUnclearResult(toolResult)
+      ? (summary.unclearTurns ?? 0) + 1
+      : 0;
     summary = {
       identityStatus: summary.identityStatus,
       verifiedCustomerId: summary.verifiedCustomerId ?? null,
       pendingCustomerId: summary.pendingCustomerId ?? null,
       pendingCustomerProfile: summary.pendingCustomerProfile ?? null,
       workflowState: summary.workflowState ?? null,
+      unclearTurns: nextUnclearTurns,
       zipAttempts: summary.zipAttempts ?? 0,
       lastToolName: toolResult.toolName,
       lastToolResult: stringifyToolResult(redactedToolResult, deps.logger),
@@ -2891,6 +3064,7 @@ export const handleAgentMessage = async (
     summary = {
       ...summary,
       callSummary: trimSummaryText(replyText),
+      unclearTurns: 0,
     };
     await deps.calls.updateSessionSummary({
       callSessionId,
@@ -2936,15 +3110,45 @@ export const handleAgentMessage = async (
     };
   }
 
+  let intent = toolCall?.toolName ?? "final";
+  let replyText = "";
+  let ticketId: string | undefined;
+  let toolCustomer = customer;
+  let selectedAppointmentId: string | null = summary.lastAppointmentId ?? null;
+  const failureMessage =
+    "Something went wrong on my end. Please try again, or I can connect you with a person to help.";
+  const maxToolPasses = 10;
+  let iterations = 0;
+
   if (!toolCall && modelOutput?.type === "final") {
     // Sanitize model output to remove any embedded JSON/function calls
     let replyText = sanitizeModelOutput(modelOutput.text);
+    const usedFallback = !replyText;
     if (!replyText) {
-      replyText = agentConfig.scopeMessage;
+      const fallbackResult = buildFallbackToolResult(
+        "empty_response",
+        "Model returned empty text; clarify the request or offer a human handoff.",
+      );
+      replyText = await generateReply(
+        model,
+        input,
+        customer,
+        fallbackResult,
+        friendlyFallbackText(agentConfig.scopeMessage),
+        context,
+        modelCalls,
+        messageHistory,
+        logger,
+        callSessionId,
+        options?.onToken,
+      );
+      intent = "agent.fallback";
     }
+    const nextUnclearTurns = usedFallback ? (summary.unclearTurns ?? 0) + 1 : 0;
     summary = {
       ...summary,
       callSummary: trimSummaryText(replyText),
+      unclearTurns: nextUnclearTurns,
     };
     await deps.calls.updateSessionSummary({
       callSessionId,
@@ -2990,16 +3194,6 @@ export const handleAgentMessage = async (
       actions,
     };
   }
-
-  let replyText = "";
-  let intent = toolCall?.toolName ?? "final";
-  let ticketId: string | undefined;
-  let toolCustomer = customer;
-  let selectedAppointmentId: string | null = summary.lastAppointmentId ?? null;
-  const failureMessage =
-    "Something went wrong on my end. Please try again, or I can have someone reach out to you.";
-  const maxToolPasses = 10;
-  let iterations = 0;
 
   if (toolCall && toolCall.type === "tool_call" && options?.onStatus) {
     const emitStatus = options.onStatus;
@@ -3092,21 +3286,98 @@ export const handleAgentMessage = async (
       options?.onToken,
     );
     if (!replyText.trim()) {
-      replyText = agentConfig.scopeMessage;
+      const fallbackResult = buildFallbackToolResult(
+        "empty_response",
+        `No response after tool ${toolCall ? toolCall.toolName : intent}; politely clarify or offer a human.`,
+      );
+      replyText = await generateReply(
+        model,
+        input,
+        toolCustomer,
+        fallbackResult,
+        friendlyFallbackText(agentConfig.scopeMessage),
+        context,
+        modelCalls,
+        messageHistory,
+        logger,
+        callSessionId,
+        options?.onToken,
+      );
+    }
+
+    const unclearTurns = summary.unclearTurns ?? 0;
+    const shouldEscalate =
+      isUnclearResult(exec.toolResult) && unclearTurns >= 2;
+    if (shouldEscalate) {
+      toolCall = {
+        type: "tool_call",
+        toolName: "agent.escalate",
+        arguments: {
+          reason: "Unable to interpret request after multiple attempts",
+          summary: input.text,
+        },
+      };
+      summary = { ...summary, unclearTurns: 0 };
+      continue;
     }
 
     toolCall = null;
     iterations += 1;
   }
 
+  let replyUsedFallback = false;
   if (!replyText.trim()) {
-    replyText = agentConfig.scopeMessage;
+    const fallbackResult = buildFallbackToolResult(
+      "empty_response",
+      "Agent reply was empty; ask a concise clarifying question or offer a human.",
+    );
+    replyText = await generateReply(
+      model,
+      input,
+      toolCustomer,
+      fallbackResult,
+      friendlyFallbackText(agentConfig.scopeMessage),
+      context,
+      modelCalls,
+      messageHistory,
+      logger,
+      callSessionId,
+      options?.onToken,
+    );
+    replyUsedFallback = true;
   }
   statusOpen = false;
   summary = {
     ...summary,
     callSummary: trimSummaryText(replyText),
+    unclearTurns: replyUsedFallback
+      ? (summary.unclearTurns ?? 0) + 1
+      : (summary.unclearTurns ?? 0),
   };
+  if (replyUsedFallback && (summary.unclearTurns ?? 0) >= 2) {
+    const escalateResult = buildFallbackToolResult(
+      "escalate",
+      "Still having trouble understanding; offering a human handoff.",
+    );
+    replyText = await generateReply(
+      model,
+      input,
+      toolCustomer,
+      escalateResult,
+      friendlyFallbackText(agentConfig.scopeMessage),
+      context,
+      modelCalls,
+      messageHistory,
+      logger,
+      callSessionId,
+      options?.onToken,
+    );
+    summary = {
+      ...summary,
+      callSummary: trimSummaryText(replyText),
+      unclearTurns: 0,
+    };
+  }
   await deps.calls.updateSessionSummary({
     callSessionId,
     summary: buildSummary(summary),
