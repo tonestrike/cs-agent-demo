@@ -12,6 +12,7 @@ OPENROUTER_REFERER = "https://pestcall-worker.tonyvantur.workers.dev"
 OPENROUTER_TITLE = "PestCall CS Agent"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 REALTIMEKIT_ACCOUNT_ID = "197ac8ab6d5079d3faab60cea42eaa7e"
+REALTIMEKIT_MEETING_ID = "bbb58ddd-1416-4812-aceb-7e078e61c78b"
 
 [ai]
 binding = "AI"
