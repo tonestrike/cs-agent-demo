@@ -425,10 +425,7 @@ export class ConversationSession {
         { error: message, inputText: input.text?.slice(0, 50) },
         "conversation.session.message.error",
       );
-      return Response.json(
-        { ok: false, error: message },
-        { status: 500 },
-      );
+      return Response.json({ ok: false, error: message }, { status: 500 });
     }
   }
 
