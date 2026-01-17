@@ -719,10 +719,10 @@ export function RealtimeKitChatPanel({
       {/* Main chat area */}
       <div className="relative min-h-0 flex-1 bg-sand-50">
         {/* Always render rtk-chat to prevent unmounting and focus loss */}
-        {/* Key forces remount on session/participant change to clear stale messages */}
+        {/* Key forces remount on session change to clear stale messages */}
         {meeting && (
           <rtk-chat
-            key={`${sessionId}-${meeting.self?.userId ?? "unknown"}`}
+            key={sessionId}
             ref={handleChatRef}
             style={{
               width: "100%",

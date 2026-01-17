@@ -384,11 +384,15 @@ const streamOpenRouterResponse = async function* (
         : null;
     const deltaContent = delta && "content" in delta ? delta.content : null;
     const deltaText = delta && "text" in delta ? delta.text : null;
+    // Some models (e.g. GPT-5) put output in reasoning field when content is empty
+    const deltaReasoning =
+      delta && "reasoning" in delta ? delta.reasoning : null;
     const messageContent =
       message && "content" in message ? message.content : null;
     return (
       coerceContent(deltaContent) ??
       coerceContent(deltaText) ??
+      coerceContent(deltaReasoning) ??
       coerceContent(messageContent)
     );
   };
