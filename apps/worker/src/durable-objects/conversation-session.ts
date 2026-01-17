@@ -581,6 +581,8 @@ export class ConversationSession {
         turnId: this.activeTurnId,
         streamId,
         textLength: input.text?.length ?? 0,
+        text: input.text ?? "",
+        phoneNumber: input.phoneNumber,
       },
       "conversation.session.turn.start",
     );
@@ -1080,7 +1082,7 @@ export class ConversationSession {
     callSessionId: string,
   ): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
     const turns = await deps.calls.getRecentTurns({ callSessionId, limit: 8 });
-    return turns
+    const messages = turns
       .map((turn) => {
         const role = (turn.speaker === "agent" ? "assistant" : "user") as
           | "assistant"
@@ -1088,6 +1090,15 @@ export class ConversationSession {
         return { role, content: turn.text };
       })
       .filter((turn) => turn.content.trim().length > 0);
+    this.logger.info(
+      {
+        callSessionId,
+        messageCount: messages.length,
+        messages,
+      },
+      "conversation.session.messages.recent",
+    );
+    return messages;
   }
 
   private async updateIdentitySummary(
@@ -1942,6 +1953,15 @@ export class ConversationSession {
     const context = this.buildModelContext();
     const messages = await this.getRecentMessages(deps, callSessionId);
     try {
+      this.logger.info(
+        {
+          callSessionId,
+          turnId: this.activeTurnId,
+          messageCount: messages.length,
+          messages,
+        },
+        "conversation.session.generate.input",
+      );
       const decision = await model.generate({
         text: input.text,
         customer,
@@ -2972,6 +2992,16 @@ export class ConversationSession {
       messages: recentMessages,
       ...toolResult,
     };
+    this.logger.info(
+      {
+        callSessionId,
+        toolName: toolResult.toolName,
+        messageCount: recentMessages.length,
+        messages: recentMessages,
+        contextHint: contextHint ?? null,
+      },
+      "conversation.session.narrate.input",
+    );
     try {
       if (model.respondStream) {
         let combined = "";
@@ -3184,6 +3214,15 @@ export class ConversationSession {
     const context = this.buildModelContext();
     let statusText = fallback;
     try {
+      this.logger.info(
+        {
+          callSessionId,
+          messageCount: messages.length,
+          messages,
+          contextHint: contextHint ?? null,
+        },
+        "conversation.session.status.input",
+      );
       statusText = await model.status({
         text: input.text,
         contextHint,
