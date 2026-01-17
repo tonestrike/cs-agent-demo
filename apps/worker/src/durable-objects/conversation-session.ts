@@ -1299,6 +1299,10 @@ export class ConversationSession {
             date: slot.date,
             timeWindow: slot.timeWindow,
           })),
+          conversation: applyIntent(
+            this.sessionState.conversation ?? initialConversationState(),
+            { type: "schedule_requested" },
+          ),
         };
         await this.state.storage.put("state", this.sessionState);
         return await this.narrateToolResult(
@@ -1366,6 +1370,22 @@ export class ConversationSession {
           return result.message ?? "Rescheduling is temporarily unavailable.";
         }
         const appointments = result.appointments ?? [];
+        this.sessionState = {
+          ...this.sessionState,
+          conversation: applyIntent(
+            this.sessionState.conversation ?? initialConversationState(),
+            {
+              type: "appointments_loaded",
+              appointments: appointments.map((appointment) => ({
+                id: appointment.id,
+                date: appointment.date,
+                timeWindow: appointment.timeWindow,
+                addressSummary: appointment.addressSummary,
+              })),
+            },
+          ),
+        };
+        await this.state.storage.put("state", this.sessionState);
         return await this.narrateToolResult(
           {
             toolName: "crm.listUpcomingAppointments",
@@ -1631,6 +1651,13 @@ export class ConversationSession {
               date: slot.date,
               timeWindow: slot.timeWindow,
             })),
+            conversation: applyIntent(
+              this.sessionState.conversation ?? initialConversationState(),
+              {
+                type: "reschedule_requested",
+                appointmentId: resolvedAppointmentId,
+              },
+            ),
           };
           await this.state.storage.put("state", this.sessionState);
           const replyText = await this.narrateToolResult(
@@ -1668,6 +1695,17 @@ export class ConversationSession {
             type: RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
             payload: { slotId: resolvedSlotId },
           });
+          this.sessionState = {
+            ...this.sessionState,
+            conversation: applyIntent(
+              this.sessionState.conversation ?? initialConversationState(),
+              {
+                type: "reschedule_slot_selected",
+                slotId: resolvedSlotId,
+              },
+            ),
+          };
+          await this.state.storage.put("state", this.sessionState);
           const replyText = await this.narrateText(
             input,
             deps,
@@ -1694,6 +1732,14 @@ export class ConversationSession {
           this.sessionState = {
             ...this.sessionState,
             availableSlots: undefined,
+            conversation: applyIntent(
+              this.sessionState.conversation ?? initialConversationState(),
+              {
+                type: confirmation
+                  ? "reschedule_confirmed"
+                  : "reschedule_declined",
+              },
+            ),
           };
           await this.state.storage.put("state", this.sessionState);
           const replyText = await this.narrateText(
@@ -2171,6 +2217,22 @@ export class ConversationSession {
             contextHint: "Ask which appointment to reschedule using the list.",
           },
         );
+        this.sessionState = {
+          ...this.sessionState,
+          conversation: applyIntent(
+            this.sessionState.conversation ?? initialConversationState(),
+            {
+              type: "appointments_loaded",
+              appointments: appointments.map((appointment) => ({
+                id: appointment.id,
+                date: appointment.date,
+                timeWindow: appointment.timeWindow,
+                addressSummary: appointment.addressSummary,
+              })),
+            },
+          ),
+        };
+        await this.state.storage.put("state", this.sessionState);
         return {
           callSessionId,
           replyText: this.joinNarration(acknowledgementText, replyText),
@@ -2199,6 +2261,13 @@ export class ConversationSession {
             date: slot.date,
             timeWindow: slot.timeWindow,
           })),
+          conversation: applyIntent(
+            this.sessionState.conversation ?? initialConversationState(),
+            {
+              type: "reschedule_requested",
+              appointmentId,
+            },
+          ),
         };
         await this.state.storage.put("state", this.sessionState);
         const acknowledgementText = await activeAcknowledgementPromise;
@@ -2236,6 +2305,17 @@ export class ConversationSession {
           payload: { slotId },
         });
       }
+      this.sessionState = {
+        ...this.sessionState,
+        conversation: applyIntent(
+          this.sessionState.conversation ?? initialConversationState(),
+          {
+            type: "reschedule_slot_selected",
+            slotId,
+          },
+        ),
+      };
+      await this.state.storage.put("state", this.sessionState);
       const acknowledgementText = await activeAcknowledgementPromise;
       const replyText = await this.narrateText(
         input,
@@ -2609,6 +2689,16 @@ export class ConversationSession {
               "Confirm the appointment was scheduled and confirm the address on file.",
           },
         );
+        if (result.ok) {
+          this.sessionState = {
+            ...this.sessionState,
+            conversation: applyIntent(
+              this.sessionState.conversation ?? initialConversationState(),
+              { type: "schedule_confirmed" },
+            ),
+          };
+          await this.state.storage.put("state", this.sessionState);
+        }
         return {
           callSessionId,
           replyText: this.joinNarration(acknowledgementText, replyText),

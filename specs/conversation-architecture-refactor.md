@@ -226,21 +226,15 @@ The Worker forwards the DO event stream to the client unchanged.
 - WS is authoritative; SSE exists only for compatibility.
 
 ## Planned work (deltas only)
-1) **ActionPlan contract**
-   - Define a strict ActionPlan schema (intent, proposed tools, arguments, preconditions).
-   - Validate all model proposals; enforce policy gates for high‑risk actions.
-2) **State machine expansion**
+1) **State machine expansion**
    - Add schedule/reschedule/slot selection states.
    - Encode invariants as code rules (no prompt‑only enforcement).
-3) **Event schema freeze**
-   - Add `seq`, `turnId`, `messageId`, `role`, `correlationId`.
-   - Update UI to stitch turns by `messageId` and `seq`.
-4) **Replay + audit**
+2) **Replay + audit**
    - Formalize short vs long reconnect behavior.
    - Emit a state snapshot on resync for long gaps.
-5) **Voice integration**
+3) **Voice integration**
    - Wire RealtimeKit transcripts to DO with `final_transcript`.
-6) **Latency + observability**
+4) **Latency + observability**
    - Add AI Gateway trace ids to log context.
    - Track per‑turn latency with `callSessionId` and `turnId`.
 
@@ -253,11 +247,12 @@ Done:
 - SSE parser fix for OpenRouter streaming.
 - WS is authoritative for assistant output; RPC returns `{ ok, callSessionId }`.
 - E2E tests updated to match new RPC response shape.
+- ActionPlan schema + policy gates before tool execution.
+- WS event schema with `seq`, `turnId`, `messageId`, `role`, `correlationId` and UI stitching.
 
 In progress:
 - First-token-fast acknowledgements before tool/model work begins.
 - AI Gateway trace id logging + latency tracing per model call.
-- Web UI rendering of status events and streaming cleanup for WS-only output.
 - RealtimeKit UI tab + token endpoint so verified customers can join the RTK chat.
 
 Not started:
@@ -286,7 +281,7 @@ Workstream C: Voice transcripts (frontend + backend)
 
 Workstream D: Quality guardrails (backend)
 - Tighten model prompts for verification/reschedule/schedule/confirm.
-- Implement ActionPlan schema + policy gates for high‑risk actions.
+- Implement ActionPlan schema + policy gates for high‑risk actions. (done)
 - Reduce robotic phrasing; ensure address-on-file confirmation before asking for new.
 - Add fallback clarifications for ambiguous scheduling.
 
@@ -296,7 +291,8 @@ M1: First-token-fast + reduced model round trips (A/B) — in progress
   - Remaining: immediate ack before tool/model work, guard against JSON leakage.
 M2: RealtimeKit text chat wired to DO (A) — in progress
   - Done: register web components, init meeting, mount `<rtk-chat>`.
-  - Remaining: bridge chat events to `/api/conversations/:id/message` and keep realtime docs updated.
+  - Done: bridge chat events to `/api/conversations/:id/message`.
+  - Remaining: keep realtime docs updated.
 M3: Voice transcripts wired to DO (C) — not started
   - Remaining: map `meeting.ai` transcripts to DO events; use final transcript for tool calls.
 M4: Quality and prompt tuning complete (D) — in progress

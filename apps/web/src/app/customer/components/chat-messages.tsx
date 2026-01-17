@@ -5,10 +5,9 @@ import type { ChatMessage } from "../types";
 
 type ChatMessagesProps = {
   messages: ChatMessage[];
-  statusText?: string;
 };
 
-export function ChatMessages({ messages, statusText }: ChatMessagesProps) {
+export function ChatMessages({ messages }: ChatMessagesProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScroll = useRef(true);
 
@@ -153,11 +152,6 @@ export function ChatMessages({ messages, statusText }: ChatMessagesProps) {
                 )}
               </div>
             ))}
-            {statusText ? (
-              <div className="inline-block rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-500 shadow-soft">
-                {statusText}
-              </div>
-            ) : null}
           </div>
         )}
       </div>

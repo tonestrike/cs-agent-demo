@@ -4,8 +4,13 @@ export const conversationStateSchema = z.object({
   status: z.enum([
     "CollectingVerification",
     "VerifiedIdle",
+    "DisambiguatingIntent",
     "PresentingAppointments",
+    "PresentingSlots",
     "PendingCancellationConfirmation",
+    "PendingRescheduleConfirmation",
+    "PendingScheduleDetails",
+    "PendingScheduleConfirmation",
     "Completed",
   ]),
   verification: z.object({
@@ -24,6 +29,10 @@ export const conversationStateSchema = z.object({
     )
     .default([]),
   pendingCancellationId: z.string().nullable(),
+  pendingRescheduleId: z.string().nullable(),
+  pendingRescheduleSlotId: z.string().nullable(),
+  pendingScheduleSlotId: z.string().nullable(),
+  pendingScheduleAddressConfirmed: z.boolean().default(false),
 });
 
 export type ConversationState = z.infer<typeof conversationStateSchema>;
@@ -37,11 +46,16 @@ export const initialConversationState = (): ConversationState => ({
   },
   appointments: [],
   pendingCancellationId: null,
+  pendingRescheduleId: null,
+  pendingRescheduleSlotId: null,
+  pendingScheduleSlotId: null,
+  pendingScheduleAddressConfirmed: false,
 });
 
 export type ConversationIntent =
   | { type: "request_verification"; reason: "missing" | "invalid_zip" }
   | { type: "verified"; customerId: string }
+  | { type: "intent_ambiguous" }
   | {
       type: "appointments_loaded";
       appointments: ConversationState["appointments"];
@@ -49,7 +63,16 @@ export type ConversationIntent =
   | { type: "appointments_listed" }
   | { type: "cancel_requested"; appointmentId: string }
   | { type: "cancel_confirmed" }
-  | { type: "cancel_declined" };
+  | { type: "cancel_declined" }
+  | { type: "reschedule_requested"; appointmentId: string }
+  | { type: "reschedule_slot_selected"; slotId: string }
+  | { type: "reschedule_confirmed" }
+  | { type: "reschedule_declined" }
+  | { type: "schedule_requested" }
+  | { type: "schedule_address_confirmed" }
+  | { type: "schedule_slot_selected"; slotId: string }
+  | { type: "schedule_confirmed" }
+  | { type: "schedule_declined" };
 
 export const applyIntent = (
   state: ConversationState,
@@ -80,6 +103,11 @@ export const applyIntent = (
           zipAttempts: 0,
         },
       };
+    case "intent_ambiguous":
+      return {
+        ...state,
+        status: "DisambiguatingIntent",
+      };
     case "appointments_listed":
       return {
         ...state,
@@ -108,6 +136,66 @@ export const applyIntent = (
         ...state,
         status: "VerifiedIdle",
         pendingCancellationId: null,
+      };
+    case "reschedule_requested":
+      return {
+        ...state,
+        status: "PresentingSlots",
+        pendingRescheduleId: intent.appointmentId,
+        pendingRescheduleSlotId: null,
+      };
+    case "reschedule_slot_selected":
+      return {
+        ...state,
+        status: "PendingRescheduleConfirmation",
+        pendingRescheduleSlotId: intent.slotId,
+      };
+    case "reschedule_confirmed":
+      return {
+        ...state,
+        status: "Completed",
+        pendingRescheduleId: null,
+        pendingRescheduleSlotId: null,
+      };
+    case "reschedule_declined":
+      return {
+        ...state,
+        status: "VerifiedIdle",
+        pendingRescheduleId: null,
+        pendingRescheduleSlotId: null,
+      };
+    case "schedule_requested":
+      return {
+        ...state,
+        status: "PendingScheduleDetails",
+        pendingScheduleSlotId: null,
+        pendingScheduleAddressConfirmed: false,
+      };
+    case "schedule_address_confirmed":
+      return {
+        ...state,
+        status: "PresentingSlots",
+        pendingScheduleAddressConfirmed: true,
+      };
+    case "schedule_slot_selected":
+      return {
+        ...state,
+        status: "PendingScheduleConfirmation",
+        pendingScheduleSlotId: intent.slotId,
+      };
+    case "schedule_confirmed":
+      return {
+        ...state,
+        status: "Completed",
+        pendingScheduleSlotId: null,
+        pendingScheduleAddressConfirmed: false,
+      };
+    case "schedule_declined":
+      return {
+        ...state,
+        status: "VerifiedIdle",
+        pendingScheduleSlotId: null,
+        pendingScheduleAddressConfirmed: false,
       };
     default:
       return state;

@@ -210,7 +210,7 @@ export function useConversationSession(phoneNumber: string) {
     hasDeltaRef.current = false;
     pendingPlaceholderIdRef.current = null;
     setMessages([]);
-    setStatus("New session");
+      setStatus("New session");
     socketRef.current?.close();
     socketRef.current = null;
     sessionRef.current = null;
@@ -218,7 +218,10 @@ export function useConversationSession(phoneNumber: string) {
   }, [phoneNumber, logEvent]);
 
   const sendMessage = useCallback(
-    async (message: string) => {
+    async (
+      message: string,
+      options?: { skipUserMessage?: boolean; userMessageText?: string },
+    ) => {
       const trimmed = message.trim();
       if (!trimmed) {
         return;
@@ -228,10 +231,12 @@ export function useConversationSession(phoneNumber: string) {
         setCallSessionId(sessionId);
       }
       logEvent("message.send.start", { sessionId, length: trimmed.length });
-      setMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), role: "customer", text: trimmed },
-      ]);
+      if (!options?.skipUserMessage) {
+        setMessages((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), role: "customer", text: options?.userMessageText ?? trimmed },
+        ]);
+      }
 
       const responseId = crypto.randomUUID();
       responseIdRef.current = responseId;
@@ -308,6 +313,14 @@ export function useConversationSession(phoneNumber: string) {
     [callSessionId, phoneNumber, ensureSocket, logEvent],
   );
 
+  const startCall = useCallback(async () => {
+    if (!phoneNumber) {
+      return;
+    }
+    logEvent("chat.start_call", { phoneNumber });
+    await sendMessage("Incoming call started", { skipUserMessage: true });
+  }, [logEvent, phoneNumber, sendMessage]);
+
   return {
     messages,
     status,
@@ -315,6 +328,7 @@ export function useConversationSession(phoneNumber: string) {
     confirmedSessionId,
     callSessionId,
     sendMessage,
+    startCall,
     resetSession,
   };
 }

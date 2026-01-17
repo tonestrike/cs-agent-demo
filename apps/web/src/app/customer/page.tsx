@@ -27,8 +27,22 @@ export default function CustomerPage() {
     confirmedSessionId,
     callSessionId,
     sendMessage,
+    startCall,
     resetSession,
   } = useConversationSession(phoneNumber);
+  const [startingCall, setStartingCall] = useState(false);
+
+  const handleStartCall = useCallback(async () => {
+    if (startingCall || !selectedCustomer) {
+      return;
+    }
+    setStartingCall(true);
+    try {
+      await startCall();
+    } finally {
+      setStartingCall(false);
+    }
+  }, [selectedCustomer, startCall, startingCall]);
 
   const handleCustomerChange = useCallback(
     (phone: string) => {
@@ -48,8 +62,6 @@ export default function CustomerPage() {
   }, [callSessionId, phoneNumber, messages]);
 
   const [chatMode, setChatMode] = useState<ChatMode>("classic");
-  const statusLine =
-    status === "New session" || status.startsWith("Session ") ? "" : status;
 
   return (
     <div className="fixed inset-0 top-[57px] flex overflow-hidden bg-sand-200">
@@ -224,7 +236,7 @@ export default function CustomerPage() {
             <>
               {/* Messages area - fills remaining space */}
               <div className="min-h-0 flex-1 overflow-hidden">
-                <ChatMessages messages={messages} statusText={statusLine} />
+                <ChatMessages messages={messages} />
               </div>
 
               {/* Input bar pinned at bottom */}
@@ -239,6 +251,19 @@ export default function CustomerPage() {
             </>
           ) : (
             <div className="flex-1 overflow-hidden px-4 pb-6">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-ink-200 pb-3">
+                <p className="text-xs text-ink-500">
+                  Start an incoming call session (runs verification before the customer replies).
+                </p>
+                <button
+                  type="button"
+                  onClick={handleStartCall}
+                  disabled={!selectedCustomer || startingCall}
+                  className="rounded-lg border border-ink-200 bg-white px-4 py-2 text-xs font-semibold text-ink-600 transition hover:bg-sand-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {startingCall ? "Starting…" : "Start call"}
+                </button>
+              </div>
               <RealtimeKitChatPanel
                 sessionId={callSessionId}
                 customer={selectedCustomer}
