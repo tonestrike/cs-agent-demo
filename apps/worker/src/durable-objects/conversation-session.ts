@@ -129,8 +129,7 @@ const toolAcknowledgementSchema = z.enum([
 ]);
 
 const MAX_EVENT_BUFFER = 200;
-const FILLER_STATUS_TEXT = "Okay, checking.";
-const FILLER_TIMEOUT_MS = 2000;
+const FILLER_TIMEOUT_MS = 400;
 
 export class ConversationSession {
   private connections = new Set<WebSocket>();
@@ -177,7 +176,9 @@ export class ConversationSession {
     customerContextMs?: number;
     recentMessagesMs?: number;
     modelGenerateMs?: number;
+    preWorkMs?: number;
   } | null = null;
+  private cachedCustomerContext: AgentModelInput["customer"] | null = null;
 
   constructor(
     private state: DurableObjectState,
@@ -609,6 +610,18 @@ export class ConversationSession {
       },
       "conversation.session.turn.start",
     );
+    // First-token-fast: emit early acknowledgement for verified users
+    // This runs the acknowledgement model call concurrently with other pre-work
+    const conversationState =
+      this.sessionState.conversation ?? initialConversationState();
+    let earlyAckPromise: Promise<void> | null = null;
+    if (conversationState.verification.verified) {
+      earlyAckPromise = this.emitEarlyAcknowledgement(
+        activeInput,
+        deps,
+        streamId,
+      );
+    }
     let fillerTimer: ReturnType<typeof setTimeout> | null = null;
     let fillerEmitted = false;
     const scheduleFiller = () => {
@@ -633,12 +646,13 @@ export class ConversationSession {
           return;
         }
         fillerEmitted = true;
+        // Use empty fallback - all customer-facing text must be model-generated
         void this.emitNarratorStatus(
           activeInput,
           deps,
           streamId,
-          FILLER_STATUS_TEXT,
-          "Acknowledge the request briefly while you check.",
+          "",
+          "Acknowledge the request briefly and naturally while you check. Be friendly and conversational.",
         );
       }, FILLER_TIMEOUT_MS);
     };
@@ -929,21 +943,22 @@ export class ConversationSession {
       payload: { confirmed },
     });
 
-    const fallbackText = confirmed
-      ? "Thanks. I'll cancel that appointment now."
-      : "Okay, I won't cancel that appointment.";
+    // All customer-facing text must be model-generated
+    const contextHint = confirmed
+      ? "Confirm you're canceling the appointment in a warm, helpful tone."
+      : "Acknowledge that you won't cancel the appointment in a friendly tone.";
     const statusText =
       (await this.emitNarratorStatus(
         {
           callSessionId: sessionId,
           phoneNumber: this.sessionState.lastPhoneNumber ?? "unknown",
-          text: fallbackText,
+          text: confirmed ? "cancel confirmed" : "cancel declined",
         },
         deps,
         this.activeStreamId,
-        fallbackText,
-        "Confirm or acknowledge the cancellation decision.",
-      )) ?? fallbackText;
+        "",
+        contextHint,
+      )) ?? "";
     const current =
       this.sessionState.conversation ?? initialConversationState();
     this.sessionState = {
@@ -2065,25 +2080,22 @@ export class ConversationSession {
       return null;
     }
     const callSessionId = input.callSessionId ?? crypto.randomUUID();
-    const modelStart = Date.now();
-    const model = await this.getModelAdapter(deps);
-    const modelMs = Date.now() - modelStart;
+    // Parallelize pre-work: model adapter, customer context, and recent messages
+    const preWorkStart = Date.now();
+    const [model, customer, messages] = await Promise.all([
+      this.getModelAdapter(deps),
+      this.getCustomerContext(deps, input),
+      this.getRecentMessages(deps, callSessionId),
+    ]);
+    const preWorkMs = Date.now() - preWorkStart;
     if (this.turnTimings) {
-      this.turnTimings.modelAdapterMs = modelMs;
-    }
-    const customerStart = Date.now();
-    const customer = await this.getCustomerContext(deps, input);
-    const customerMs = Date.now() - customerStart;
-    if (this.turnTimings) {
-      this.turnTimings.customerContextMs = customerMs;
+      this.turnTimings.preWorkMs = preWorkMs;
+      // Keep individual timings as estimates (parallel execution)
+      this.turnTimings.modelAdapterMs = preWorkMs;
+      this.turnTimings.customerContextMs = preWorkMs;
+      this.turnTimings.recentMessagesMs = preWorkMs;
     }
     const context = this.buildModelContext();
-    const messagesStart = Date.now();
-    const messages = await this.getRecentMessages(deps, callSessionId);
-    const messagesMs = Date.now() - messagesStart;
-    if (this.turnTimings) {
-      this.turnTimings.recentMessagesMs = messagesMs;
-    }
     try {
       this.recordModelCall("generate", model);
       this.logger.info(
@@ -2100,9 +2112,7 @@ export class ConversationSession {
         {
           callSessionId,
           turnId: this.activeTurnId,
-          modelMs,
-          customerMs,
-          messagesMs,
+          preWorkMs,
           messageCount: messages.length,
           messages,
         },
@@ -3173,28 +3183,38 @@ export class ConversationSession {
     deps: ReturnType<typeof createDependencies>,
     input: AgentMessageInput,
   ): Promise<AgentModelInput["customer"]> {
+    // Return cached context if available (set after verification)
+    if (this.cachedCustomerContext) {
+      return this.cachedCustomerContext;
+    }
     const customerId =
       this.sessionState.conversation?.verification.customerId ?? null;
     if (customerId) {
       const cached = await deps.customers.get(customerId);
       if (cached) {
-        return {
+        const context = {
           id: cached.id,
           displayName: cached.displayName,
           phoneE164: cached.phoneE164,
           addressSummary: cached.addressSummary ?? "the service address",
         };
+        // Cache for future calls in this session
+        this.cachedCustomerContext = context;
+        return context;
       }
     }
     const matches = await deps.crm.lookupCustomerByPhone(input.phoneNumber);
     const match = Array.isArray(matches) ? matches[0] : null;
     if (match) {
-      return {
+      const context = {
         id: match.id,
         displayName: match.displayName,
         phoneE164: match.phoneE164,
         addressSummary: match.addressSummary,
       };
+      // Cache for future calls in this session
+      this.cachedCustomerContext = context;
+      return context;
     }
     return {
       id: customerId ?? "unknown",
@@ -3235,13 +3255,18 @@ export class ConversationSession {
     },
   ): Promise<string> {
     const { input, deps, streamId, fallback, contextHint, messages } = options;
-    const model = await this.getModelAdapter(deps);
-    const customer = await this.getCustomerContext(deps, input);
     const callSessionId =
       input.callSessionId ?? this.sessionState.lastCallSessionId ?? null;
-    const recentMessages =
-      messages ??
-      (callSessionId ? await this.getRecentMessages(deps, callSessionId) : []);
+    // Parallelize pre-work: model adapter, customer context, and recent messages
+    const [model, customer, recentMessages] = await Promise.all([
+      this.getModelAdapter(deps),
+      this.getCustomerContext(deps, input),
+      messages
+        ? Promise.resolve(messages)
+        : callSessionId
+          ? this.getRecentMessages(deps, callSessionId)
+          : Promise.resolve([]),
+    ]);
     const respondInput: AgentResponseInput = {
       text: input.text,
       customer,
@@ -3574,6 +3599,88 @@ export class ConversationSession {
         firstStatusMs,
       },
     };
+  }
+
+  /**
+   * Emits an early model-generated acknowledgement in parallel with main work.
+   * This method is intentionally NOT awaited - it runs concurrently and emits
+   * tokens as soon as the model returns. All acknowledgement text is model-generated
+   * with appropriate context and tone.
+   */
+  private async emitEarlyAcknowledgement(
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+    streamId: number,
+  ): Promise<void> {
+    if (this.canceledStreamIds.has(streamId)) {
+      return;
+    }
+    const callSessionId =
+      input.callSessionId ?? this.activeCallSessionId ?? null;
+    const ackStart = Date.now();
+    try {
+      // Parallelize pre-work: model adapter, messages, and customer context
+      const [model, messages] = await Promise.all([
+        this.getModelAdapter(deps),
+        callSessionId
+          ? this.getRecentMessages(deps, callSessionId)
+          : Promise.resolve([]),
+      ]);
+      if (this.canceledStreamIds.has(streamId)) {
+        return;
+      }
+      // Check if we've already emitted tokens - if so, skip the acknowledgement
+      if (this.turnMetrics?.firstTokenAt !== null || this.statusSequence > 0) {
+        return;
+      }
+      const context = this.buildModelContext();
+      this.recordModelCall("status", model);
+      this.logger.info(
+        {
+          callSessionId,
+          provider: model.name,
+          modelId: model.modelId ?? null,
+          kind: "early_ack",
+        },
+        "conversation.session.model.call",
+      );
+      const statusText = await model.status({
+        text: input.text,
+        contextHint:
+          "Acknowledge the request briefly and naturally while you check. Be friendly and conversational.",
+        context,
+        messages,
+      });
+      const ackMs = Date.now() - ackStart;
+      this.logger.info(
+        {
+          callSessionId,
+          ackMs,
+          statusLength: statusText?.length ?? 0,
+        },
+        "conversation.session.early_ack.complete",
+      );
+      if (this.canceledStreamIds.has(streamId)) {
+        return;
+      }
+      // Check again if we've already emitted tokens
+      if (this.turnMetrics?.firstTokenAt !== null || this.statusSequence > 0) {
+        return;
+      }
+      const trimmed = this.sanitizeNarratorOutput(statusText).trim();
+      if (!trimmed) {
+        return;
+      }
+      // Emit as tokens for streaming display
+      this.emitNarratorTokens(trimmed, streamId);
+      this.recordTurnToken();
+    } catch (error) {
+      this.logger.error(
+        { error: error instanceof Error ? error.message : "unknown" },
+        "conversation.session.early_ack.failed",
+      );
+      // Don't emit anything on failure - let the filler timer or main flow handle it
+    }
   }
 
   private async emitNarratorStatus(

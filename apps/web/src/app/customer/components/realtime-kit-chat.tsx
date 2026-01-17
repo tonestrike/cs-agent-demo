@@ -405,6 +405,17 @@ export function RealtimeKitChatPanel({
           data?: { replyText?: string };
         };
 
+        // Handle status events for TTS - speak them immediately
+        if (payload.type === "status") {
+          const text = payload.text?.trim();
+          if (text && ttsEnabled.current) {
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+          }
+          return;
+        }
+
+        // Skip other system messages
         if (payload.role === "system") return;
 
         const messageId = payload.messageId ?? "default";

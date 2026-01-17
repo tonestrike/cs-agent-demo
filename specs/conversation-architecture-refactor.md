@@ -208,8 +208,8 @@ The Worker forwards the DO event stream to the client unchanged.
    - Fallback emit: if a stream ends with zero deltas but has a final message, emit that content.
    - Optional future: timeout fallback to `respond` when no tokens in N ms.
 3) Status guidance centralization
-   - Single shared tool-status config for fallback text + instruction hints.
-   - Remove duplicated status/ack maps from per-call sites.
+   - Single shared tool-status config for context hints passed to the model.
+   - Remove duplicated status/ack maps from per-call sites; all text is model-generated.
 4) Context hygiene
    - Keep status turns in storage for audit but exclude from model context.
    - Enforce consistent ordering (chronological) for model input.
@@ -497,7 +497,7 @@ M5: Diagnostics + summaries (B/D) — in progress
 - Minimal cancel confirmation e2e (requires `E2E_CUSTOMER_ID`, optional `E2E_ZIP`/`E2E_APPOINTMENT_ID`).
 - ConversationSession can start cancel workflows via `start_cancel`.
 - Admin RPC procedures for creating customers/appointments (`admin.createCustomer`, `admin.createAppointment`).
-- ConversationSession now gates verification with deterministic ZIP prompts and CRM verification before model flow.
+- ConversationSession now gates verification with model-generated ZIP prompts (with context/tone) and CRM verification before proceeding.
 
 ## Tests
 - Integration tests for:
@@ -510,7 +510,171 @@ M5: Diagnostics + summaries (B/D) — in progress
 ## Open questions
 - Do we want the interpreter model to live on Workers AI or OpenRouter?
 - Should SSE stream reconnect support replays of the last N events?
-- Do we need a shared “first-token” latency SLA per transport (web chat vs voice)?
+- Do we need a shared "first-token" latency SLA per transport (web chat vs voice)?
+
+## Audit findings (January 2026)
+
+### Core design principle: Model-generated responses only
+All customer-facing text must be model-generated with appropriate context and tone guidance. This includes:
+- Status/acknowledgement messages ("Checking your appointments...")
+- Error recovery messages
+- Verification prompts
+- Tool result narration
+- Any other text shown to customers
+
+**Rationale**: Hardcoded fallback text sounds robotic and cannot adapt to context. Model-generated responses can:
+- Match the conversation tone (friendly, professional, apologetic)
+- Reference specific customer context (name, previous statements)
+- Follow tone guidance and brand voice settings
+- Handle edge cases naturally
+
+**Implementation**: Fire off model calls in parallel with main work; emit model-generated text as soon as it's available. The filler timeout (800ms → 400ms) serves only as a last-resort fallback if the model call fails entirely.
+
+### Latency issues identified
+
+1. **Multiple serial model calls per turn**
+   - Location: `conversation-session.ts` lines 619-790
+   - Flow: `emitEarlyAcknowledgement` → `handleVerificationGate` → `handleWorkflowSelection` → `handleToolCallingFlow` → `handleAgentMessage`
+   - Each handler may call the model (generate/respond/status), creating a cascade of sequential calls
+   - Impact: First token can be delayed 2-4 seconds when multiple model calls chain
+
+2. **emitNarratorStatus is blocking**
+   - Location: `conversation-session.ts` lines 3602-3673
+   - The `model.status()` call is awaited before emitting any status text
+   - This adds ~200-500ms latency per status emission
+   - Recommendation: Fire off `model.status()` in parallel with verification/workflow/tool work; emit status when the model returns without blocking the main flow
+
+3. **Filler timeout is 800ms**
+   - Location: `conversation-session.ts` line 132 (`FILLER_TIMEOUT_MS`)
+   - Users wait almost a full second before seeing "Okay, checking." if model is slow
+   - Recommendation: Keep as backup fallback but reduce to 400-500ms; status model call should complete before this timer fires if running in parallel with main work
+
+4. **Database I/O during message handling**
+   - `getRecentMessages` fetches from D1 (lines 1182-1211)
+   - `getCustomerContext` may hit D1/CRM (lines 3180-3222)
+   - `ensureCallSession` creates session in D1
+   - Only `handleToolCallingFlow` parallelizes pre-work (line 2083)
+   - Other handlers (`handleVerificationGate`, `handleWorkflowSelection`) do not parallelize
+   - Recommendation: Parallelize all DB fetches at turn start, cache aggressively
+
+5. **narrateToolResult makes redundant model calls**
+   - Location: `conversation-session.ts` lines 3244-3413
+   - Calls `getModelAdapter`, `getCustomerContext`, `getRecentMessages` again even if already fetched
+   - Recommendation: Pass pre-fetched data through options, avoid repeat I/O
+
+6. **JSON detection holds back all tokens**
+   - Location: `conversation-session.ts` lines 3322-3351
+   - When JSON is detected in narrator output, tokens are buffered until sanitized
+   - Then emitted via `emitNarratorTokens` which splits by whitespace and emits word-by-word
+   - Loses streaming benefit entirely when model returns JSON wrapper
+   - Recommendation: Fix model prompts to never return JSON; use JSON mode only for structured outputs
+
+### Context and state management issues
+
+1. **State fragmentation across three storage layers**
+   - DO memory: `sessionState` with `conversation`, `pendingIntent`, workflow IDs (line 140)
+   - D1 database: `SummarySnapshot` JSON in call sessions (accessed via `deps.calls.getSession`)
+   - Workflow state: `cancelWorkflowId`, `rescheduleWorkflowId` in both DO and workflows
+   - Recommendation: Make DO the source of truth for live state; D1 for audit only
+
+2. **Summary sync failures are silently ignored**
+   - Location: `syncConversationState` lines 862-899
+   - JSON parse errors are logged but execution continues with potentially stale state
+   - Can cause verification status, appointments, or workflow state to be out of sync
+   - Recommendation: Fail the turn or trigger a resync when summary parse fails
+
+3. **Pending intent restoration is fragile**
+   - `pendingIntent` stored in `sessionState` (lines 91-100)
+   - Executed in `handleVerificationGate` after successful ZIP verification
+   - If any error occurs between capture and execution, intent is lost
+   - Recommendation: Persist pending intent to D1 for durability; add explicit retry logic
+
+4. **Cached customer context not invalidated**
+   - `cachedCustomerContext` set on first fetch (line 181)
+   - Never cleared if customer data changes during session
+   - Could serve stale addresses or names
+   - Recommendation: Add TTL or invalidate on verification
+
+5. **Message history includes only last 8 turns**
+   - Location: `getRecentMessages` line 1187
+   - May lose important context in longer conversations
+   - Status messages are filtered but other system messages are not
+   - Recommendation: Consider dynamic window based on token budget
+
+### Realtime API / update message issues
+
+1. **No message update semantics in event protocol**
+   - Current event structure (lines 69-80) has `messageId` but no update type
+   - Events are append-only; cannot update or replace previous content
+   - Recommendation: Add `updateType: 'append' | 'replace' | 'complete'` to event schema
+
+2. **Status events don't integrate with message stream**
+   - Status events (type: "status") emit as separate system messages
+   - Client sees them as distinct from assistant message being built
+   - Recommendation: Consider `updateType: 'status'` that augments current message
+
+3. **Token streaming lost on JSON fallback**
+   - When `waitingForJson` is true (lines 3322-3347), no tokens emit until end
+   - Then `emitNarratorTokens` emits all at once, losing progressive display
+   - Recommendation: Detect JSON early and switch to respond fallback immediately
+
+4. **Missing incremental update for tool progress**
+   - Tool calls emit status but don't update the current message with progress
+   - User sees "Checking appointments..." but message content doesn't reflect this
+   - Recommendation: Emit incremental updates with tool progress as part of message
+
+5. **Acknowledgement and narration can race**
+   - `emitEarlyAcknowledgement` runs concurrently with other handlers
+   - If early ack finishes after tool narration starts, order is wrong
+   - Recommendation: Sequence early ack completion before tool calls; use `messageId` to distinguish
+
+### Specific recommendations (priority order)
+
+**P0 - Critical latency fixes**
+1. Fire off model-generated status call in parallel with main work (non-blocking)
+   - Start `model.status()` immediately when turn begins
+   - Continue with verification/workflow/tool work without waiting
+   - Emit model-generated status text as soon as it returns
+   - All status text is model-generated with context and tone guidance
+2. Parallelize all DB fetches at turn start in a single `Promise.all`
+3. Cache model adapter instance for session lifetime
+4. Reduce `FILLER_TIMEOUT_MS` to 400ms (emergency fallback only, model should beat this)
+
+**P1 - Context reliability**
+1. Make summary parse failures fail the turn with a resync prompt
+2. Add TTL (5 min) to `cachedCustomerContext`
+3. Persist pending intent to D1 with explicit state machine tracking
+
+**P2 - Streaming improvements**
+1. Add `updateType` to event schema for message updates
+2. Fix model prompts to return plain text only (no JSON wrapper)
+3. If JSON detected in first chunk, abort stream and use `respond` fallback immediately
+4. Sequence early acknowledgement to complete before tool narration begins
+
+**P3 - Observability**
+1. Log per-handler latency breakdown (verification, workflow, tool flow, agent message)
+2. Track JSON fallback rate as a metric
+3. Add trace ID linking all model calls in a single turn
+
+### Implementation checklist (January 2026)
+
+**Done:**
+- [x] Audit of conversation-session.ts completed
+- [x] Latency issues documented with line references
+- [x] Context/state issues documented
+- [x] Realtime API issues documented
+- [x] CORS fix for 500 errors (`apps/worker/src/index.ts`)
+- [x] Core design principle added: all customer-facing text model-generated
+- [x] Removed deterministic message references from spec
+
+**Next steps:**
+- [ ] Implement non-blocking status emission (fire model.status() in parallel)
+- [ ] Parallelize DB fetches at turn start
+- [ ] Cache model adapter for session lifetime
+- [ ] Reduce FILLER_TIMEOUT_MS to 400ms
+- [ ] Add updateType to event schema
+- [ ] Fix model prompts to avoid JSON output in narrator mode
+- [ ] Add TTL to cachedCustomerContext
 
 ## Realtime quality requirements
 - Acknowledge intent immediately with a first streamed token (e.g., “Got it — rescheduling your appointment now.”).
@@ -538,7 +702,7 @@ M5: Diagnostics + summaries (B/D) — in progress
 
 ### Timeout policy
 - If silence exceeds ~2s:
-  - emit a deterministic filler status,
+  - emit model-generated filler status (with context and tone),
   - run tool call,
   - speak result when ready.
 

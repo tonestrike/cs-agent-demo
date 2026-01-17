@@ -89,8 +89,22 @@ export default {
         return stub.fetch(request);
       }
       const target = `https://conversation-session/${action}?callSessionId=${conversationId}`;
-      const response = await stub.fetch(new Request(target, request));
-      return withCors(response);
+      try {
+        const response = await stub.fetch(new Request(target, request));
+        return withCors(response);
+      } catch (error) {
+        const logger = createLogger(env);
+        logger.error(
+          { error: error instanceof Error ? error.message : "unknown", action },
+          "conversation.session.fetch.error",
+        );
+        return withCors(
+          Response.json(
+            { error: "Internal server error" },
+            { status: 500 },
+          ),
+        );
+      }
     }
     if (url.pathname.startsWith("/ws/conversations/")) {
       if (!env.CONVERSATION_HUB) {
