@@ -63,10 +63,10 @@ export function RealtimeChatView({
   }, [callSessionId, phoneNumber, status, logs]);
 
   return (
-    <div className="fixed inset-0 top-[57px] flex overflow-hidden bg-sand-200">
+    <div className="flex min-w-0 flex-1 overflow-hidden bg-sand-200">
       <aside
         className={`
-          fixed bottom-0 left-0 right-0 top-[57px] z-30 transform bg-white transition-transform duration-200 ease-in-out
+          fixed bottom-0 left-0 right-0 top-0 z-30 transform bg-white transition-transform duration-200 ease-in-out
           md:relative md:right-auto md:top-0 md:w-80 md:flex-shrink-0 md:border-r md:border-ink-200 md:translate-x-0
           lg:w-96
           ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
@@ -177,7 +177,7 @@ export function RealtimeChatView({
 
       {sidebarOpen && (
         <div
-          className="fixed inset-0 top-[57px] z-20 bg-ink/30 md:hidden"
+          className="fixed inset-0 z-20 bg-ink/30 md:hidden"
           onClick={() => setSidebarOpen(false)}
           onKeyDown={(e) => e.key === "Escape" && setSidebarOpen(false)}
         />
