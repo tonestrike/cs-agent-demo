@@ -26,6 +26,7 @@ export const envSchema = z.object({
   AGENT_NARRATOR_MODEL_ID: z.string().optional(),
   BUILD_ID: z.string().optional(),
   AI: z.custom<Ai>().optional(),
+  KNOWLEDGE_VECTORS: z.custom<VectorizeIndex>().optional(),
   AI_GATEWAY_ACCOUNT_ID: z.string().optional(),
   AI_GATEWAY_ID: z.string().optional(),
   AI_GATEWAY_TOKEN: z.string().optional(),

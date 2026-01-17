@@ -76,6 +76,7 @@ function extractGatingState(state: SessionState): ToolGatingState {
     | { verification?: { verified?: boolean } }
     | undefined;
   const isVerified = Boolean(conversation?.verification?.verified);
+  const zipAttempts = conversation?.verification?.zipAttempts ?? 0;
 
   return {
     isVerified,
@@ -83,6 +84,7 @@ function extractGatingState(state: SessionState): ToolGatingState {
       Boolean(domainState["rescheduleWorkflowId"]) ||
       Boolean(domainState["cancelWorkflowId"]) ||
       Boolean(domainState["activeSelection"]),
+    allowUnverifiedEscalation: !isVerified && zipAttempts >= 2,
   };
 }
 

@@ -20,6 +20,10 @@ REALTIMEKIT_PRESET_NAME = "group_call_guest"
 [ai]
 binding = "AI"
 
+[[vectorize]]
+binding = "KNOWLEDGE_VECTORS"
+index_name = "pest-control-knowledge"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "pestcall_local"

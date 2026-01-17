@@ -34,6 +34,7 @@ type ToolDefinition = {
 export type ToolGatingState = {
   isVerified: boolean;
   hasActiveWorkflow: boolean;
+  allowUnverifiedEscalation?: boolean;
 };
 
 const fiveDigitZip = z.string().regex(/^\d{5}$/);
@@ -190,6 +191,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     }),
     outputSchema: escalateResultSchema,
     missingArgsMessage: "Escalation details are required.",
+    requiresVerification: true,
     acknowledgement: "I'll bring in a specialist to assist.",
   },
   "agent.fallback": {
@@ -290,7 +292,11 @@ export const getAvailableTools = (
     const toolName = name as AgentToolName;
 
     // Check verification requirement
-    if (definition.requiresVerification && !state.isVerified) {
+    if (
+      definition.requiresVerification &&
+      !state.isVerified &&
+      !(toolName === "agent.escalate" && state.allowUnverifiedEscalation)
+    ) {
       continue;
     }
 

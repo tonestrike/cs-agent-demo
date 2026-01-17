@@ -183,8 +183,11 @@ export type ToolProvider = {
  * This is how agent personality/behavior is injected.
  */
 export type PromptProvider = {
-  /** Build system instructions based on current state */
-  buildSystemPrompt: (state: SessionState) => string;
+  /** Build system instructions based on current state (async for RAG retrieval) */
+  buildSystemPrompt: (
+    state: SessionState,
+    userMessage?: string,
+  ) => Promise<string>;
   /** Get the initial greeting message */
   getGreeting: () => string;
 };

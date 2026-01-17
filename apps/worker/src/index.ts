@@ -6,6 +6,7 @@ import { CORSPlugin } from "@orpc/server/plugins";
 import { createContext } from "./context";
 import type { Env } from "./env";
 import { createLogger } from "./logger";
+import { seedKnowledgeBase } from "./rag";
 import { router } from "./router";
 export { CancelWorkflow } from "./workflows/cancel";
 export { ConversationHub } from "./durable-objects/conversation-hub";
@@ -230,6 +231,47 @@ export default {
       const stub = env.CONVERSATION_HUB.get(id);
       return stub.fetch(request);
     }
+    // Knowledge base seeding endpoint (admin only)
+    if (url.pathname === "/api/knowledge/seed" && request.method === "POST") {
+      const token =
+        request.headers.get("x-demo-auth") ??
+        request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
+        "";
+      if (env.DEMO_AUTH_TOKEN && token !== env.DEMO_AUTH_TOKEN) {
+        return withCors(new Response("Unauthorized", { status: 401 }));
+      }
+      if (!env.AI || !env.KNOWLEDGE_VECTORS) {
+        return withCors(
+          Response.json(
+            {
+              ok: false,
+              error: "AI or KNOWLEDGE_VECTORS binding not configured",
+            },
+            { status: 500 },
+          ),
+        );
+      }
+      try {
+        const result = await seedKnowledgeBase(env.AI, env.KNOWLEDGE_VECTORS);
+        return withCors(Response.json(result));
+      } catch (error) {
+        const logger = createLogger(env);
+        logger.error(
+          { error: error instanceof Error ? error.message : "unknown" },
+          "knowledge.seed.error",
+        );
+        return withCors(
+          Response.json(
+            {
+              ok: false,
+              error: error instanceof Error ? error.message : "Seeding failed",
+            },
+            { status: 500 },
+          ),
+        );
+      }
+    }
+
     if (url.pathname === "/health/openrouter") {
       const baseUrl = env.OPENROUTER_BASE_URL?.trim() ?? "";
       const token = env.OPENROUTER_TOKEN ?? "";

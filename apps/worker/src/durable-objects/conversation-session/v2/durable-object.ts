@@ -12,6 +12,7 @@ import {
 } from "@pestcall/core";
 import { createDependencies } from "../../../context";
 import type { Env } from "../../../env";
+import { createKnowledgeRetriever } from "../../../rag";
 import { createSession } from "./factory";
 import type { ConversationSessionV2 } from "./session";
 
@@ -80,6 +81,15 @@ export class ConversationSessionV2DO {
       agentConfig = defaultAgentConfig;
     }
 
+    // Create knowledge retriever if bindings are available
+    const knowledgeRetriever =
+      this.env.AI && this.env.KNOWLEDGE_VECTORS
+        ? createKnowledgeRetriever({
+            ai: this.env.AI,
+            vectorize: this.env.KNOWLEDGE_VECTORS,
+          })
+        : undefined;
+
     // Create the v2 session
     this.session = createSession({
       durableState: this.state,
@@ -89,6 +99,7 @@ export class ConversationSessionV2DO {
       agentConfig,
       streamId: 1,
       env: this.env as unknown as Record<string, unknown>,
+      knowledgeRetriever,
     });
 
     return this.session;

@@ -599,8 +599,11 @@ export class ConversationSessionV2 {
 
     const sessionState = this.state.get();
 
-    // Build system prompt via provider
-    const systemPrompt = this.promptProvider.buildSystemPrompt(sessionState);
+    // Build system prompt via provider (async for RAG retrieval)
+    const systemPrompt = await this.promptProvider.buildSystemPrompt(
+      sessionState,
+      input.text,
+    );
 
     // Build messages
     const messages: RoleScopedChatInput[] = [

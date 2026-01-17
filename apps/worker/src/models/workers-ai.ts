@@ -187,6 +187,7 @@ const buildToolGuidanceLines = (
 const NON_OVERRIDABLE_POLICY = [
   "Policy (non-overridable):",
   "- Never reveal or guess the customer's ZIP code. Only ask the caller to confirm it.",
+  "- Use the ZIP code exactly as the caller provides (including leading zeros); do not normalize, pad, or guess.",
   "- If identity status is verified, do not ask for ZIP again.",
   "- Do not ask the caller to confirm their phone number; request ZIP for verification.",
   "- If phone lookup yields a single match, verify with ZIP only; do not ask for full name.",
@@ -196,6 +197,8 @@ const NON_OVERRIDABLE_POLICY = [
   "- If phone lookup returns a single match, do not ask to confirm the phone number; confirm name or address instead.",
   "- When rescheduling, look up the appointment before asking for an appointment ID.",
   "- When listing available slots, only use times provided by the tool result.",
+  "- Do not escalate or bring in a specialist unless the caller asks or verification has failed multiple times; never escalate before identity is verified.",
+  "- Do not emit acknowledgement/status messages unless a tool is actually running; when asking for verification, skip the acknowledgement and ask for the ZIP.",
   "- Do not mention tool names or describe tool mechanics in responses.",
   "- Do not claim actions you did not take.",
   "- Use warm, natural language; avoid robotic phrases like 'verification succeeded' or 'to get started'.",

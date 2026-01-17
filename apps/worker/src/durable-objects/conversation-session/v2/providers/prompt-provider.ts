@@ -6,6 +6,7 @@
  */
 
 import type { AgentPromptConfig } from "@pestcall/core";
+import type { KnowledgeRetriever } from "../../../../rag";
 import type { PromptProvider, SessionState } from "../types";
 
 /**
@@ -14,6 +15,8 @@ import type { PromptProvider, SessionState } from "../types";
 export type PromptProviderConfig = {
   /** Agent configuration (persona, company name, tone, etc.) */
   agentConfig: AgentPromptConfig;
+  /** Optional knowledge retriever for RAG */
+  knowledgeRetriever?: KnowledgeRetriever;
 };
 
 /**
@@ -83,20 +86,24 @@ function buildWorkflowContext(state: SessionState): string | null {
  * ```ts
  * const promptProvider = createPromptProvider({
  *   agentConfig: await deps.agentConfig.get(defaults),
+ *   knowledgeRetriever: createKnowledgeRetriever({ ai, vectorize }),
  * });
  * ```
  */
 export function createPromptProvider(
   config: PromptProviderConfig,
 ): PromptProvider {
-  const { agentConfig } = config;
+  const { agentConfig, knowledgeRetriever } = config;
 
   return {
     getGreeting: (): string => {
       return agentConfig.greeting;
     },
 
-    buildSystemPrompt: (state: SessionState): string => {
+    buildSystemPrompt: async (
+      state: SessionState,
+      userMessage?: string,
+    ): Promise<string> => {
       const verified = isVerified(state);
       const activeWorkflow = hasActiveWorkflow(state);
       const workflowContext = buildWorkflowContext(state);
@@ -135,6 +142,27 @@ export function createPromptProvider(
         );
       }
 
+      // RAG: Inject relevant knowledge if retriever is available and we have a user message
+      if (knowledgeRetriever && userMessage) {
+        try {
+          const results = await knowledgeRetriever.retrieve(userMessage, 3);
+
+          if (results.chunks.length > 0) {
+            lines.push(
+              "## Relevant Knowledge",
+              "Use this information to help answer the customer's question:",
+              "",
+            );
+
+            for (const chunk of results.chunks) {
+              lines.push(`### ${chunk.metadata.section}`, chunk.content, "");
+            }
+          }
+        } catch {
+          // Silently fail if RAG retrieval fails - agent can still respond without it
+        }
+      }
+
       lines.push(
         "## Guidelines",
         "- Call tools when you need information or need to take action",
@@ -167,7 +195,7 @@ export function createPromptProvider(
 export function createMinimalPromptProvider(): PromptProvider {
   return {
     getGreeting: () => "Hello, how can I help you?",
-    buildSystemPrompt: () => "You are a helpful assistant.",
+    buildSystemPrompt: async () => "You are a helpful assistant.",
   };
 }
 
@@ -175,11 +203,15 @@ export function createMinimalPromptProvider(): PromptProvider {
  * Create a custom prompt provider with a builder function.
  */
 export function createCustomPromptProvider(
-  builder: (state: SessionState) => string,
+  builder: (
+    state: SessionState,
+    userMessage?: string,
+  ) => string | Promise<string>,
   greeting = "Hello, how can I help you?",
 ): PromptProvider {
   return {
     getGreeting: () => greeting,
-    buildSystemPrompt: builder,
+    buildSystemPrompt: async (state, userMessage) =>
+      builder(state, userMessage),
   };
 }

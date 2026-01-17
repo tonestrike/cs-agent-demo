@@ -9,6 +9,7 @@ import type { Ai, DurableObjectState } from "@cloudflare/workers-types";
 import type { AgentPromptConfig } from "@pestcall/core";
 import type { createDependencies } from "../../../context";
 import type { Logger } from "../../../logger";
+import type { KnowledgeRetriever } from "../../../rag";
 import { createPromptProvider } from "./providers/prompt-provider";
 import { createToolProvider } from "./providers/tool-provider";
 import { type ConversationSessionV2, SessionBuilder } from "./session";
@@ -31,6 +32,8 @@ export type SessionFactoryConfig = {
   streamId?: number;
   /** Environment bindings */
   env?: Record<string, unknown>;
+  /** Knowledge retriever for RAG (optional) */
+  knowledgeRetriever?: KnowledgeRetriever;
 };
 
 /**
@@ -65,6 +68,7 @@ export function createSession(
     agentConfig,
     streamId = 1,
     env = {},
+    knowledgeRetriever,
   } = config;
 
   // Create providers
@@ -75,6 +79,7 @@ export function createSession(
 
   const promptProvider = createPromptProvider({
     agentConfig,
+    knowledgeRetriever,
   });
 
   // Build session
