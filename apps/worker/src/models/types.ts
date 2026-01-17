@@ -268,6 +268,8 @@ export type AgentResponseInput = {
   messages?: Array<{ role: "user" | "assistant"; content: string }>;
   context?: string;
   hasContext?: boolean;
+  /** Prior acknowledgement text already shown to user (e.g. "Let me look that up...") */
+  priorAcknowledgement?: string;
 } & ToolResult;
 
 export type SelectionOption = {

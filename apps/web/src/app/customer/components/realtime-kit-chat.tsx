@@ -642,106 +642,29 @@ export function RealtimeKitChatPanel({
   };
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-ink-200 bg-white shadow-soft">
-      {/* Header with status indicators */}
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-ink-100 px-4 py-3">
-        <div className="flex items-center gap-3">
-          <h3 className="text-sm font-semibold text-ink">RealtimeKit chat</h3>
-          {meetingReady && <rtk-mic-toggle ref={handleMicRef} size="sm" />}
-        </div>
-        <div className="flex items-center gap-2">
-          {/* WebSocket connection indicator */}
-          <div
-            className="flex items-center gap-1"
-            title={
-              wsConnected ? "WebSocket connected" : "WebSocket disconnected"
-            }
-          >
-            <div
-              className={`h-2 w-2 rounded-full ${wsConnected ? "bg-green-500 animate-pulse" : "bg-red-500"}`}
-            />
-            <span className="text-xs text-ink/50">WS</span>
-          </div>
-          {/* RTK meeting indicator */}
-          <div
-            className="flex items-center gap-1"
-            title={meetingReady ? "Meeting ready" : "Meeting not ready"}
-          >
-            <div
-              className={`h-2 w-2 rounded-full ${meetingReady ? "bg-green-500" : meeting ? "bg-yellow-500 animate-pulse" : "bg-gray-400"}`}
-            />
-            <span className="text-xs text-ink/50">RTK</span>
-          </div>
-          {/* TTS speaking indicator */}
-          {isSpeaking && (
-            <div className="flex items-center gap-1" title="TTS speaking">
-              <div className="h-2 w-2 rounded-full bg-purple-500 animate-pulse" />
-              <span className="text-xs text-ink/50">TTS</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Status bar */}
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-ink-100 bg-ink-50 px-4 py-1.5">
-        <span className="text-xs text-ink/70" title={statusError}>
-          {status}
-        </span>
-        {/* Last activity indicator */}
-        {lastActivity && (
-          <div className="flex items-center gap-1.5 text-xs text-ink/60">
-            <div
-              className={`h-1.5 w-1.5 rounded-full ${getActivityColor(lastActivity.type)}`}
-            />
-            <span className="max-w-48 truncate" title={lastActivity.text}>
-              {lastActivity.text}
-            </span>
-            <span className="text-ink/40">
-              {Math.round((Date.now() - lastActivity.time) / 1000)}s ago
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Transcript display */}
-      {(partialTranscript || finalTranscripts.length > 0) && (
-        <div className="flex-shrink-0 border-b border-ink-100 bg-sand-50 px-4 py-2 text-xs text-ink-600">
-          {finalTranscripts.map((line) => (
-            <p key={line.id}>You: {line.text}</p>
-          ))}
-          {partialTranscript && (
-            <p className="italic text-ink-500">
-              Listening… {partialTranscript}
-            </p>
-          )}
+    <div className="relative min-h-0 flex-1">
+      {/* Always render rtk-chat to prevent unmounting and focus loss */}
+      {/* Key forces remount on session change to clear stale messages */}
+      {meeting && (
+        <rtk-chat
+          key={sessionId}
+          ref={handleChatRef}
+          style={{
+            width: "100%",
+            height: "100%",
+            opacity: meetingReady ? 1 : 0,
+            pointerEvents: meetingReady ? "auto" : "none",
+          }}
+        />
+      )}
+      {/* Overlay loading state when not ready */}
+      {!meetingReady && (
+        <div className="absolute inset-0 flex items-center justify-center px-4 text-sm text-ink/70">
+          {sessionId
+            ? status
+            : "Send a message to establish a session before realtime chat loads."}
         </div>
       )}
-
-      {/* Main chat area */}
-      <div className="relative min-h-0 flex-1 bg-sand-50">
-        {/* Always render rtk-chat to prevent unmounting and focus loss */}
-        {/* Key forces remount on session change to clear stale messages */}
-        {meeting && (
-          <rtk-chat
-            key={sessionId}
-            ref={handleChatRef}
-            style={{
-              width: "100%",
-              height: "100%",
-              opacity: meetingReady ? 1 : 0,
-              pointerEvents: meetingReady ? "auto" : "none",
-            }}
-          />
-        )}
-        {/* Overlay loading state when not ready */}
-        {!meetingReady && (
-          <div className="absolute inset-0 flex items-center justify-center px-4 text-sm text-ink/70 bg-sand-50">
-            {sessionId
-              ? status
-              : "Send a message to establish a session before realtime chat loads."}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

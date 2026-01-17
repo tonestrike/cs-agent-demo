@@ -2473,6 +2473,7 @@ export class ConversationSession {
               ? this.formatAppointmentsResponse(appointments)
               : "I couldn't find any upcoming appointments to cancel.",
             contextHint: "Ask which appointment to cancel using the list.",
+            priorAcknowledgement: acknowledgementText,
           },
         );
         return {
@@ -2566,6 +2567,7 @@ export class ConversationSession {
               ? `${this.formatAppointmentsResponse(appointments)} Which one would you like to reschedule?`
               : "I couldn't find any upcoming appointments to reschedule.",
             contextHint: "Ask which appointment to reschedule using the list.",
+            priorAcknowledgement: acknowledgementText,
           },
         );
         this.sessionState = {
@@ -2641,6 +2643,7 @@ export class ConversationSession {
               : "I couldn't find any available times right now. Would you like me to check again later?",
             contextHint:
               "Offer available reschedule slots and ask which one they prefer.",
+            priorAcknowledgement: acknowledgementText,
           },
         );
         return {
@@ -2740,6 +2743,7 @@ export class ConversationSession {
               ? this.formatAppointmentsResponse(appointments)
               : "I couldn't find any upcoming appointments. Would you like to schedule one?",
             contextHint: "Share upcoming appointments and ask next step.",
+            priorAcknowledgement: acknowledgementText,
           },
         );
         const state =
@@ -2799,6 +2803,7 @@ export class ConversationSession {
                 ])
               : "I couldn't find any upcoming appointments. Would you like to schedule one?",
             contextHint: "Share the next appointment details.",
+            priorAcknowledgement: acknowledgementText,
           },
         );
         return {
@@ -2841,6 +2846,7 @@ export class ConversationSession {
               : "I couldn't find that appointment. Want me to list upcoming appointments?",
             contextHint:
               "Share the appointment details or ask for a new choice.",
+            priorAcknowledgement: acknowledgementText,
           },
         );
         return {
@@ -2880,6 +2886,7 @@ export class ConversationSession {
               ? this.formatInvoicesResponse(invoices)
               : "You're all set. I don't see any open invoices right now.",
             contextHint: "Share the balance and invoice status.",
+            priorAcknowledgement: acknowledgementText,
           },
         );
         return {
@@ -2930,6 +2937,7 @@ export class ConversationSession {
               : "I couldn't find any available times right now. Would you like me to check again later?",
             contextHint:
               "Offer available times and confirm whether the on-file address is correct.",
+            priorAcknowledgement: acknowledgementText,
           },
         );
         return {
@@ -2952,6 +2960,7 @@ export class ConversationSession {
             streamId,
             fallback: policyText,
             contextHint: "Share the requested service policy.",
+            priorAcknowledgement: acknowledgementText,
           },
         );
         return {
@@ -2989,6 +2998,7 @@ export class ConversationSession {
                 fallback: `I've asked a specialist to reach out. Your ticket ID is ${result.ticketId ?? "on file"}.`,
                 contextHint:
                   "Confirm that a specialist will follow up and share the ticket id if available.",
+                priorAcknowledgement: acknowledgementText,
               },
             )
           : await this.narrateText(
@@ -3033,6 +3043,7 @@ export class ConversationSession {
               : "I couldn't create that appointment yet. Want to try a different time?",
             contextHint:
               "Confirm the appointment was scheduled and confirm the address on file.",
+            priorAcknowledgement: acknowledgementText,
           },
         );
         if (result.ok) {
@@ -3195,9 +3206,18 @@ export class ConversationSession {
       fallback: string;
       contextHint?: string;
       messages?: Array<{ role: "user" | "assistant"; content: string }>;
+      priorAcknowledgement?: string;
     },
   ): Promise<string> {
-    const { input, deps, streamId, fallback, contextHint, messages } = options;
+    const {
+      input,
+      deps,
+      streamId,
+      fallback,
+      contextHint,
+      messages,
+      priorAcknowledgement,
+    } = options;
     const callSessionId =
       input.callSessionId ?? this.sessionState.lastCallSessionId ?? null;
     // Parallelize pre-work: model adapter, customer context, and recent messages
@@ -3216,6 +3236,7 @@ export class ConversationSession {
       hasContext: Boolean(input.callSessionId),
       context: contextHint,
       messages: recentMessages,
+      priorAcknowledgement,
       ...toolResult,
     };
     this.recordModelCall("respond", model);

@@ -198,9 +198,20 @@ const buildRespondInstructions = (
     "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
     `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
     `HasContext: ${input.hasContext ? "true" : "false"}`,
+  ];
+
+  // Add context about prior acknowledgement if present
+  if (input.priorAcknowledgement) {
+    promptLines.push(
+      `The customer has already been told: "${input.priorAcknowledgement}"`,
+      "Do not repeat this acknowledgement or similar phrasing. Just provide the information they requested.",
+    );
+  }
+
+  promptLines.push(
     "Internal tool result (do not mention internal field names or IDs in the answer):",
     JSON.stringify(input.result),
-  ];
+  );
 
   return promptLines.join("\n");
 };
