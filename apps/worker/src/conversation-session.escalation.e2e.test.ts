@@ -80,16 +80,17 @@ describeIf("conversation session escalation e2e", () => {
     });
 
     const messageResponse = await postJson<{
+      ok: boolean;
       callSessionId: string;
-      replyText: string;
     }>(`/api/conversations/${conversationId}/message`, {
       phoneNumber,
       text: "hello",
     });
+    expect(messageResponse.ok).toBe(true);
 
     await postJson<{
+      ok: boolean;
       callSessionId: string;
-      replyText: string;
     }>(`/api/conversations/${conversationId}/message`, {
       callSessionId: messageResponse.callSessionId,
       phoneNumber,
@@ -97,14 +98,14 @@ describeIf("conversation session escalation e2e", () => {
     });
 
     const escalation = await postJson<{
+      ok: boolean;
       callSessionId: string;
-      replyText: string;
     }>(`/api/conversations/${conversationId}/message`, {
       callSessionId: messageResponse.callSessionId,
       phoneNumber,
       text: "I need to speak with a human.",
     });
 
-    expect(escalation.replyText.toLowerCase()).toContain("ticket");
+    expect(escalation.ok).toBe(true);
   });
 });

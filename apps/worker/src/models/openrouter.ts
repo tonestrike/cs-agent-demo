@@ -184,7 +184,7 @@ const buildRespondInstructions = (
     "Respond conversationally, keeping it concise and clear.",
     "Use the tool result to answer the customer or ask a follow-up.",
     "When a customer accepts help, move forward with the next step or ask for the missing detail instead of asking if you should proceed.",
-    "Return a JSON object with an answer string and optional citations array.",
+    "Respond with plain text only. Do not return JSON.",
     ...NON_OVERRIDABLE_POLICY,
     `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
     "Never include tool names or internal system references in responses.",
@@ -415,7 +415,7 @@ const requestOpenRouter = async (
   payload: Record<string, unknown>,
   logger: Logger,
   tag: string,
-): Promise<Response> => {
+): Promise<Response | unknown> => {
   const baseUrl = resolveBaseUrl(env);
   const token = env.OPENROUTER_TOKEN;
   if (!baseUrl || !token) {
@@ -475,6 +475,10 @@ const requestOpenRouter = async (
       code: "OPENROUTER_REQUEST_FAILED",
       meta: { errorBody },
     });
+  }
+  const stream = (payload as { stream?: boolean }).stream;
+  if (stream === true) {
+    return response;
   }
   return response.json();
 };
@@ -609,6 +613,11 @@ export const createOpenRouterAdapter = (
         logger,
         "respond_stream",
       );
+      if (!(response instanceof Response)) {
+        throw new AppError("OpenRouter stream response missing.", {
+          code: "OPENROUTER_STREAM_MISSING",
+        });
+      }
       yield* streamOpenRouterResponse(response, logger);
     },
     async route(input: AgentModelInput): Promise<AgentRouteDecision> {

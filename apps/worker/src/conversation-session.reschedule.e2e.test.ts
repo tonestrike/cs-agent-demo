@@ -109,12 +109,13 @@ describeIf("conversation session reschedule e2e", () => {
     });
 
     const start = await postJson<{
+      ok: boolean;
       callSessionId: string;
-      replyText: string;
     }>(`/api/conversations/${conversationId}/message`, {
       phoneNumber,
       text: "hello",
     });
+    expect(start.ok).toBe(true);
 
     await postJson(`/api/conversations/${conversationId}/message`, {
       callSessionId: start.callSessionId,
@@ -147,16 +148,16 @@ describeIf("conversation session reschedule e2e", () => {
     await delay(1500);
 
     const confirm = await postJson<{
+      ok: boolean;
       callSessionId: string;
-      replyText: string;
     }>(`/api/conversations/${conversationId}/message`, {
       callSessionId: start.callSessionId,
       phoneNumber,
       text: "Yes, please confirm.",
     });
 
+    expect(confirm.ok).toBe(true);
     expect(confirm.callSessionId).toBe(start.callSessionId);
-    expect(confirm.replyText.length).toBeGreaterThan(0);
 
     const original = await waitForReschedule(appointmentId);
     expect(original.status).toBe(ServiceAppointmentStatus.Cancelled);

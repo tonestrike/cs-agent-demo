@@ -105,12 +105,13 @@ describeIf("conversation session cancel confirmation e2e", () => {
       })
     ).id;
     const start = await postJson<{
+      ok: boolean;
       callSessionId: string;
-      replyText: string;
     }>(`/api/conversations/${conversationId}/message`, {
       phoneNumber,
       text: "hello",
     });
+    expect(start.ok).toBe(true);
 
     await postJson(`/api/conversations/${conversationId}/message`, {
       callSessionId: start.callSessionId,
@@ -135,16 +136,16 @@ describeIf("conversation session cancel confirmation e2e", () => {
     await waitForPendingCancellation(conversationId, seededAppointmentId);
 
     const confirm = await postJson<{
+      ok: boolean;
       callSessionId: string;
-      replyText: string;
     }>(`/api/conversations/${conversationId}/message`, {
       callSessionId: start.callSessionId,
       phoneNumber,
       text: "Yes, please cancel it.",
     });
 
+    expect(confirm.ok).toBe(true);
     expect(confirm.callSessionId).toBe(start.callSessionId);
-    expect(confirm.replyText.length).toBeGreaterThan(0);
     const appointmentStatus = await waitForAppointmentStatus(
       seededAppointmentId,
       ServiceAppointmentStatus.Cancelled,

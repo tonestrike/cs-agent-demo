@@ -82,33 +82,35 @@ describeIf("conversation session billing e2e", () => {
     });
 
     const messageResponse = await postJson<{
+      ok: boolean;
       callSessionId: string;
-      replyText: string;
     }>(`/api/conversations/${conversationId}/message`, {
       phoneNumber,
       text: "hello",
     });
+    expect(messageResponse.ok).toBe(true);
 
     const verification = await postJson<{
+      ok: boolean;
       callSessionId: string;
-      replyText: string;
     }>(`/api/conversations/${conversationId}/message`, {
       callSessionId: messageResponse.callSessionId,
       phoneNumber,
       text: zipCode,
     });
 
+    expect(verification.ok).toBe(true);
     expect(verification.callSessionId).toBe(messageResponse.callSessionId);
 
     const billing = await postJson<{
+      ok: boolean;
       callSessionId: string;
-      replyText: string;
     }>(`/api/conversations/${conversationId}/message`, {
       callSessionId: messageResponse.callSessionId,
       phoneNumber,
       text: "Do I have a balance due?",
     });
 
-    expect(billing.replyText.length).toBeGreaterThan(0);
+    expect(billing.ok).toBe(true);
   });
 });

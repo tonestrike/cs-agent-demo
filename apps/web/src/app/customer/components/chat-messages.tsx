@@ -124,26 +124,33 @@ export function ChatMessages({ messages, statusText }: ChatMessagesProps) {
         ) : (
           <div className="space-y-3">
             {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`animate-rise max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                  message.role === "customer"
-                    ? "ml-auto bg-ink text-white shadow-medium"
-                    : "bg-white text-ink shadow-soft border border-ink-100"
-                }`}
-              >
-                <p
-                  className={`text-[10px] font-semibold uppercase tracking-wider ${
-                    message.role === "customer"
-                      ? "text-white/60"
-                      : "text-ink-400"
-                  }`}
-                >
-                  {message.role === "customer" ? "You" : "PestCall"}
-                </p>
-                <p className="mt-1">
-                  {message.text || (message.role === "agent" ? "..." : "")}
-                </p>
+              <div key={message.id}>
+                {message.role === "status" ? (
+                  <div className="inline-flex rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-500 shadow-soft">
+                    {message.text}
+                  </div>
+                ) : (
+                  <div
+                    className={`animate-rise max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                      message.role === "customer"
+                        ? "ml-auto bg-ink text-white shadow-medium"
+                        : "bg-white text-ink shadow-soft border border-ink-100"
+                    }`}
+                  >
+                    <p
+                      className={`text-[10px] font-semibold uppercase tracking-wider ${
+                        message.role === "customer"
+                          ? "text-white/60"
+                          : "text-ink-400"
+                      }`}
+                    >
+                      {message.role === "customer" ? "You" : "PestCall"}
+                    </p>
+                    <p className="mt-1">
+                      {message.text || (message.role === "agent" ? "..." : "")}
+                    </p>
+                  </div>
+                )}
               </div>
             ))}
             {statusText ? (

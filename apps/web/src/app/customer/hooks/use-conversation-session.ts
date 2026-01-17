@@ -15,6 +15,7 @@ export function useConversationSession(phoneNumber: string) {
 
   const socketRef = useRef<WebSocket | null>(null);
   const responseIdRef = useRef<string | null>(null);
+  const statusMessageIdRef = useRef<string | null>(null);
   const sessionRef = useRef<string | null>(null);
   const hasDeltaRef = useRef(false);
 
@@ -86,6 +87,7 @@ export function useConversationSession(phoneNumber: string) {
       socket.onmessage = (event) => {
         try {
           const payload = JSON.parse(String(event.data)) as {
+            id?: number;
             type?: string;
             text?: string;
             data?: { callSessionId?: string; replyText?: string };
@@ -100,6 +102,21 @@ export function useConversationSession(phoneNumber: string) {
             const text = payload.text ?? "";
             if (text.trim()) {
               setStatus(text);
+              const statusId =
+                statusMessageIdRef.current ??
+                `status-${payload.id ?? crypto.randomUUID()}`;
+              statusMessageIdRef.current = statusId;
+              setMessages((prev) => {
+                const hasStatus = prev.some(
+                  (message) => message.id === statusId,
+                );
+                if (hasStatus) {
+                  return prev.map((message) =>
+                    message.id === statusId ? { ...message, text } : message,
+                  );
+                }
+                return [...prev, { id: statusId, role: "status", text }];
+              });
             }
             return;
           }
@@ -136,7 +153,7 @@ export function useConversationSession(phoneNumber: string) {
               setCallSessionId(data.callSessionId);
               setConfirmedSessionId(data.callSessionId);
             }
-            setStatus(`Session ${sessionId.slice(0, 8)}…`);
+            statusMessageIdRef.current = null;
             return;
           }
           if (payload.type === "error") {
@@ -185,6 +202,7 @@ export function useConversationSession(phoneNumber: string) {
     setCallSessionId(null);
     setConfirmedSessionId(null);
     hasDeltaRef.current = false;
+    statusMessageIdRef.current = null;
     setMessages([]);
     setStatus("New session");
     socketRef.current?.close();
@@ -208,11 +226,11 @@ export function useConversationSession(phoneNumber: string) {
         ...prev,
         { id: crypto.randomUUID(), role: "customer", text: trimmed },
       ]);
-      setStatus("Streaming reply...");
 
       const responseId = crypto.randomUUID();
       responseIdRef.current = responseId;
       hasDeltaRef.current = false;
+      statusMessageIdRef.current = null;
       setMessages((prev) => [
         ...prev,
         { id: responseId, role: "agent", text: "" },

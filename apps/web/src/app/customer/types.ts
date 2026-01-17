@@ -1,6 +1,6 @@
 export type ChatMessage = {
   id: string;
-  role: "customer" | "agent";
+  role: "customer" | "agent" | "status";
   text: string;
 };
 

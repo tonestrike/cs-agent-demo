@@ -7,17 +7,16 @@ import {
   ChatMessages,
   ClientLogsPanel,
   CustomerBar,
+  RealtimeKitChatPanel,
 } from "./components";
-import { AudioChatInterface } from "./components/audio-chat-interface";
 import { useConversationSession, useCustomers } from "./hooks";
 
 type SidebarTab = "settings" | "logs";
-type ChatMode = "text" | "audio";
+type ChatMode = "classic" | "realtime";
 
 export default function CustomerPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<SidebarTab>("settings");
-  const [chatMode, setChatMode] = useState<ChatMode>("text");
   const { customers, selectedCustomer, phoneNumber, selectCustomer } =
     useCustomers();
 
@@ -43,16 +42,12 @@ export default function CustomerPage() {
     resetSession();
   }, [resetSession]);
 
-  const handleAudioStatusChange = useCallback((audioStatus: string) => {
-    // Could integrate audio status with session status if needed
-    console.log("Audio status changed:", audioStatus);
-  }, []);
-
   const copyConversation = useCallback(async () => {
     const payload = { callSessionId, phoneNumber, messages };
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
   }, [callSessionId, phoneNumber, messages]);
 
+  const [chatMode, setChatMode] = useState<ChatMode>("classic");
   const statusLine =
     status === "New session" || status.startsWith("Session ") ? "" : status;
 
@@ -199,35 +194,33 @@ export default function CustomerPage() {
           </span>
         </div>
 
-        {/* Chat mode tabs */}
-        <div className="flex flex-shrink-0 border-b border-ink-200 bg-sand-100">
-          <button
-            type="button"
-            onClick={() => setChatMode("text")}
-            className={`flex-1 px-6 py-3 text-sm font-semibold transition-colors ${
-              chatMode === "text"
-                ? "border-b-2 border-ink bg-white text-ink"
-                : "text-ink-500 hover:text-ink-700"
-            }`}
-          >
-            Text Chat
-          </button>
-          <button
-            type="button"
-            onClick={() => setChatMode("audio")}
-            className={`flex-1 px-6 py-3 text-sm font-semibold transition-colors ${
-              chatMode === "audio"
-                ? "border-b-2 border-ink bg-white text-ink"
-                : "text-ink-500 hover:text-ink-700"
-            }`}
-          >
-            Audio Chat
-          </button>
-        </div>
-
         {/* Chat content area */}
         <div className="min-h-0 flex-1 overflow-hidden flex flex-col">
-          {chatMode === "text" ? (
+          <div className="flex flex-shrink-0 border-b border-ink-200 bg-sand-100">
+            <button
+              type="button"
+              onClick={() => setChatMode("classic")}
+              className={`flex-1 px-6 py-3 text-sm font-semibold transition-colors ${
+                chatMode === "classic"
+                  ? "border-b-2 border-ink bg-white text-ink"
+                  : "text-ink-500 hover:text-ink-700"
+              }`}
+            >
+              Classic chat
+            </button>
+            <button
+              type="button"
+              onClick={() => setChatMode("realtime")}
+              className={`flex-1 px-6 py-3 text-sm font-semibold transition-colors ${
+                chatMode === "realtime"
+                  ? "border-b-2 border-ink bg-white text-ink"
+                  : "text-ink-500 hover:text-ink-700"
+              }`}
+            >
+              Realtime chat
+            </button>
+          </div>
+          {chatMode === "classic" ? (
             <>
               {/* Messages area - fills remaining space */}
               <div className="min-h-0 flex-1 overflow-hidden">
@@ -245,13 +238,10 @@ export default function CustomerPage() {
               </div>
             </>
           ) : (
-            /* Audio chat fills entire space */
-            <div className="flex-1">
-              <AudioChatInterface
+            <div className="flex-1 overflow-hidden px-4 pb-6">
+              <RealtimeKitChatPanel
+                sessionId={callSessionId}
                 customer={selectedCustomer}
-                phoneNumber={phoneNumber}
-                callSessionId={callSessionId}
-                onAudioStatusChange={handleAudioStatusChange}
               />
             </div>
           )}

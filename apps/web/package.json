@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@cloudflare/realtimekit": "^1.0.0",
+    "@cloudflare/realtimekit-ui": "^1.0.8",
     "@orpc/client": "1.13.4",
     "@orpc/react-query": "^1.13.4",
     "@pestcall/core": "workspace:*",

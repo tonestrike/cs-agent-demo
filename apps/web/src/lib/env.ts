@@ -10,3 +10,7 @@ export const apiBaseUrl = normalizeBaseUrl(
 );
 
 export const demoAuthToken = process.env.NEXT_PUBLIC_DEMO_AUTH_TOKEN ?? "";
+export const realtimeKitApiKey =
+  process.env.NEXT_PUBLIC_REALTIMEKIT_API_KEY ?? "";
+export const realtimeKitRegion =
+  process.env.NEXT_PUBLIC_REALTIMEKIT_REGION ?? "us-east-1";

@@ -92,35 +92,37 @@ describeIf("conversation session e2e", () => {
       timeWindow: fixture.appointmentTimeWindow,
     });
     const messageResponse = await postJson<{
+      ok: boolean;
       callSessionId: string;
-      replyText: string;
     }>(`/api/conversations/${conversationId}/message`, {
       phoneNumber,
       text: "hello",
     });
 
+    expect(messageResponse.ok).toBe(true);
     expect(messageResponse.callSessionId).toBeTruthy();
-    expect(messageResponse.replyText.length).toBeGreaterThan(0);
 
     const verification = await postJson<{
+      ok: boolean;
       callSessionId: string;
-      replyText: string;
     }>(`/api/conversations/${conversationId}/message`, {
       callSessionId: messageResponse.callSessionId,
       phoneNumber,
       text: zipCode,
     });
 
+    expect(verification.ok).toBe(true);
     expect(verification.callSessionId).toBe(messageResponse.callSessionId);
 
     const appointments = await postJson<{
+      ok: boolean;
       callSessionId: string;
-      replyText: string;
     }>(`/api/conversations/${conversationId}/message`, {
       callSessionId: messageResponse.callSessionId,
       phoneNumber,
       text: "What are my appointments?",
     });
+    expect(appointments.ok).toBe(true);
 
     const resyncAfterAppointments = await postJson<{
       state: {
@@ -137,8 +139,6 @@ describeIf("conversation session e2e", () => {
           appointment.date === fixture.appointmentDate,
       ),
     ).toBe(true);
-
-    expect(appointments.replyText.length).toBeGreaterThan(0);
 
     const resync = await postJson<{
       events: Array<{ type: string }>;
