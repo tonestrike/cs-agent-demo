@@ -72,6 +72,7 @@ function schemaToParameters(schema: unknown): ToolDefinition["parameters"] {
 function extractGatingState(state: SessionState): ToolGatingState {
   const domainState = state.domainState;
   // Check verification in conversation state (where handleVerifyAccount stores it)
+  // biome-ignore lint/complexity/useLiteralKeys: index signature access
   const conversation = domainState["conversation"] as
     | { verification?: { verified?: boolean } }
     | undefined;
@@ -80,8 +81,11 @@ function extractGatingState(state: SessionState): ToolGatingState {
   return {
     isVerified,
     hasActiveWorkflow:
+      // biome-ignore lint/complexity/useLiteralKeys: index signature access
       Boolean(domainState["rescheduleWorkflowId"]) ||
+      // biome-ignore lint/complexity/useLiteralKeys: index signature access
       Boolean(domainState["cancelWorkflowId"]) ||
+      // biome-ignore lint/complexity/useLiteralKeys: index signature access
       Boolean(domainState["activeSelection"]),
   };
 }
@@ -102,17 +106,23 @@ function buildToolFlowContext(
       // Map v2 SessionState to v1 SessionState structure
       lastPhoneNumber: ctx.sessionState.phoneNumber,
       lastCallSessionId: ctx.sessionState.callSessionId,
+      // biome-ignore lint/complexity/useLiteralKeys: index signature access
       conversation: ds["conversation"] as
         | ToolFlowContext["sessionState"]["conversation"]
         | undefined,
+      // biome-ignore lint/complexity/useLiteralKeys: index signature access
       cancelWorkflowId: ds["cancelWorkflowId"] as string | undefined,
+      // biome-ignore lint/complexity/useLiteralKeys: index signature access
       rescheduleWorkflowId: ds["rescheduleWorkflowId"] as string | undefined,
+      // biome-ignore lint/complexity/useLiteralKeys: index signature access
       availableSlots: ds["availableSlots"] as
         | Array<{ id: string; date: string; timeWindow: string }>
         | undefined,
+      // biome-ignore lint/complexity/useLiteralKeys: index signature access
       pendingIntent: ds["pendingIntent"] as
         | ToolFlowContext["sessionState"]["pendingIntent"]
         | undefined,
+      // biome-ignore lint/complexity/useLiteralKeys: index signature access
       activeSelection: ds["activeSelection"] as
         | {
             kind: "appointment" | "slot" | "confirmation";
@@ -125,6 +135,7 @@ function buildToolFlowContext(
     deps: config.deps,
     streamId: config.streamId,
     getConversationState: () => {
+      // biome-ignore lint/complexity/useLiteralKeys: index signature access
       const conversation = ds["conversation"] as
         | ToolFlowContext["sessionState"]["conversation"]
         | undefined;

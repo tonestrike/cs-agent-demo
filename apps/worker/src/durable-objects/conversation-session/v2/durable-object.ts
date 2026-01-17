@@ -42,7 +42,7 @@ export class ConversationSessionV2DO {
   private state: DurableObjectState;
   private env: Env;
   private session: ConversationSessionV2 | null = null;
-  private initPromise: Promise<void> | null = null;
+  private initPromise: Promise<ConversationSessionV2> | null = null;
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
@@ -58,19 +58,17 @@ export class ConversationSessionV2DO {
     }
 
     if (this.initPromise) {
-      await this.initPromise;
-      return this.session!;
+      return this.initPromise;
     }
 
     this.initPromise = this.initialize();
-    await this.initPromise;
-    return this.session!;
+    return this.initPromise;
   }
 
   /**
    * Initialize the v2 session with all dependencies.
    */
-  private async initialize(): Promise<void> {
+  private async initialize(): Promise<ConversationSessionV2> {
     // Create dependencies (includes logger)
     const deps = createDependencies(this.env);
 
@@ -92,6 +90,8 @@ export class ConversationSessionV2DO {
       streamId: 1,
       env: this.env as unknown as Record<string, unknown>,
     });
+
+    return this.session;
   }
 
   /**

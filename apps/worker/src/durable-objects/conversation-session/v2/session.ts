@@ -448,6 +448,7 @@ export class ConversationSessionV2 {
       sessionState = this.state.get();
     }
 
+    // biome-ignore lint/complexity/useLiteralKeys: index signature access
     const greetingSent = Boolean(
       sessionState.domainState["greetingSent"] as boolean | undefined,
     );
@@ -723,7 +724,11 @@ export class ConversationSessionV2 {
         // Check for barge-in cancellation
         if (this.isStreamCanceled(streamId)) {
           this.logger.info(
-            { turnId: turn.turnId, streamId, partialLength: fullResponse.length },
+            {
+              turnId: turn.turnId,
+              streamId,
+              partialLength: fullResponse.length,
+            },
             "session.streaming_canceled",
           );
           break;

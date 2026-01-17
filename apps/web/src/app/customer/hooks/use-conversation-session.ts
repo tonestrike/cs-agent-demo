@@ -448,8 +448,21 @@ export function useConversationSession(phoneNumber: string) {
     }
     logEvent("chat.start_call", { phoneNumber });
     clearAutoZipTimer();
-    await sendMessage("Incoming call started", { skipUserMessage: true });
-  }, [clearAutoZipTimer, logEvent, phoneNumber, sendMessage]);
+    // Just establish the WebSocket connection - greeting is sent on connect
+    const sessionId = callSessionId ?? crypto.randomUUID();
+    if (!callSessionId) {
+      setCallSessionId(sessionId);
+      setConfirmedSessionId(sessionId);
+    }
+    try {
+      setConnectionStatus("Connecting");
+      await ensureSocket(sessionId);
+      logEvent("ws.ready", { sessionId });
+    } catch {
+      setConnectionStatus("Connection issue. Try again.");
+      logEvent("ws.unavailable", { sessionId });
+    }
+  }, [callSessionId, clearAutoZipTimer, ensureSocket, logEvent, phoneNumber]);
 
   const recordClientLog = useCallback(
     (
