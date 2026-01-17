@@ -285,7 +285,7 @@ export function useConversationSession(phoneNumber: string) {
                 );
               });
             }
-            if (data?.callSessionId) {
+            if (data?.callSessionId && data.callSessionId !== callSessionId) {
               setCallSessionId(data.callSessionId);
               setConfirmedSessionId(data.callSessionId);
             }
@@ -431,7 +431,7 @@ export function useConversationSession(phoneNumber: string) {
         const data = (await response.json()) as {
           callSessionId?: string;
         };
-        if (data.callSessionId) {
+        if (data.callSessionId && data.callSessionId !== callSessionId) {
           setCallSessionId(data.callSessionId);
           setConfirmedSessionId(data.callSessionId);
         }

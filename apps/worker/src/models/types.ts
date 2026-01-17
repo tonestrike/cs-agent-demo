@@ -26,6 +26,18 @@ export const agentToolCallSchema = z.object({
   acknowledgement: z.string().optional(),
 });
 
+/** Schema for multiple parallel tool calls */
+export const agentToolCallsSchema = z.object({
+  type: z.literal("tool_calls"),
+  calls: z.array(
+    z.object({
+      toolName: agentToolNameSchema,
+      arguments: z.record(z.unknown()).optional(),
+    }),
+  ),
+  acknowledgement: z.string().optional(),
+});
+
 export const agentFinalSchema = z.object({
   type: z.literal("final"),
   text: z.string().min(1),
@@ -33,10 +45,21 @@ export const agentFinalSchema = z.object({
 
 export const agentModelOutputSchema = z.union([
   agentToolCallSchema,
+  agentToolCallsSchema,
   agentFinalSchema,
 ]);
 
 export type AgentModelOutput = z.infer<typeof agentModelOutputSchema>;
+
+/** Type guard for single tool call */
+export const isSingleToolCall = (
+  output: AgentModelOutput,
+): output is z.infer<typeof agentToolCallSchema> => output.type === "tool_call";
+
+/** Type guard for multiple tool calls */
+export const isMultipleToolCalls = (
+  output: AgentModelOutput,
+): output is z.infer<typeof agentToolCallsSchema> => output.type === "tool_calls";
 
 export const actionPreconditionSchema = z.enum([
   "verified",

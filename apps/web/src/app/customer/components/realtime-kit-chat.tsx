@@ -225,9 +225,22 @@ export function RealtimeKitChatPanel({
     const cleanup = () => {
       const client = meetingRef.current;
       if (client) {
-        meetingRef.current = null;
-        meetingSessionRef.current = { sessionId: null, customerId: null };
-        client.leave().catch(() => {});
+        const chatEl = chatElementRef.current;
+        const micEl = micToggleRef.current;
+        // Keep meeting on elements so RTK disconnect handlers see a valid object.
+        if (chatEl && !chatEl.isConnected) {
+          chatEl.meeting = client;
+        }
+        if (micEl && !micEl.isConnected) {
+          micEl.meeting = client;
+        }
+        client
+          .leave()
+          .catch(() => {})
+          .finally(() => {
+            meetingRef.current = null;
+            meetingSessionRef.current = { sessionId: null, customerId: null };
+          });
       }
       setMeeting(null);
       setMeetingReady(false);
