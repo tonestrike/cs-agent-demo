@@ -53,3 +53,23 @@ export const createAdminAppointment = async (
   });
   return { id };
 };
+
+export const getAdminAppointment = async (
+  deps: Dependencies,
+  input: { id: string },
+) => {
+  const appointment = await deps.appointments.get(input.id);
+  if (!appointment) {
+    return { appointment: null };
+  }
+  return {
+    appointment: {
+      id: appointment.id,
+      status: appointment.status,
+      date: appointment.date,
+      timeWindow: appointment.timeWindow,
+      rescheduledFromId: appointment.rescheduledFromId ?? null,
+      rescheduledToId: appointment.rescheduledToId ?? null,
+    },
+  };
+};

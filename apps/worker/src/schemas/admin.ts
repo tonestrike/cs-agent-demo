@@ -27,3 +27,20 @@ export const adminCreateAppointmentInputSchema = z.object({
 export const adminCreateAppointmentOutputSchema = z.object({
   id: z.string().min(1),
 });
+
+export const adminGetAppointmentInputSchema = z.object({
+  id: z.string().min(1),
+});
+
+export const adminGetAppointmentOutputSchema = z.object({
+  appointment: z
+    .object({
+      id: z.string().min(1),
+      status: z.nativeEnum(ServiceAppointmentStatus),
+      date: z.string().min(1),
+      timeWindow: z.string().min(1),
+      rescheduledFromId: z.string().min(1).nullable(),
+      rescheduledToId: z.string().min(1).nullable(),
+    })
+    .nullable(),
+});

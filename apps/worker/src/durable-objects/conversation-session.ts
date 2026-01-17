@@ -1,3 +1,5 @@
+import { normalizePhoneE164 } from "@pestcall/core";
+
 import { createDependencies } from "../context";
 import {
   type ConversationState,
@@ -18,7 +20,14 @@ import {
   agentMessageInputSchema,
 } from "../schemas/agent";
 import { handleAgentMessage } from "../use-cases/agent";
-import { CANCEL_WORKFLOW_EVENT_CONFIRM } from "../workflows/constants";
+import { listUpcomingAppointments, verifyAccount } from "../use-cases/crm";
+import {
+  CANCEL_WORKFLOW_EVENT_CONFIRM,
+  CANCEL_WORKFLOW_EVENT_SELECT_APPOINTMENT,
+  RESCHEDULE_WORKFLOW_EVENT_CONFIRM,
+  RESCHEDULE_WORKFLOW_EVENT_SELECT_APPOINTMENT,
+  RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
+} from "../workflows/constants";
 
 type ConversationEventType =
   | "token"
@@ -41,6 +50,7 @@ type SessionState = {
   lastCallSessionId?: string;
   conversation?: ConversationState;
   cancelWorkflowId?: string;
+  rescheduleWorkflowId?: string;
 };
 
 type ClientMessage =
@@ -299,6 +309,46 @@ export class ConversationSession {
     await this.setSpeaking(true);
     let lastStatus = "";
     try {
+      const verificationResponse = await this.handleVerificationGate(
+        input,
+        deps,
+      );
+      if (verificationResponse) {
+        this.emitEvent({ type: "final", data: verificationResponse });
+        await this.updateSessionState(input, verificationResponse);
+        await this.syncConversationState(
+          verificationResponse.callSessionId,
+          deps,
+        );
+        return verificationResponse;
+      }
+      const workflowResponse = await this.handleWorkflowIntent(input);
+      if (workflowResponse) {
+        this.emitEvent({ type: "final", data: workflowResponse });
+        await this.updateSessionState(input, workflowResponse);
+        await this.syncConversationState(workflowResponse.callSessionId, deps);
+        return workflowResponse;
+      }
+      const selectionResponse = await this.handleWorkflowSelection(input, deps);
+      if (selectionResponse) {
+        this.emitEvent({ type: "final", data: selectionResponse });
+        await this.updateSessionState(input, selectionResponse);
+        await this.syncConversationState(selectionResponse.callSessionId, deps);
+        return selectionResponse;
+      }
+      const appointmentResponse = await this.handleAppointmentsFlow(
+        input,
+        deps,
+      );
+      if (appointmentResponse) {
+        this.emitEvent({ type: "final", data: appointmentResponse });
+        await this.updateSessionState(input, appointmentResponse);
+        await this.syncConversationState(
+          appointmentResponse.callSessionId,
+          deps,
+        );
+        return appointmentResponse;
+      }
       const response = await handleAgentMessage(deps, input, undefined, {
         onStatus: (status) => {
           const text = status.text.trim();
@@ -357,6 +407,7 @@ export class ConversationSession {
           })
         : current;
     this.sessionState = {
+      ...this.sessionState,
       lastPhoneNumber: input.phoneNumber,
       lastCallSessionId: response.callSessionId,
       conversation: nextState,
@@ -467,6 +518,7 @@ export class ConversationSession {
   private async handleCancelStart(input: {
     callSessionId?: string;
     customerId?: string;
+    phoneNumber?: string;
     message?: string;
   }): Promise<{ ok: boolean; message?: string }> {
     const deps = createDependencies(this.env);
@@ -475,6 +527,12 @@ export class ConversationSession {
     if (!callSessionId) {
       return { ok: false, message: "No active session found." };
     }
+    const phoneNumber =
+      input.phoneNumber ?? this.sessionState.lastPhoneNumber ?? null;
+    if (!phoneNumber) {
+      return { ok: false, message: "Phone number is required to cancel." };
+    }
+    await this.ensureCallSession(deps, callSessionId, phoneNumber);
     if (!deps.workflows.cancel) {
       return {
         ok: false,
@@ -499,6 +557,17 @@ export class ConversationSession {
         message: input.message ?? "Cancel my appointment.",
       },
     });
+    const appointments = await listUpcomingAppointments(
+      deps.crm,
+      customerId,
+      3,
+    );
+    await this.updateAppointmentSummary(
+      deps,
+      callSessionId,
+      phoneNumber,
+      appointments,
+    );
     this.sessionState = {
       ...this.sessionState,
       cancelWorkflowId: instance.id,
@@ -510,6 +579,494 @@ export class ConversationSession {
     });
     await this.syncConversationState(callSessionId, deps);
     return { ok: true, message: instance.id };
+  }
+
+  private async handleRescheduleStart(input: {
+    callSessionId?: string;
+    customerId?: string;
+    phoneNumber?: string;
+    message?: string;
+  }): Promise<{ ok: boolean; message?: string }> {
+    const deps = createDependencies(this.env);
+    const callSessionId =
+      input.callSessionId ?? this.sessionState.lastCallSessionId;
+    if (!callSessionId) {
+      return { ok: false, message: "No active session found." };
+    }
+    const phoneNumber =
+      input.phoneNumber ?? this.sessionState.lastPhoneNumber ?? null;
+    if (!phoneNumber) {
+      return { ok: false, message: "Phone number is required to reschedule." };
+    }
+    await this.ensureCallSession(deps, callSessionId, phoneNumber);
+    if (!deps.workflows.reschedule) {
+      return {
+        ok: false,
+        message: "Rescheduling is temporarily unavailable.",
+      };
+    }
+    const customerId =
+      input.customerId ??
+      this.sessionState.conversation?.verification.customerId ??
+      null;
+    if (!customerId) {
+      return {
+        ok: false,
+        message: "Customer verification is required before rescheduling.",
+      };
+    }
+    const instance = await deps.workflows.reschedule.create({
+      params: {
+        callSessionId,
+        customerId,
+        intent: "reschedule",
+        message: input.message ?? "Reschedule my appointment.",
+      },
+    });
+    const appointments = await listUpcomingAppointments(
+      deps.crm,
+      customerId,
+      3,
+    );
+    await this.updateAppointmentSummary(
+      deps,
+      callSessionId,
+      phoneNumber,
+      appointments,
+    );
+    this.sessionState = {
+      ...this.sessionState,
+      rescheduleWorkflowId: instance.id,
+    };
+    await this.state.storage.put("state", this.sessionState);
+    this.emitEvent({
+      type: "status",
+      text: "I'm pulling your upcoming appointments now.",
+    });
+    await this.syncConversationState(callSessionId, deps);
+    return { ok: true, message: instance.id };
+  }
+
+  private async ensureCallSession(
+    deps: ReturnType<typeof createDependencies>,
+    callSessionId: string,
+    phoneNumber: string,
+  ): Promise<void> {
+    const existing = await deps.calls.getSession(callSessionId);
+    if (existing) {
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const phoneE164 = normalizePhoneE164(phoneNumber);
+    await deps.calls.createSession({
+      id: callSessionId,
+      startedAt: nowIso,
+      phoneE164,
+      status: "active",
+      transport: "web",
+      summary: null,
+    });
+  }
+
+  private async updateIdentitySummary(
+    deps: ReturnType<typeof createDependencies>,
+    callSessionId: string,
+    phoneNumber: string,
+    customerId: string,
+  ): Promise<void> {
+    await this.ensureCallSession(deps, callSessionId, phoneNumber);
+    const session = await deps.calls.getSession(callSessionId);
+    let summary: SummarySnapshot = {};
+    if (session?.summary) {
+      try {
+        summary = JSON.parse(session.summary) as SummarySnapshot;
+      } catch (error) {
+        this.logger.error(
+          { error: error instanceof Error ? error.message : "unknown" },
+          "conversation.session.summary.parse_failed",
+        );
+      }
+    }
+    const nextSummary: SummarySnapshot = {
+      ...summary,
+      identityStatus: "verified",
+      verifiedCustomerId: customerId,
+    };
+    await deps.calls.updateSessionSummary({
+      callSessionId,
+      summary: JSON.stringify(nextSummary),
+    });
+  }
+
+  private async updateAppointmentSummary(
+    deps: ReturnType<typeof createDependencies>,
+    callSessionId: string,
+    phoneNumber: string,
+    appointments: Array<{
+      id: string;
+      date: string;
+      timeWindow: string;
+      addressSummary: string;
+    }>,
+  ): Promise<void> {
+    await this.ensureCallSession(deps, callSessionId, phoneNumber);
+    const session = await deps.calls.getSession(callSessionId);
+    let summary: SummarySnapshot = {};
+    if (session?.summary) {
+      try {
+        summary = JSON.parse(session.summary) as SummarySnapshot;
+      } catch (error) {
+        this.logger.error(
+          { error: error instanceof Error ? error.message : "unknown" },
+          "conversation.session.summary.parse_failed",
+        );
+      }
+    }
+    const nextSummary: SummarySnapshot = {
+      ...summary,
+      lastAppointmentOptions: appointments.map((appointment) => ({
+        id: appointment.id,
+        date: appointment.date,
+        timeWindow: appointment.timeWindow,
+        addressSummary: appointment.addressSummary,
+      })),
+    };
+    await deps.calls.updateSessionSummary({
+      callSessionId,
+      summary: JSON.stringify(nextSummary),
+    });
+  }
+
+  private async handleVerificationGate(
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+  ): Promise<AgentMessageOutput | null> {
+    const state = this.sessionState.conversation ?? initialConversationState();
+    if (state.verification.verified) {
+      return null;
+    }
+    const matches = await deps.crm.lookupCustomerByPhone(input.phoneNumber);
+    const customer =
+      Array.isArray(matches) && matches.length === 1 ? matches[0] : null;
+    const zipMatch = input.text.match(/\b(\d{5})\b/);
+    const callSessionId = input.callSessionId ?? crypto.randomUUID();
+    if (!zipMatch || !customer) {
+      const response: AgentMessageOutput = {
+        callSessionId,
+        replyText:
+          "To get started, please share the 5-digit ZIP code on your account.",
+        actions: [],
+      };
+      this.sessionState = {
+        ...this.sessionState,
+        conversation: applyIntent(state, {
+          type: "request_verification",
+          reason: "missing",
+        }),
+      };
+      await this.state.storage.put("state", this.sessionState);
+      return response;
+    }
+
+    const zipCode = zipMatch[1];
+    if (!zipCode) {
+      return {
+        callSessionId,
+        replyText:
+          "To get started, please share the 5-digit ZIP code on your account.",
+        actions: [],
+      };
+    }
+    this.emitEvent({ type: "status", text: "Checking that ZIP code now." });
+    const ok = await verifyAccount(deps.crm, customer.id, zipCode);
+    if (ok) {
+      await this.updateIdentitySummary(
+        deps,
+        callSessionId,
+        input.phoneNumber,
+        customer.id,
+      );
+    }
+    const response: AgentMessageOutput = {
+      callSessionId,
+      replyText: ok
+        ? "Thanks, you're verified. What would you like to do next?"
+        : "That ZIP does not match our records. Please share the 5-digit ZIP code on your account.",
+      actions: [],
+    };
+    this.sessionState = {
+      ...this.sessionState,
+      conversation: ok
+        ? applyIntent(state, {
+            type: "verified",
+            customerId: customer.id,
+          })
+        : applyIntent(state, {
+            type: "request_verification",
+            reason: "invalid_zip",
+          }),
+    };
+    await this.state.storage.put("state", this.sessionState);
+    return response;
+  }
+
+  private async handleAppointmentsFlow(
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+  ): Promise<AgentMessageOutput | null> {
+    const state = this.sessionState.conversation ?? initialConversationState();
+    if (!state.verification.verified || !state.verification.customerId) {
+      return null;
+    }
+    const wantsAppointments =
+      /\b(appointment|appointments|schedule|scheduled|when)\b/i.test(
+        input.text,
+      );
+    if (!wantsAppointments) {
+      return null;
+    }
+
+    this.emitEvent({
+      type: "status",
+      text: "Looking up your appointments now.",
+    });
+    const appointments = await listUpcomingAppointments(
+      deps.crm,
+      state.verification.customerId,
+      3,
+    );
+    const callSessionId = input.callSessionId ?? crypto.randomUUID();
+    await this.updateAppointmentSummary(
+      deps,
+      callSessionId,
+      input.phoneNumber,
+      appointments,
+    );
+    const replyText = appointments.length
+      ? this.formatAppointmentsResponse(appointments)
+      : "I couldn't find any upcoming appointments. Would you like to schedule one?";
+    const response: AgentMessageOutput = {
+      callSessionId,
+      replyText,
+      actions: [],
+    };
+    this.sessionState = {
+      ...this.sessionState,
+      conversation: applyIntent(state, {
+        type: "appointments_loaded",
+        appointments: appointments.map((appointment) => ({
+          id: appointment.id,
+          date: appointment.date,
+          timeWindow: appointment.timeWindow,
+          addressSummary: appointment.addressSummary,
+        })),
+      }),
+    };
+    await this.state.storage.put("state", this.sessionState);
+    return response;
+  }
+
+  private async handleWorkflowIntent(
+    input: AgentMessageInput,
+  ): Promise<AgentMessageOutput | null> {
+    const state = this.sessionState.conversation ?? initialConversationState();
+    if (!state.verification.verified || !state.verification.customerId) {
+      return null;
+    }
+    const lowered = input.text.toLowerCase();
+    const wantsCancel = /\bcancel\b/.test(lowered);
+    const wantsReschedule =
+      /\breschedul(e|ing)\b/.test(lowered) ||
+      /\b(change|move)\b.*\bappointment\b/.test(lowered);
+    if (!wantsCancel && !wantsReschedule) {
+      return null;
+    }
+
+    if (wantsCancel) {
+      const result = await this.handleCancelStart({
+        callSessionId: input.callSessionId,
+        customerId: state.verification.customerId ?? undefined,
+        phoneNumber: input.phoneNumber,
+        message: input.text,
+      });
+      return {
+        callSessionId: input.callSessionId ?? crypto.randomUUID(),
+        replyText: result.ok
+          ? "I'm pulling your upcoming appointments now."
+          : (result.message ?? "Cancellation is temporarily unavailable."),
+        actions: [],
+      };
+    }
+
+    const result = await this.handleRescheduleStart({
+      callSessionId: input.callSessionId,
+      customerId: state.verification.customerId ?? undefined,
+      phoneNumber: input.phoneNumber,
+      message: input.text,
+    });
+    return {
+      callSessionId: input.callSessionId ?? crypto.randomUUID(),
+      replyText: result.ok
+        ? "I'm pulling your upcoming appointments now."
+        : (result.message ?? "Rescheduling is temporarily unavailable."),
+      actions: [],
+    };
+  }
+
+  private async handleWorkflowSelection(
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+  ): Promise<AgentMessageOutput | null> {
+    const callSessionId =
+      input.callSessionId ?? this.sessionState.lastCallSessionId;
+    if (!callSessionId) {
+      return null;
+    }
+    const text = input.text.trim();
+    const confirmation = this.parseConfirmation(text);
+    const appointmentIdMatch = text.match(/^appt_[\w-]+$/i);
+    const slotIdMatch = text.match(/^slot_[\w-]+$/i);
+
+    if (this.sessionState.cancelWorkflowId) {
+      if (appointmentIdMatch) {
+        const instance = await deps.workflows.cancel?.get(
+          this.sessionState.cancelWorkflowId,
+        );
+        if (instance) {
+          await instance.sendEvent({
+            type: CANCEL_WORKFLOW_EVENT_SELECT_APPOINTMENT,
+            payload: { appointmentId: appointmentIdMatch[0] },
+          });
+          const state =
+            this.sessionState.conversation ?? initialConversationState();
+          this.sessionState = {
+            ...this.sessionState,
+            conversation: applyIntent(state, {
+              type: "cancel_requested",
+              appointmentId: appointmentIdMatch[0],
+            }),
+          };
+          await this.state.storage.put("state", this.sessionState);
+          return {
+            callSessionId,
+            replyText: "Confirm cancelling this appointment? (yes or no)",
+            actions: [],
+          };
+        }
+      }
+      if (confirmation !== null) {
+        const instance = await deps.workflows.cancel?.get(
+          this.sessionState.cancelWorkflowId,
+        );
+        if (instance) {
+          await instance.sendEvent({
+            type: CANCEL_WORKFLOW_EVENT_CONFIRM,
+            payload: { confirmed: confirmation },
+          });
+          const state =
+            this.sessionState.conversation ?? initialConversationState();
+          this.sessionState = {
+            ...this.sessionState,
+            conversation: applyIntent(state, {
+              type: confirmation ? "cancel_confirmed" : "cancel_declined",
+            }),
+          };
+          await this.state.storage.put("state", this.sessionState);
+          return {
+            callSessionId,
+            replyText: confirmation
+              ? "Thanks. I'll cancel that appointment now."
+              : "Okay, I won't cancel that appointment.",
+            actions: [],
+          };
+        }
+      }
+    }
+
+    if (this.sessionState.rescheduleWorkflowId) {
+      if (appointmentIdMatch) {
+        const instance = await deps.workflows.reschedule?.get(
+          this.sessionState.rescheduleWorkflowId,
+        );
+        if (instance) {
+          await instance.sendEvent({
+            type: RESCHEDULE_WORKFLOW_EVENT_SELECT_APPOINTMENT,
+            payload: { appointmentId: appointmentIdMatch[0] },
+          });
+          return {
+            callSessionId,
+            replyText: "Got it. Which new time works best? (share a slot id)",
+            actions: [],
+          };
+        }
+      }
+      if (slotIdMatch) {
+        const instance = await deps.workflows.reschedule?.get(
+          this.sessionState.rescheduleWorkflowId,
+        );
+        if (instance) {
+          await instance.sendEvent({
+            type: RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
+            payload: { slotId: slotIdMatch[0] },
+          });
+          return {
+            callSessionId,
+            replyText: "Confirm the new appointment time? (yes or no)",
+            actions: [],
+          };
+        }
+      }
+      if (confirmation !== null) {
+        const instance = await deps.workflows.reschedule?.get(
+          this.sessionState.rescheduleWorkflowId,
+        );
+        if (instance) {
+          await instance.sendEvent({
+            type: RESCHEDULE_WORKFLOW_EVENT_CONFIRM,
+            payload: { confirmed: confirmation },
+          });
+          return {
+            callSessionId,
+            replyText: confirmation
+              ? "Thanks. I'll finalize the reschedule now."
+              : "Okay, I won't change the appointment.",
+            actions: [],
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private parseConfirmation(value: string): boolean | null {
+    if (/^(yes|yep|yeah|sure)\b/i.test(value)) {
+      return true;
+    }
+    if (/^(no|nope|nah)\b/i.test(value)) {
+      return false;
+    }
+    return null;
+  }
+
+  private formatAppointmentsResponse(
+    appointments: Array<{
+      id: string;
+      date: string;
+      timeWindow: string;
+      addressSummary: string;
+    }>,
+  ): string {
+    const intro =
+      appointments.length === 1
+        ? "Here is your upcoming appointment:"
+        : "Here are your upcoming appointments:";
+    const lines = appointments.map((appointment, index) => {
+      const dateLabel = appointment.date;
+      const timeLabel = appointment.timeWindow;
+      return `${index + 1}) ${dateLabel} ${timeLabel} at ${appointment.addressSummary}`;
+    });
+    return [intro, ...lines].join(" ");
   }
 
   private async handleBargeIn(): Promise<void> {

@@ -16,6 +16,7 @@ interface E2EEnv {
   E2E_ZIP?: string;
   E2E_CUSTOMER_ID?: string;
   E2E_APPOINTMENT_ID?: string;
+  E2E_SLOT_ID?: string;
 }
 
 const env = process.env as E2EEnv;
@@ -29,11 +30,15 @@ const fixture = {
   addressSummary: "742 Evergreen Terrace",
   appointmentDate: "2025-02-10",
   appointmentTimeWindow: "10:00-12:00",
+  slotId: "slot_001",
+  slotDate: "2025-02-14",
+  slotTimeWindow: "09:00-11:00",
 };
 const phoneNumber = env.E2E_PHONE ?? fixture.phoneE164;
 const zipCode = env.E2E_ZIP ?? fixture.zipCode;
 const customerId = env.E2E_CUSTOMER_ID ?? fixture.customerId;
 const appointmentId = env.E2E_APPOINTMENT_ID ?? fixture.appointmentId;
+const slotId = env.E2E_SLOT_ID ?? fixture.slotId;
 
 const describeIf = env.E2E_BASE_URL ? describe : describe.skip;
 
@@ -81,29 +86,28 @@ const postJson = async <T>(
   return (await response.json()) as T;
 };
 
-describeIf("conversation session cancel confirmation e2e", () => {
-  it("confirms cancellation via conversation", async () => {
-    const conversationId = `e2e-cancel-${crypto.randomUUID()}`;
+describeIf("conversation session reschedule e2e", () => {
+  it("reschedules via conversation and updates appointments", async () => {
+    const conversationId = `e2e-reschedule-${crypto.randomUUID()}`;
     const seededCustomerId = (
       await callRpc<{ id: string }>("admin/createCustomer", {
         id: customerId,
-        displayName: "E2E Cancel Customer",
+        displayName: "E2E Reschedule Customer",
         phoneE164: phoneNumber,
         addressSummary: fixture.addressSummary,
         zipCode,
       })
     ).id;
-    const seededAppointmentId = (
-      await callRpc<{ id: string }>("admin/createAppointment", {
-        id: appointmentId,
-        customerId: seededCustomerId,
-        phoneE164: phoneNumber,
-        addressSummary: fixture.addressSummary,
-        date: fixture.appointmentDate,
-        timeWindow: fixture.appointmentTimeWindow,
-        status: ServiceAppointmentStatus.Scheduled,
-      })
-    ).id;
+    await callRpc<{ id: string }>("admin/createAppointment", {
+      id: appointmentId,
+      customerId: seededCustomerId,
+      phoneE164: phoneNumber,
+      addressSummary: fixture.addressSummary,
+      date: fixture.appointmentDate,
+      timeWindow: fixture.appointmentTimeWindow,
+      status: ServiceAppointmentStatus.Scheduled,
+    });
+
     const start = await postJson<{
       callSessionId: string;
       replyText: string;
@@ -121,7 +125,7 @@ describeIf("conversation session cancel confirmation e2e", () => {
     await postJson(`/api/conversations/${conversationId}/message`, {
       callSessionId: start.callSessionId,
       phoneNumber,
-      text: "Cancel my appointment.",
+      text: "I need to reschedule my appointment.",
     });
 
     await waitForAppointments(conversationId);
@@ -129,10 +133,18 @@ describeIf("conversation session cancel confirmation e2e", () => {
     await postJson(`/api/conversations/${conversationId}/message`, {
       callSessionId: start.callSessionId,
       phoneNumber,
-      text: seededAppointmentId,
+      text: appointmentId,
     });
 
-    await waitForPendingCancellation(conversationId, seededAppointmentId);
+    await delay(1500);
+
+    await postJson(`/api/conversations/${conversationId}/message`, {
+      callSessionId: start.callSessionId,
+      phoneNumber,
+      text: slotId,
+    });
+
+    await delay(1500);
 
     const confirm = await postJson<{
       callSessionId: string;
@@ -140,36 +152,63 @@ describeIf("conversation session cancel confirmation e2e", () => {
     }>(`/api/conversations/${conversationId}/message`, {
       callSessionId: start.callSessionId,
       phoneNumber,
-      text: "Yes, please cancel it.",
+      text: "Yes, please confirm.",
     });
 
     expect(confirm.callSessionId).toBe(start.callSessionId);
     expect(confirm.replyText.length).toBeGreaterThan(0);
-    const appointmentStatus = await waitForAppointmentStatus(
-      seededAppointmentId,
-      ServiceAppointmentStatus.Cancelled,
-    );
-    expect(appointmentStatus).toBe(ServiceAppointmentStatus.Cancelled);
+
+    const original = await waitForReschedule(appointmentId);
+    expect(original.status).toBe(ServiceAppointmentStatus.Cancelled);
+    expect(original.rescheduledToId).toBeTruthy();
+
+    const nextId = original.rescheduledToId ?? "";
+    const next = await waitForAppointment(nextId);
+    expect(next.rescheduledFromId).toBe(appointmentId);
+    expect(next.status).toBe(ServiceAppointmentStatus.Scheduled);
+    if (!env.E2E_SLOT_ID) {
+      expect(next.date).toBe(fixture.slotDate);
+      expect(next.timeWindow).toBe(fixture.slotTimeWindow);
+    }
   });
 });
 
-const waitForAppointmentStatus = async (
-  appointmentIdValue: string,
-  expectedStatus: ServiceAppointmentStatus,
-) => {
-  const maxAttempts = 10;
+const waitForReschedule = async (appointmentIdValue: string) => {
+  const maxAttempts = 12;
   const delayMs = 1000;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const response = await callRpc<{
-      appointment: { status: ServiceAppointmentStatus } | null;
+      appointment: {
+        status: ServiceAppointmentStatus;
+        rescheduledToId: string | null;
+      } | null;
     }>("admin/getAppointment", { id: appointmentIdValue });
-    const status = response.appointment?.status;
-    if (status === expectedStatus) {
-      return status;
+    if (response.appointment?.rescheduledToId) {
+      return response.appointment;
     }
     await delay(delayMs);
   }
-  throw new Error("Timed out waiting for appointment status update.");
+  throw new Error("Timed out waiting for appointment reschedule.");
+};
+
+const waitForAppointment = async (appointmentIdValue: string) => {
+  const maxAttempts = 12;
+  const delayMs = 1000;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const response = await callRpc<{
+      appointment: {
+        status: ServiceAppointmentStatus;
+        date: string;
+        timeWindow: string;
+        rescheduledFromId: string | null;
+      } | null;
+    }>("admin/getAppointment", { id: appointmentIdValue });
+    if (response.appointment) {
+      return response.appointment;
+    }
+    await delay(delayMs);
+  }
+  throw new Error("Timed out waiting for rescheduled appointment.");
 };
 
 const waitForAppointments = async (conversationId: string) => {
@@ -185,22 +224,4 @@ const waitForAppointments = async (conversationId: string) => {
     await delay(delayMs);
   }
   throw new Error("Timed out waiting for appointment options.");
-};
-
-const waitForPendingCancellation = async (
-  conversationId: string,
-  appointmentIdValue: string,
-) => {
-  const maxAttempts = 10;
-  const delayMs = 1000;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const resync = await postJson<{
-      state: { pendingCancellationId: string | null };
-    }>(`/api/conversations/${conversationId}/resync`, { lastEventId: 0 });
-    if (resync.state.pendingCancellationId === appointmentIdValue) {
-      return resync;
-    }
-    await delay(delayMs);
-  }
-  throw new Error("Timed out waiting for cancellation state.");
 };

@@ -7,19 +7,26 @@ interface E2EEnv {
   DEMO_AUTH_TOKEN?: string;
   E2E_PHONE?: string;
   E2E_ZIP?: string;
+  E2E_CUSTOMER_ID?: string;
+  E2E_APPOINTMENT_ID?: string;
 }
 
 const env = process.env as E2EEnv;
 const baseUrl = env.E2E_BASE_URL ?? "http://127.0.0.1:8787";
 const authToken = env.E2E_AUTH_TOKEN ?? env.DEMO_AUTH_TOKEN;
-const generatePhone = () => {
-  const suffix = Math.floor(Math.random() * 10_000_000)
-    .toString()
-    .padStart(7, "0");
-  return `+1415${suffix}`;
+const fixture = {
+  customerId: "cust_001",
+  appointmentId: "appt_001",
+  phoneE164: "+14155552671",
+  zipCode: "94107",
+  addressSummary: "742 Evergreen Terrace",
+  appointmentDate: "2025-02-10",
+  appointmentTimeWindow: "10:00-12:00",
 };
-const phoneNumber = env.E2E_PHONE ?? generatePhone();
-const zipCode = env.E2E_ZIP ?? "00000";
+const phoneNumber = env.E2E_PHONE ?? fixture.phoneE164;
+const zipCode = env.E2E_ZIP ?? fixture.zipCode;
+const customerId = env.E2E_CUSTOMER_ID ?? fixture.customerId;
+const appointmentId = env.E2E_APPOINTMENT_ID ?? fixture.appointmentId;
 
 const describeIf = env.E2E_BASE_URL ? describe : describe.skip;
 
@@ -69,11 +76,20 @@ const callRpc = async <T>(
 describeIf("conversation session e2e", () => {
   it("accepts messages and resyncs events", async () => {
     const conversationId = `e2e-${crypto.randomUUID()}`;
-    await callRpc<{ id: string }>("admin/createCustomer", {
+    const customer = await callRpc<{ id: string }>("admin/createCustomer", {
+      id: customerId,
       displayName: "E2E Message Customer",
       phoneE164: phoneNumber,
-      addressSummary: "100 Test Street",
+      addressSummary: fixture.addressSummary,
       zipCode,
+    });
+    await callRpc<{ id: string }>("admin/createAppointment", {
+      id: appointmentId,
+      customerId: customer.id,
+      phoneE164: phoneNumber,
+      addressSummary: fixture.addressSummary,
+      date: fixture.appointmentDate,
+      timeWindow: fixture.appointmentTimeWindow,
     });
     const messageResponse = await postJson<{
       callSessionId: string;
@@ -86,11 +102,43 @@ describeIf("conversation session e2e", () => {
     expect(messageResponse.callSessionId).toBeTruthy();
     expect(messageResponse.replyText.length).toBeGreaterThan(0);
 
-    await postJson(`/api/conversations/${conversationId}/message`, {
+    const verification = await postJson<{
+      callSessionId: string;
+      replyText: string;
+    }>(`/api/conversations/${conversationId}/message`, {
       callSessionId: messageResponse.callSessionId,
       phoneNumber,
       text: zipCode,
     });
+
+    expect(verification.callSessionId).toBe(messageResponse.callSessionId);
+
+    const appointments = await postJson<{
+      callSessionId: string;
+      replyText: string;
+    }>(`/api/conversations/${conversationId}/message`, {
+      callSessionId: messageResponse.callSessionId,
+      phoneNumber,
+      text: "What are my appointments?",
+    });
+
+    const resyncAfterAppointments = await postJson<{
+      state: {
+        status: string;
+        appointments: Array<{ id: string; date: string }>;
+      };
+    }>(`/api/conversations/${conversationId}/resync`, { lastEventId: 0 });
+
+    expect(resyncAfterAppointments.state.status).toBe("PresentingAppointments");
+    expect(
+      resyncAfterAppointments.state.appointments.some(
+        (appointment) =>
+          appointment.id === appointmentId &&
+          appointment.date === fixture.appointmentDate,
+      ),
+    ).toBe(true);
+
+    expect(appointments.replyText.length).toBeGreaterThan(0);
 
     const resync = await postJson<{
       events: Array<{ type: string }>;

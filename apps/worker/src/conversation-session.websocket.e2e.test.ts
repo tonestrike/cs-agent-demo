@@ -7,19 +7,21 @@ interface E2EEnv {
   DEMO_AUTH_TOKEN?: string;
   E2E_PHONE?: string;
   E2E_ZIP?: string;
+  E2E_CUSTOMER_ID?: string;
 }
 
 const env = process.env as E2EEnv;
 const baseUrl = env.E2E_BASE_URL ?? "http://127.0.0.1:8787";
 const authToken = env.E2E_AUTH_TOKEN ?? env.DEMO_AUTH_TOKEN ?? "";
-const generatePhone = () => {
-  const suffix = Math.floor(Math.random() * 10_000_000)
-    .toString()
-    .padStart(7, "0");
-  return `+1415${suffix}`;
+const fixture = {
+  customerId: "cust_001",
+  phoneE164: "+14155552671",
+  zipCode: "94107",
+  addressSummary: "742 Evergreen Terrace",
 };
-const phoneNumber = env.E2E_PHONE ?? generatePhone();
-const zipCode = env.E2E_ZIP ?? "00000";
+const phoneNumber = env.E2E_PHONE ?? fixture.phoneE164;
+const zipCode = env.E2E_ZIP ?? fixture.zipCode;
+const customerId = env.E2E_CUSTOMER_ID ?? fixture.customerId;
 
 const describeIf = env.E2E_BASE_URL ? describe : describe.skip;
 
@@ -71,9 +73,10 @@ describeIf("conversation session websocket e2e", () => {
         },
         body: JSON.stringify({
           json: {
+            id: customerId,
             displayName: "E2E WebSocket Customer",
             phoneE164: phoneNumber,
-            addressSummary: "100 Test Street",
+            addressSummary: fixture.addressSummary,
             zipCode,
           },
           meta: [],

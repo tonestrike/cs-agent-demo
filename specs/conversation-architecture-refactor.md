@@ -195,9 +195,18 @@ The Worker forwards the DO event stream to the client unchanged.
   - Add doc in `docs/` describing event schema and resync.
 
 ## Progress (implemented)
-- ConversationSession DO with WebSocket support, message/resync endpoints, and event buffering.
-- Worker routing for `/api/conversations/:id/{socket|message|resync}`.
-- State machine scaffold + summary-to-state derivation.
+- [x] ConversationSession DO with WebSocket support, message/resync endpoints, and event buffering.
+- [x] Worker routing for `/api/conversations/:id/{socket|message|resync}`.
+- [x] State machine scaffold + summary-to-state derivation.
+- [x] Verification gate with ZIP prompt + CRM verification in the DO.
+- [x] Deterministic appointment listing response + state updates in the DO.
+- [x] Conversational e2e tests covering verification + appointment listing.
+- [x] Admin appointment lookup to verify cancel/reschedule outcomes in e2e tests.
+- [x] Conversational cancel/reschedule e2e tests validate appointment status changes.
+- [x] E2E tests validate DO state via resync instead of brittle response strings.
+- [x] E2E tests wait for appointment options before sending workflow selections.
+- [x] DO starts cancel/reschedule workflows deterministically and ensures call sessions exist.
+- [x] DO sends cancel/reschedule selection events directly (appointment/slot/confirm) for reliable e2e flows.
 - Unit tests for state transitions and summary mapping.
 - Remote-only e2e tests for message/resync and WebSocket final events.
 - Resync payloads now include conversation state snapshots.
@@ -205,6 +214,7 @@ The Worker forwards the DO event stream to the client unchanged.
 - Minimal cancel confirmation e2e (requires `E2E_CUSTOMER_ID`, optional `E2E_ZIP`/`E2E_APPOINTMENT_ID`).
 - ConversationSession can start cancel workflows via `start_cancel`.
 - Admin RPC procedures for creating customers/appointments (`admin.createCustomer`, `admin.createAppointment`).
+- ConversationSession now gates verification with deterministic ZIP prompts and CRM verification before model flow.
 
 ## Tests
 - Integration tests for:
