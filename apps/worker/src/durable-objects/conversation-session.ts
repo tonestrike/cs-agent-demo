@@ -3387,6 +3387,29 @@ export class ConversationSession {
           },
           "conversation.session.narrate.stream.end",
         );
+        if (!tokenCount && !sanitized) {
+          try {
+            const directText = await model.respond(respondInput);
+            const trimmed = this.sanitizeNarratorOutput(directText.trim());
+            if (trimmed) {
+              this.emitNarratorTokens(trimmed, streamId);
+              this.logger.info(
+                {
+                  callSessionId,
+                  toolName: toolResult.toolName,
+                  textLength: trimmed.length,
+                },
+                "conversation.session.narrate.stream.fallback",
+              );
+              return trimmed;
+            }
+          } catch (error) {
+            this.logger.error(
+              { error: error instanceof Error ? error.message : "unknown" },
+              "conversation.session.narrate.stream.fallback_failed",
+            );
+          }
+        }
         return sanitized || fallback;
       }
       const text = await model.respond(respondInput);
@@ -3665,33 +3688,51 @@ export class ConversationSession {
     if (!trimmed) {
       return null;
     }
-    if (trimmed === this.activeStatusText) {
-      return trimmed;
+    await this.emitStatusText(
+      callSessionId,
+      input.phoneNumber,
+      trimmed,
+      correlationId,
+    );
+    return trimmed;
+  }
+
+  private async emitStatusText(
+    callSessionId: string | null,
+    phoneNumber: string,
+    text: string,
+    correlationId?: string,
+  ): Promise<void> {
+    if (!text) {
+      return;
     }
-    this.activeStatusText = trimmed;
+    if (text === this.activeStatusText) {
+      return;
+    }
+    this.activeStatusText = text;
     this.statusSequence += 1;
-    this.turnStatusTexts = [...this.turnStatusTexts, trimmed];
+    this.turnStatusTexts = [...this.turnStatusTexts, text];
     this.emitEvent({
       type: "status",
-      text: trimmed,
+      text,
       correlationId,
       role: "system",
     });
-    if (callSessionId && input.phoneNumber) {
-      await this.ensureCallSession(deps, callSessionId, input.phoneNumber);
+    if (callSessionId && phoneNumber) {
+      const deps = createDependencies(this.env);
+      await this.ensureCallSession(deps, callSessionId, phoneNumber);
       await deps.calls.addTurn({
         id: crypto.randomUUID(),
         callSessionId,
         ts: new Date().toISOString(),
         speaker: "system",
-        text: trimmed,
+        text,
         meta: {
           kind: "status",
           correlationId: correlationId ?? null,
         },
       });
     }
-    return trimmed;
   }
 
   private formatAppointmentsResponse(
