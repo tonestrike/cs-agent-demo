@@ -114,13 +114,18 @@ Then set `AGENT_MODEL=openrouter` (or choose an OpenRouter model ID in Prompt St
 
 ## Useful commands
 
-- `bun lint`
-- `bun format`
-- `bun typecheck`
-- `bun run test`
-- `bun run test:integration`
-- `bun run test:e2e`
-- `bun db:migrate:local`
+- `bun lint` - lint source with Biome
+- `bun format` - auto-format with Biome
+- `bun typecheck` - TypeScript project build/typecheck
+- `bun run test` - unit tests
+- `bun run test:integration` - integration tests
+- `bun run test:e2e` - local e2e tests (requires local Worker)
+- `bun run test:e2e:remote` - remote e2e against deployed Worker
+- `bun db:migrate:local` - apply local D1 migrations
+- `bun db:seed:local` - seed local D1 fixtures
+- `bun deploy:worker` - deploy Worker (runs migrations)
+- `bun deploy:worker --seed` - deploy + seed
+- `bun logs:worker` - tail Worker logs (pretty)
 
 ## Repo layout
 

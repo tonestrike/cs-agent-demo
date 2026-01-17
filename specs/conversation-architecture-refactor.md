@@ -227,6 +227,15 @@ The Worker forwards the DO event stream to the client unchanged.
 ## Open questions
 - Do we want the interpreter model to live on Workers AI or OpenRouter?
 - Should SSE stream reconnect support replays of the last N events?
+- Do we need a shared “first-token” latency SLA per transport (web chat vs voice)?
+
+## Realtime quality requirements
+- Acknowledge intent immediately with a first streamed token (e.g., “Got it — rescheduling your appointment now.”).
+- Status updates are additive; they must not replace the initial acknowledgement.
+- Narrator streaming continues even when the flow is workflow-driven.
+- First response must stream without waiting on a second user turn.
+- Tokens must stream as soon as the narrator starts; do not hold streaming for tool results.
+- Track and log `first_token_ms` and `time_to_status_ms` per turn, plus an easy log filter by `callSessionId`.
 
 ## Voice requirements
 ### Transport

@@ -322,14 +322,22 @@ export class ConversationSession {
         );
         return verificationResponse;
       }
-      const workflowResponse = await this.handleWorkflowIntent(input);
+      const workflowResponse = await this.handleWorkflowIntent(
+        input,
+        deps,
+        streamId,
+      );
       if (workflowResponse) {
         this.emitEvent({ type: "final", data: workflowResponse });
         await this.updateSessionState(input, workflowResponse);
         await this.syncConversationState(workflowResponse.callSessionId, deps);
         return workflowResponse;
       }
-      const selectionResponse = await this.handleWorkflowSelection(input, deps);
+      const selectionResponse = await this.handleWorkflowSelection(
+        input,
+        deps,
+        streamId,
+      );
       if (selectionResponse) {
         this.emitEvent({ type: "final", data: selectionResponse });
         await this.updateSessionState(input, selectionResponse);
@@ -868,6 +876,8 @@ export class ConversationSession {
 
   private async handleWorkflowIntent(
     input: AgentMessageInput,
+    _deps: ReturnType<typeof createDependencies>,
+    streamId: number,
   ): Promise<AgentMessageOutput | null> {
     const state = this.sessionState.conversation ?? initialConversationState();
     if (!state.verification.verified || !state.verification.customerId) {
@@ -883,6 +893,9 @@ export class ConversationSession {
     }
 
     if (wantsCancel) {
+      const replyText =
+        "Got it. I can help cancel that appointment. I'm pulling your upcoming appointments now.";
+      this.emitNarratorTokens(replyText, streamId);
       const result = await this.handleCancelStart({
         callSessionId: input.callSessionId,
         customerId: state.verification.customerId ?? undefined,
@@ -892,12 +905,15 @@ export class ConversationSession {
       return {
         callSessionId: input.callSessionId ?? crypto.randomUUID(),
         replyText: result.ok
-          ? "I'm pulling your upcoming appointments now."
+          ? replyText
           : (result.message ?? "Cancellation is temporarily unavailable."),
         actions: [],
       };
     }
 
+    const replyText =
+      "Got it. I can help reschedule your appointment. I'm pulling your upcoming appointments now.";
+    this.emitNarratorTokens(replyText, streamId);
     const result = await this.handleRescheduleStart({
       callSessionId: input.callSessionId,
       customerId: state.verification.customerId ?? undefined,
@@ -907,7 +923,7 @@ export class ConversationSession {
     return {
       callSessionId: input.callSessionId ?? crypto.randomUUID(),
       replyText: result.ok
-        ? "I'm pulling your upcoming appointments now."
+        ? replyText
         : (result.message ?? "Rescheduling is temporarily unavailable."),
       actions: [],
     };
@@ -916,6 +932,7 @@ export class ConversationSession {
   private async handleWorkflowSelection(
     input: AgentMessageInput,
     deps: ReturnType<typeof createDependencies>,
+    streamId: number,
   ): Promise<AgentMessageOutput | null> {
     const callSessionId =
       input.callSessionId ?? this.sessionState.lastCallSessionId;
@@ -947,9 +964,11 @@ export class ConversationSession {
             }),
           };
           await this.state.storage.put("state", this.sessionState);
+          const replyText = "Confirm cancelling this appointment? (yes or no)";
+          this.emitNarratorTokens(replyText, streamId);
           return {
             callSessionId,
-            replyText: "Confirm cancelling this appointment? (yes or no)",
+            replyText,
             actions: [],
           };
         }
@@ -972,11 +991,13 @@ export class ConversationSession {
             }),
           };
           await this.state.storage.put("state", this.sessionState);
+          const replyText = confirmation
+            ? "Thanks. I'll cancel that appointment now."
+            : "Okay, I won't cancel that appointment.";
+          this.emitNarratorTokens(replyText, streamId);
           return {
             callSessionId,
-            replyText: confirmation
-              ? "Thanks. I'll cancel that appointment now."
-              : "Okay, I won't cancel that appointment.",
+            replyText,
             actions: [],
           };
         }
@@ -993,9 +1014,12 @@ export class ConversationSession {
             type: RESCHEDULE_WORKFLOW_EVENT_SELECT_APPOINTMENT,
             payload: { appointmentId: appointmentIdMatch[0] },
           });
+          const replyText =
+            "Got it. Which new time works best? (share a slot id)";
+          this.emitNarratorTokens(replyText, streamId);
           return {
             callSessionId,
-            replyText: "Got it. Which new time works best? (share a slot id)",
+            replyText,
             actions: [],
           };
         }
@@ -1009,9 +1033,11 @@ export class ConversationSession {
             type: RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
             payload: { slotId: slotIdMatch[0] },
           });
+          const replyText = "Confirm the new appointment time? (yes or no)";
+          this.emitNarratorTokens(replyText, streamId);
           return {
             callSessionId,
-            replyText: "Confirm the new appointment time? (yes or no)",
+            replyText,
             actions: [],
           };
         }
@@ -1025,11 +1051,13 @@ export class ConversationSession {
             type: RESCHEDULE_WORKFLOW_EVENT_CONFIRM,
             payload: { confirmed: confirmation },
           });
+          const replyText = confirmation
+            ? "Thanks. I'll finalize the reschedule now."
+            : "Okay, I won't change the appointment.";
+          this.emitNarratorTokens(replyText, streamId);
           return {
             callSessionId,
-            replyText: confirmation
-              ? "Thanks. I'll finalize the reschedule now."
-              : "Okay, I won't change the appointment.",
+            replyText,
             actions: [],
           };
         }
@@ -1047,6 +1075,22 @@ export class ConversationSession {
       return false;
     }
     return null;
+  }
+
+  private emitNarratorTokens(text: string, streamId: number) {
+    if (this.canceledStreamIds.has(streamId)) {
+      return;
+    }
+    const parts = text.split(/\s+/).filter(Boolean);
+    if (!parts.length) {
+      return;
+    }
+    for (const part of parts) {
+      if (this.canceledStreamIds.has(streamId)) {
+        return;
+      }
+      this.emitEvent({ type: "token", text: `${part} ` });
+    }
   }
 
   private formatAppointmentsResponse(

@@ -37,6 +37,7 @@ export default function CustomerPage() {
   ]);
   const [status, setStatus] = useState("New session");
   const [copied, setCopied] = useState(false);
+  const [logsCopied, setLogsCopied] = useState(false);
   const [logs, setLogs] = useState<ClientLog[]>([]);
   const listRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScroll = useRef(true);
@@ -361,6 +362,17 @@ export default function CustomerPage() {
     setTimeout(() => setCopied(false), 1500);
   };
 
+  const copyClientLogs = async () => {
+    const payload = {
+      callSessionId,
+      phoneNumber,
+      logs,
+    };
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    setLogsCopied(true);
+    setTimeout(() => setLogsCopied(false), 1500);
+  };
+
   return (
     <main className="grid-dots min-h-screen px-6 py-10">
       <div className="mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-[1.3fr_0.7fr]">
@@ -540,7 +552,16 @@ export default function CustomerPage() {
           </div>
         </Card>
         <Card className="flex flex-col gap-5 animate-rise">
-          <Badge className="w-fit">Client Log</Badge>
+          <div className="flex items-center justify-between">
+            <Badge className="w-fit">Client Log</Badge>
+            <button
+              type="button"
+              onClick={copyClientLogs}
+              className="text-xs font-semibold uppercase tracking-wide text-ink/50 hover:text-ink"
+            >
+              {logsCopied ? "Copied" : "Copy Logs"}
+            </button>
+          </div>
           <div className="max-h-72 space-y-3 overflow-auto rounded-2xl border border-ink/10 bg-white/70 p-4 text-xs text-ink/70">
             {logs.length === 0 ? (
               <p className="text-ink/50">No client events yet.</p>
