@@ -407,7 +407,11 @@ export function RealtimeKitChatPanel({
       cancelled = true;
       const chat = meeting.chat;
       if (chat?.removeListener) {
-        chat.removeListener("chatUpdate", handleChatUpdate);
+        try {
+          chat.removeListener("chatUpdate", handleChatUpdate);
+        } catch {
+          // Emitter may already be destroyed; ignore cleanup errors.
+        }
       }
       if (chatReadyTimerRef.current) {
         window.clearTimeout(chatReadyTimerRef.current);
@@ -512,7 +516,30 @@ export function RealtimeKitChatPanel({
     if (!element || !meeting || !meetingReady) {
       return;
     }
-    element.meeting = meeting;
+    let cancelled = false;
+    let timerId: number | null = null;
+    let retries = 0;
+    const MAX_RETRIES = 20;
+    const tryAssign = () => {
+      if (cancelled) return;
+      try {
+        element.meeting = meeting;
+      } catch (err) {
+        retries++;
+        if (retries < MAX_RETRIES) {
+          // RTK component may not be ready; retry after a short delay.
+          timerId = window.setTimeout(tryAssign, 50);
+        } else {
+          console.warn("rtk-chat: failed to assign meeting after retries", err);
+        }
+      }
+    };
+    // Delay initial assignment to allow web component to fully mount.
+    timerId = window.setTimeout(tryAssign, 0);
+    return () => {
+      cancelled = true;
+      if (timerId !== null) window.clearTimeout(timerId);
+    };
   }, [meeting, meetingReady]);
 
   useEffect(() => {
@@ -520,27 +547,48 @@ export function RealtimeKitChatPanel({
     if (!element || !meeting || !meetingReady) {
       return;
     }
-    element.meeting = meeting;
+    let cancelled = false;
+    let timerId: number | null = null;
+    let retries = 0;
+    const MAX_RETRIES = 20;
+    const tryAssign = () => {
+      if (cancelled) return;
+      try {
+        element.meeting = meeting;
+      } catch (err) {
+        retries++;
+        if (retries < MAX_RETRIES) {
+          // RTK component may not be ready; retry after a short delay.
+          timerId = window.setTimeout(tryAssign, 50);
+        } else {
+          console.warn(
+            "rtk-mic-toggle: failed to assign meeting after retries",
+            err,
+          );
+        }
+      }
+    };
+    timerId = window.setTimeout(tryAssign, 0);
+    return () => {
+      cancelled = true;
+      if (timerId !== null) window.clearTimeout(timerId);
+    };
   }, [meeting, meetingReady]);
 
   const handleChatRef = useCallback(
     (element: HTMLRtkChatElement | null) => {
       chatElementRef.current = element;
-      if (element && meeting && meetingReady) {
-        element.meeting = meeting;
-      }
+      // Assignment is handled by the useEffect above to avoid race conditions.
     },
-    [meeting, meetingReady],
+    [],
   );
 
   const handleMicToggleRef = useCallback(
     (element: HTMLRtkMicToggleElement | null) => {
       micToggleRef.current = element;
-      if (element && meeting && meetingReady) {
-        element.meeting = meeting;
-      }
+      // Assignment is handled by the useEffect above to avoid race conditions.
     },
-    [meeting, meetingReady],
+    [],
   );
 
   return (

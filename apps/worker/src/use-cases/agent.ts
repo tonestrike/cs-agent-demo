@@ -702,7 +702,10 @@ export const handleAgentMessage = async (
     } else {
       summary = parseSummary(session.summary ?? null, deps.logger);
       recentTurns = await deps.calls.getRecentTurns({ callSessionId });
-      contextTurns = recentTurns.length;
+      contextTurns = recentTurns.filter((turn) => {
+        const kind = (turn.meta as { kind?: string } | undefined)?.kind;
+        return turn.speaker !== "system" && kind !== "status";
+      }).length;
     }
   }
 
@@ -844,18 +847,15 @@ export const handleAgentMessage = async (
   );
 
   const messageHistory: Array<{ role: "user" | "assistant"; content: string }> =
-    recentTurns.map((turn) => {
-      if (turn.speaker === "system" || turn.meta?.["kind"] === "status") {
-        return {
-          role: "assistant",
-          content: `(status) ${turn.text}`,
-        };
-      }
-      return {
+    recentTurns
+      .filter((turn) => {
+        const kind = (turn.meta as { kind?: string } | undefined)?.kind;
+        return turn.speaker !== "system" && kind !== "status";
+      })
+      .map((turn) => ({
         role: turn.speaker === "agent" ? "assistant" : "user",
         content: turn.text,
-      };
-    });
+      }));
   messageHistory.push({ role: "user", content: input.text });
   logger.debug(
     {

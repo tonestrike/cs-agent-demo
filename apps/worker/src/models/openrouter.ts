@@ -315,6 +315,15 @@ const streamOpenRouterResponse = async function* (
   if (!response.body) {
     return;
   }
+  const startAt = Date.now();
+  logger.info(
+    {
+      contentType: response.headers.get("content-type"),
+      cacheControl: response.headers.get("cache-control"),
+      transferEncoding: response.headers.get("transfer-encoding"),
+    },
+    "openrouter.respond.stream.start",
+  );
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -325,6 +334,10 @@ const streamOpenRouterResponse = async function* (
   let emptyDeltaCount = 0;
   let firstLine: string | null = null;
   let lastLine: string | null = null;
+  let firstChunkAt: number | null = null;
+  let lastMessageContent: string | null = null;
+  const choiceKeysCount: Record<string, number> = {};
+  const deltaKeysCount: Record<string, number> = {};
 
   const coerceContent = (value: unknown): string | null => {
     if (typeof value === "string") {
@@ -401,6 +414,20 @@ const streamOpenRouterResponse = async function* (
         choices?: Array<unknown>;
       };
       const choice = parsed.choices?.[0] ?? null;
+      if (choice && typeof choice === "object") {
+        for (const key of Object.keys(choice)) {
+          choiceKeysCount[key] = (choiceKeysCount[key] ?? 0) + 1;
+        }
+        const delta =
+          "delta" in choice && typeof choice.delta === "object"
+            ? choice.delta
+            : null;
+        if (delta) {
+          for (const key of Object.keys(delta)) {
+            deltaKeysCount[key] = (deltaKeysCount[key] ?? 0) + 1;
+          }
+        }
+      }
       const delta = extractDeltaText(choice);
       if (delta) {
         deltaCount += 1;
@@ -431,6 +458,18 @@ const streamOpenRouterResponse = async function* (
           },
           "openrouter.respond.stream.empty_delta",
         );
+        if (choice && typeof choice === "object" && "message" in choice) {
+          const message =
+            typeof choice.message === "object" && choice.message
+              ? choice.message
+              : null;
+          const messageContent =
+            message && "content" in message ? message.content : null;
+          const coerced = coerceContent(messageContent);
+          if (coerced) {
+            lastMessageContent = coerced;
+          }
+        }
       }
     } catch (error) {
       logger.error(
@@ -447,6 +486,9 @@ const streamOpenRouterResponse = async function* (
     const { value, done } = await reader.read();
     if (done) {
       break;
+    }
+    if (firstChunkAt === null) {
+      firstChunkAt = Date.now();
     }
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
@@ -470,14 +512,28 @@ const streamOpenRouterResponse = async function* (
     }
   }
   yield* flushEvent();
+  if (!deltaCount && typeof lastMessageContent === "string") {
+    const fallback = lastMessageContent as string;
+    logger.info(
+      {
+        length: fallback.length,
+      },
+      "openrouter.respond.stream.fallback_emit",
+    );
+    yield fallback;
+  }
   logger.info(
     {
       lineCount,
       eventCount,
       deltaCount,
       emptyDeltaCount,
+      firstChunkMs:
+        firstChunkAt === null ? null : Math.max(0, firstChunkAt - startAt),
       firstLine: firstLine ? truncate(firstLine, 240) : null,
       lastLine: lastLine ? truncate(lastLine, 240) : null,
+      choiceKeysCount,
+      deltaKeysCount,
     },
     "openrouter.respond.stream.summary",
   );

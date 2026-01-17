@@ -1224,13 +1224,11 @@ export class ConversationSession {
     const start = Date.now();
     const turns = await deps.calls.getRecentTurns({ callSessionId, limit: 8 });
     const messages = turns
+      .filter((turn) => {
+        const kind = (turn.meta as { kind?: string } | undefined)?.kind;
+        return turn.speaker !== "system" && kind !== "status";
+      })
       .map((turn) => {
-        if (turn.speaker === "system" || turn.meta?.["kind"] === "status") {
-          return {
-            role: "assistant" as const,
-            content: `(status) ${turn.text}`,
-          };
-        }
         const role = (turn.speaker === "agent" ? "assistant" : "user") as
           | "assistant"
           | "user";
@@ -3831,7 +3829,8 @@ export class ConversationSession {
     lines.push("## Turns");
     turns.forEach((turn, index) => {
       const role =
-        turn.speaker === "system" || turn.meta?.["kind"] === "status"
+        turn.speaker === "system" ||
+        (turn.meta as { kind?: string } | undefined)?.kind === "status"
           ? "System"
           : turn.speaker === "agent"
             ? "Assistant"
