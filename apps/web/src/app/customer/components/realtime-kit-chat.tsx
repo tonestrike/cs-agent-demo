@@ -92,7 +92,9 @@ declare global {
 // -----------------------------------------------------------------------------
 
 function getApiHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
   if (demoAuthToken) headers["x-demo-auth"] = demoAuthToken;
   return headers;
 }
@@ -103,7 +105,9 @@ function getBaseUrl(): string {
 
 function isEmitterReady(obj: unknown): boolean {
   if (!obj || typeof obj !== "object") return false;
-  return "_events" in obj && (obj as { _events?: unknown })._events !== undefined;
+  return (
+    "_events" in obj && (obj as { _events?: unknown })._events !== undefined
+  );
 }
 
 // -----------------------------------------------------------------------------
@@ -125,7 +129,9 @@ export function RealtimeKitChatPanel({
   const [statusError, setStatusError] = useState<string | undefined>();
   const [meeting, setMeeting] = useState<RealtimeKitClient | null>(null);
   const [meetingReady, setMeetingReady] = useState(false);
-  const [partialTranscript, setPartialTranscript] = useState<string | null>(null);
+  const [partialTranscript, setPartialTranscript] = useState<string | null>(
+    null,
+  );
   const [finalTranscripts, setFinalTranscripts] = useState<
     Array<{ id: string; text: string }>
   >([]);
@@ -136,7 +142,11 @@ export function RealtimeKitChatPanel({
   const sentMessageIds = useRef(new Set<string>());
   const assistantBuffers = useRef(new Map<string, string>());
   const ttsEnabled = useRef(enableTts);
-  const timers = useRef<{ retry?: number; chatReady?: number; uiReady?: number }>({});
+  const timers = useRef<{
+    retry?: number;
+    chatReady?: number;
+    uiReady?: number;
+  }>({});
 
   // Keep ttsEnabled ref in sync
   useEffect(() => {
@@ -263,7 +273,12 @@ export function RealtimeKitChatPanel({
     const checkReady = () => {
       if (cancelled) return;
       const { chat, participants } = meeting;
-      if (chat && participants && isEmitterReady(chat) && isEmitterReady(participants)) {
+      if (
+        chat &&
+        participants &&
+        isEmitterReady(chat) &&
+        isEmitterReady(participants)
+      ) {
         setMeetingReady(true);
       } else {
         timers.current.uiReady = window.setTimeout(checkReady, 100);
@@ -340,7 +355,8 @@ export function RealtimeKitChatPanel({
       const text = event.transcript?.trim();
       if (!text) return;
 
-      const isLocal = !localUserId || !event.userId || event.userId === localUserId;
+      const isLocal =
+        !localUserId || !event.userId || event.userId === localUserId;
       if (!isLocal) return;
 
       if (event.isPartialTranscript) {
@@ -394,7 +410,10 @@ export function RealtimeKitChatPanel({
         const messageId = payload.messageId ?? "default";
         if (payload.type === "token") {
           const current = assistantBuffers.current.get(messageId) ?? "";
-          assistantBuffers.current.set(messageId, current + (payload.text ?? ""));
+          assistantBuffers.current.set(
+            messageId,
+            current + (payload.text ?? ""),
+          );
         } else if (payload.type === "final") {
           const buffer = assistantBuffers.current.get(messageId) ?? "";
           assistantBuffers.current.delete(messageId);
@@ -470,14 +489,19 @@ export function RealtimeKitChatPanel({
             <p key={line.id}>You: {line.text}</p>
           ))}
           {partialTranscript && (
-            <p className="italic text-ink-500">Listening… {partialTranscript}</p>
+            <p className="italic text-ink-500">
+              Listening… {partialTranscript}
+            </p>
           )}
         </div>
       )}
 
       <div className="min-h-0 flex-1 bg-sand-50">
         {meetingReady ? (
-          <rtk-chat ref={handleChatRef} style={{ width: "100%", height: "100%" }} />
+          <rtk-chat
+            ref={handleChatRef}
+            style={{ width: "100%", height: "100%" }}
+          />
         ) : (
           <div className="flex h-full items-center justify-center px-4 text-sm text-ink/70">
             {sessionId
