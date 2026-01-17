@@ -126,13 +126,13 @@ export function RealtimeKitChatPanel({
   enableTts = false,
 }: RealtimeKitChatPanelProps) {
   const [status, setStatus] = useState("Waiting for session...");
-  const [statusError, setStatusError] = useState<string | undefined>();
+  const [, setStatusError] = useState<string | undefined>();
   const [meeting, setMeeting] = useState<RealtimeKitClient | null>(null);
   const [meetingReady, setMeetingReady] = useState(false);
-  const [partialTranscript, setPartialTranscript] = useState<string | null>(
+  const [, setPartialTranscript] = useState<string | null>(
     null,
   );
-  const [finalTranscripts, setFinalTranscripts] = useState<
+  const [, setFinalTranscripts] = useState<
     Array<{ id: string; text: string }>
   >([]);
 
