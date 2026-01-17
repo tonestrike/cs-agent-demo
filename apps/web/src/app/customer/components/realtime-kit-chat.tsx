@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { RTKClientOptions } from "@cloudflare/realtimekit";
 import type { Meeting } from "@cloudflare/realtimekit-ui";
 import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
-import { getLogger } from "../../../lib/logger";
+import { logger } from "../../../lib/logger";
 import type { Customer } from "../types";
 
 // -----------------------------------------------------------------------------
@@ -150,6 +150,7 @@ export function RealtimeKitChatPanel({
   const sentMessageIds = useRef(new Set<string>());
   const assistantBuffers = useRef(new Map<string, string>());
   const ttsEnabled = useRef(enableTts);
+  const meetingReadyRef = useRef(false);
   const timers = useRef<{
     retry?: number;
     chatReady?: number;
@@ -160,22 +161,24 @@ export function RealtimeKitChatPanel({
     sessionId: string | null;
     customerId: string | null;
   }>({ sessionId: null, customerId: null });
+  // Refs for stable logging context
+  const sessionIdRef = useRef(sessionId);
+  const customerIdRef = useRef(customer?.id ?? null);
 
-  const logger = useMemo(
-    () =>
-      getLogger("rtk-chat", {
-        sessionId,
-        customerId: customer?.id ?? null,
-      }),
-    [customer?.id, sessionId],
-  );
+  // Stable log function with no dependencies - uses refs for all context
   const log = useCallback(
     (
       message: string,
       data?: Record<string, unknown>,
       level: "info" | "warn" | "error" = "info",
     ) => {
-      const payload = { meetingReady, ...data };
+      const payload = {
+        component: "rtk-chat",
+        sessionId: sessionIdRef.current,
+        customerId: customerIdRef.current,
+        meetingReady: meetingReadyRef.current,
+        ...data,
+      };
       if (level === "error") {
         logger.error(payload, message);
         return;
@@ -186,13 +189,25 @@ export function RealtimeKitChatPanel({
       }
       logger.info(payload, message);
     },
-    [logger, meetingReady],
+    [],
   );
 
-  // Keep ttsEnabled ref in sync
+  // Keep refs in sync with props/state for stable logging
   useEffect(() => {
     ttsEnabled.current = enableTts;
   }, [enableTts]);
+
+  useEffect(() => {
+    meetingReadyRef.current = meetingReady;
+  }, [meetingReady]);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  useEffect(() => {
+    customerIdRef.current = customer?.id ?? null;
+  }, [customer?.id]);
 
   // Send message to conversation API
   const phoneE164 = customer?.phoneE164;
