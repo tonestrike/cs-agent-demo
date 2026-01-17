@@ -247,10 +247,13 @@ export function RealtimeKitChatPanel({
       currentSession.sessionId === sessionId &&
       currentSession.customerId === customer.id
     ) {
-      console.log("[RTK Chat] Skipping recreation, meeting already exists for session", {
-        sessionId,
-        customerId: customer.id,
-      });
+      console.log(
+        "[RTK Chat] Skipping recreation, meeting already exists for session",
+        {
+          sessionId,
+          customerId: customer.id,
+        },
+      );
       return;
     }
 
