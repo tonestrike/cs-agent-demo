@@ -399,7 +399,7 @@ export function useConversationSession(phoneNumber: string) {
       }
       const base = apiBaseUrl || window.location.origin;
       try {
-        logEvent("rpc.agent.message.start", { sessionId });
+        logEvent("api.conversation.message.start", { sessionId });
         const response = await fetch(
           new URL(`/api/conversations/${sessionId}/message`, base),
           {
@@ -415,7 +415,7 @@ export function useConversationSession(phoneNumber: string) {
             }),
           },
         );
-        logEvent("rpc.agent.message.response", {
+        logEvent("api.conversation.message.response", {
           sessionId,
           status: response.status,
         });
@@ -423,14 +423,14 @@ export function useConversationSession(phoneNumber: string) {
           throw new Error("Request failed");
         }
         await response.json();
-        logEvent("rpc.agent.message.done", {
+        logEvent("api.conversation.message.done", {
           sessionId,
           replyLength: 0,
           usedFallback: false,
         });
       } catch {
         setConnectionStatus("Connection issue. Try again.");
-        logEvent("rpc.agent.message.failed", { sessionId });
+        logEvent("api.conversation.message.failed", { sessionId });
         const pendingTurns = pendingTurnsRef.current;
         const entryIndex = pendingTurns.lastIndexOf(pendingEntry);
         if (entryIndex >= 0) {

@@ -33,7 +33,6 @@ export const envSchema = z.object({
   OPENROUTER_REFERER: z.string().optional(),
   OPENROUTER_TITLE: z.string().optional(),
   OPENROUTER_BASE_URL: z.string().optional(),
-  PestCallAgent: z.custom<DurableObjectNamespace>().optional(),
   CONVERSATION_HUB: z.custom<DurableObjectNamespace>().optional(),
   CONVERSATION_SESSION_V2: z.custom<DurableObjectNamespace>().optional(),
   RESCHEDULE_WORKFLOW: z.custom<Workflow>().optional(),

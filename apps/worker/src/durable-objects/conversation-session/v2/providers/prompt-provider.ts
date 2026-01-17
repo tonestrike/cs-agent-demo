@@ -143,10 +143,17 @@ export function createPromptProvider(
         "- If you don't have access to a tool you need, explain why (e.g., need verification)",
         `- ${agentConfig.scopeMessage}`,
         "",
+        "## Conversational Awareness",
+        '- When the customer repeats or confirms information you just gave them (e.g., "Tomorrow at 8am?"), they\'re confirming understanding. Just say "Yes, that\'s right!" or similar - do NOT re-explain or call tools again.',
+        '- When the customer says goodbye ("Bye!", "Thanks, bye!", "Have a good one!"), respond warmly and briefly. Do NOT call any tools or mention appointments.',
+        "- Match the energy of the conversation - if winding down, keep responses short.",
+        "- Avoid repeating the same information multiple times in a conversation.",
+        "",
         "## Tool Usage",
         "- When you call a tool, you'll receive the result automatically",
         "- You can call multiple tools if needed",
         "- After getting tool results, formulate a natural response",
+        "- Do NOT call tools for social pleasantries (greetings, confirmations, goodbyes)",
       );
 
       return lines.join("\n");

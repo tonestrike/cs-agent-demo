@@ -860,101 +860,23 @@ export class ConversationSessionV2 {
   }
 
   /**
-   * Emit an aggregated acknowledgement using the model (or fallback).
+   * Emit an acknowledgement from the queued prompts.
+   * Uses the pre-defined acknowledgements directly - no AI generation needed.
    */
   private async emitAggregatedAcknowledgement(turn: TurnState): Promise<void> {
     const prompts = [...turn.acknowledgementPrompts];
     if (prompts.length === 0) return;
 
-    // Build prompt for acknowledgement generation
-    const systemPrompt =
-      "You write a single, brief acknowledgement while work runs in the background. Be warm, concise, and avoid overpromising. One sentence, no follow-up questions.";
-    const userPrompt = `Combine these work summaries into one short acknowledgement:\n- ${prompts.join(
-      "\n- ",
-    )}\nKeep it under 120 characters.`;
+    // Use the first acknowledgement directly - it's already well-written
+    // If multiple tools are called, just use the first one to avoid confusion
+    const acknowledgement = prompts[0] ?? "One moment please...";
 
-    const fallbackAck = prompts.join(" ");
+    this.logger.debug(
+      { turnId: turn.turnId, acknowledgement, promptCount: prompts.length },
+      "session.acknowledgement_sent",
+    );
 
-    if (!this.ai) {
-      this.events.emitStatus(fallbackAck, { turnId: turn.turnId });
-      return;
-    }
-
-    try {
-      const response = await runWithTools(
-        this.ai,
-        this.config.model as Parameters<typeof runWithTools>[1],
-        {
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          tools: [],
-        },
-        { streamFinalResponse: true, maxRecursiveToolRuns: 0 },
-      );
-
-      if (this.isReadableStream(response)) {
-        await this.streamAcknowledgementResponse(response, turn);
-      } else {
-        const text = this.extractResponseText(response);
-        this.events.emitStatus(text, { turnId: turn.turnId });
-      }
-    } catch (error) {
-      this.logger.warn(
-        {
-          error: error instanceof Error ? error.message : "unknown",
-          prompts: prompts.slice(0, 3),
-        },
-        "session.acknowledgement_generate_failed",
-      );
-      this.events.emitStatus(fallbackAck, { turnId: turn.turnId });
-    }
-  }
-
-  /**
-   * Stream acknowledgement tokens as status events.
-   * Uses EventSourceParserStream for proper SSE parsing.
-   */
-  private async streamAcknowledgementResponse(
-    stream: ReadableStream,
-    turn: TurnState,
-  ): Promise<void> {
-    try {
-      const eventStream = stream
-        .pipeThrough(new TextDecoderStream())
-        .pipeThrough(new EventSourceParserStream());
-
-      const reader = eventStream.getReader();
-
-      while (true) {
-        const { done, value: event } = await reader.read();
-        if (done) break;
-
-        if (event.data) {
-          if (event.data === "[DONE]") continue;
-
-          try {
-            const parsed = JSON.parse(event.data) as { response?: string };
-            if (parsed.response) {
-              this.events.emitStatus(parsed.response, { turnId: turn.turnId });
-            }
-          } catch {
-            this.logger.debug(
-              { data: event.data.slice(0, 50) },
-              "session.ack_sse_skip",
-            );
-          }
-        }
-      }
-
-      reader.releaseLock();
-    } catch (error) {
-      this.logger.warn(
-        { error: error instanceof Error ? error.message : "unknown" },
-        "session.ack_stream_error",
-      );
-    }
+    this.events.emitStatus(acknowledgement, { turnId: turn.turnId });
   }
 
   /**

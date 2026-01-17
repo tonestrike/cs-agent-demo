@@ -27,10 +27,6 @@ database_id = "b3a818ac-cbb2-4981-b3f2-2ee61f9a0baa"
 migrations_dir = "migrations"
 
 [[durable_objects.bindings]]
-name = "PestCallAgent"
-class_name = "PestCallAgent"
-
-[[durable_objects.bindings]]
 name = "CONVERSATION_HUB"
 class_name = "ConversationHub"
 
@@ -52,10 +48,6 @@ class_name = "VerificationWorkflow"
 name = "pestcall-cancel"
 binding = "CANCEL_WORKFLOW"
 class_name = "CancelWorkflow"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["PestCallAgent"]
 
 [[migrations]]
 tag = "v2"

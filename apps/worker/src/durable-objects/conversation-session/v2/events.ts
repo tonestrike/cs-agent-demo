@@ -120,7 +120,7 @@ export class EventEmitter {
       turnId?: number;
       messageId?: string;
       correlationId?: string;
-      data?: unknown;
+      data?: Record<string, unknown>;
     } = {},
   ): SessionEvent {
     return this.emit("final", {
@@ -128,7 +128,8 @@ export class EventEmitter {
       turnId: options.turnId,
       messageId: options.messageId,
       correlationId: options.correlationId,
-      data: options.data,
+      // Include replyText in data for client compatibility
+      data: { replyText: text, ...options.data },
     });
   }
 

@@ -1,13 +1,11 @@
 import { onError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { CORSPlugin } from "@orpc/server/plugins";
-import { routeAgentRequest } from "agents";
 
 import { createContext } from "./context";
 import type { Env } from "./env";
 import { createLogger } from "./logger";
 import { router } from "./router";
-export { PestCallAgent } from "./agents/pestcall";
 export { CancelWorkflow } from "./workflows/cancel";
 export { ConversationHub } from "./durable-objects/conversation-hub";
 export { ConversationSessionV2DO } from "./durable-objects/conversation-session/v2";
@@ -179,13 +177,6 @@ export default {
         });
       }
     }
-    const agentResponse = await routeAgentRequest(request, env, {
-      cors: true,
-    });
-    if (agentResponse) {
-      return agentResponse;
-    }
-
     const { matched, response } = await handler.handle(request, {
       prefix: "/rpc",
       context: createContext(env, request.headers),

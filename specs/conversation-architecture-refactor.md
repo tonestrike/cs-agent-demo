@@ -82,7 +82,6 @@ Fix:
 
 ## Current state
 - The agent loop lives in [`agent.ts`](../apps/worker/src/use-cases/agent.ts) with a DB-backed call summary.
-- Streaming is simulated in [`pestcall.ts`](../apps/worker/src/agents/pestcall.ts) and broadcast through [`conversation-hub.ts`](../apps/worker/src/durable-objects/conversation-hub.ts).
 - A single model does decision + response + status, which makes control flow brittle when output is ambiguous.
 
 ## Target architecture

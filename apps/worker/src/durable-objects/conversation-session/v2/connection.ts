@@ -71,8 +71,10 @@ export class ConnectionManager {
       return new Response("WebSocket unavailable", { status: 500 });
     }
 
-    this.setupConnection(server, connectionId);
+    // Accept the connection BEFORE setting up handlers so WebSocket is OPEN
+    // when connect handler (greeting) tries to broadcast
     server.accept();
+    this.setupConnection(server, connectionId);
 
     this.logger.info({ connectionId }, "connection.upgraded");
 
