@@ -3,9 +3,10 @@ Practical steps to inspect live conversations when something goes wrong.
 
 ## Quick start
 - Tail logs for a single call: `bun run scripts/logs-call-session.ts <callSessionId>`.
-- One-shot log capture (auto-stops after 15s, pass a duration to override): `bun run scripts/logs-call-session-once.ts <callSessionId> [seconds]`.
 - Snapshot the Durable Object state: `curl -H "x-demo-auth: $DEMO_TOKEN" "$WORKER_BASE/api/conversations/<callSessionId>/debug"`.
 - Fetch the last summarized view: `curl -H "x-demo-auth: $DEMO_TOKEN" "$WORKER_BASE/api/conversations/<callSessionId>/summary"`.
+- Query the D1 call record (remote): `wrangler d1 execute pestcall_local --remote --config apps/worker/wrangler.toml --command "SELECT id, started_at, status FROM call_sessions WHERE id = '<callSessionId>';"`.
+- Query the D1 call turns: `wrangler d1 execute pestcall_local --remote --config apps/worker/wrangler.toml --command "SELECT speaker, ts, text FROM call_turns WHERE call_session_id = '<callSessionId>' ORDER BY ts;"`.
 
 ## Useful endpoints
 - `GET /api/conversations/{callSessionId}/debug` – returns the DO snapshot (`sessionState`, `eventBuffer`, `turnDecision`, `turnMetrics`, and any persisted DB session/turns). Implemented in [`conversation-session.ts`](../../apps/worker/src/durable-objects/conversation-session.ts#L357).
@@ -16,7 +17,6 @@ Pass the demo auth token with `x-demo-auth` (or `authorization: Bearer ...`); ca
 
 ## Logs
 - Stream filtered worker logs for a call session: `bun run scripts/logs-call-session.ts <callSessionId>` (wraps `wrangler tail` with a search filter).
-- Capture a bounded window without keeping a terminal open: `bun run scripts/logs-call-session-once.ts <callSessionId> [seconds]`.
 - Server logs to watch:
   - `conversation.session.final.empty_text` or `conversation.session.tool_call.invalid_decision` – model returned an empty/invalid decision, so the narrator fell back.
   - `openrouter.tool_call.*` / `workers_ai.tool_call.*` – shows the raw tool-call parsing result from the model adapter.
@@ -29,8 +29,17 @@ Triage steps:
 - Tail logs for the same `callSessionId` to see the adapter-level parse failures or empty content.
 - If the model sent multiple partial replies, confirm whether the UI rendered repeated `final` events from the DO or whether the model streamed multiple final chunks (check `eventBuffer` and `turnMetrics`).
 
+## Datastores to inspect
+- **Durable Object state**: `/api/conversations/{callSessionId}/debug` includes `sessionState`, `turnDecision`, `turnMetrics`, and the recent `eventBuffer`.
+- **D1 (call history)**: tables `call_sessions` (metadata/summary) and `call_turns` (per utterance, with `meta_json`). Query via Wrangler (uses the database name `pestcall_local` from `apps/worker/wrangler.toml`):
+  - Single session: `wrangler d1 execute pestcall_local --remote --config apps/worker/wrangler.toml --command "SELECT * FROM call_sessions WHERE id = '<callSessionId>';"`.
+  - Turns: `wrangler d1 execute pestcall_local --remote --config apps/worker/wrangler.toml --command "SELECT speaker, ts, text, meta_json FROM call_turns WHERE call_session_id = '<callSessionId>' ORDER BY ts;"`.
+  - Local dev data: drop `--remote` to hit the Miniflare DB (`wrangler dev --local` uses the same `pestcall_local` name). Wrangler stores the local SQLite under `.wrangler/state` if you need to open it directly.
+- **CRM cache**: `customers_cache` caches phone/name/ZIP lookups. Join via the session: `SELECT * FROM customers_cache WHERE id = (SELECT customer_cache_id FROM call_sessions WHERE id = '<callSessionId>');`.
+
 ## Artifacts to capture for investigations
 - `callSessionId`
 - `/debug` snapshot JSON
-- Tail logs for the same session (`bun run scripts/logs-call-session.ts ...`)
+- D1 rows for `call_sessions` and `call_turns` for the same id
+- Tail logs for the session (`bun run scripts/logs-call-session.ts ...`)
 - The user’s input text and phone for CRM lookup context (E164)

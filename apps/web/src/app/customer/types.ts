@@ -9,6 +9,7 @@ export type ClientLog = {
   ts: string;
   message: string;
   data?: Record<string, unknown>;
+  contextMessages?: ChatMessage[];
   level?: "info" | "warn" | "error";
   source?: string;
 };

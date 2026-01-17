@@ -10,6 +10,7 @@ export function useConversationSession(phoneNumber: string) {
     null,
   );
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]);
   const [connectionStatus, setConnectionStatus] = useState("New session");
   const [logs, setLogs] = useState<ClientLog[]>([]);
   const [turnMetrics, setTurnMetrics] = useState<TurnMetric[]>([]);
@@ -30,6 +31,10 @@ export function useConversationSession(phoneNumber: string) {
       autoZipTimerRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   // Ref to always access the latest sendMessage callback
   const sendMessageRef = useRef<typeof sendMessage | null>(null);
@@ -59,6 +64,7 @@ export function useConversationSession(phoneNumber: string) {
         ts: new Date().toISOString(),
         message,
         data,
+        contextMessages: messagesRef.current.map((msg) => ({ ...msg })),
         level,
         source: options?.source ?? message.split(".")[0] ?? "client",
       };

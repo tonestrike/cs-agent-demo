@@ -102,6 +102,10 @@ export class ConversationSession {
     provider: string;
     modelId: string | null;
   }> = [];
+  private turnModelContext: string | null = null;
+  private turnModelMessages:
+    | Array<{ role: "user" | "assistant"; content: string }>
+    | null = null;
   private turnDecision: {
     decisionType: string;
     toolName?: string | null;
@@ -661,6 +665,8 @@ export class ConversationSession {
     this.turnToolCalls = [];
     this.turnStatusTexts = [];
     this.turnTimings = {};
+    this.turnModelMessages = null;
+    this.turnModelContext = null;
     this.canceledStreamIds.delete(streamId);
     await this.setSpeaking(true);
     let lastStatus = "";
@@ -2316,6 +2322,8 @@ export class ConversationSession {
       this.turnTimings.recentMessagesMs = preWorkMs;
     }
     const context = this.buildModelContext();
+    this.turnModelMessages = messages;
+    this.turnModelContext = context;
     try {
       this.recordModelCall("generate", model);
       this.logger.info(
@@ -4208,6 +4216,10 @@ export class ConversationSession {
       streamId: this.activeStreamId,
       messageId: this.activeMessageId,
       modelCalls: [...this.turnModelCalls],
+      modelMessages: this.turnModelMessages
+        ? [...this.turnModelMessages]
+        : null,
+      modelContext: this.turnModelContext,
       decision: this.turnDecision,
       toolCalls: [...this.turnToolCalls],
       statusTexts: [...this.turnStatusTexts],
