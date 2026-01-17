@@ -28,7 +28,11 @@ import type {
   SelectionOption,
   ToolResult,
 } from "../models/types";
-import { actionPlanSchema } from "../models/types";
+import {
+  actionPlanSchema,
+  isSingleToolCall,
+  isMultipleToolCalls,
+} from "../models/types";
 import {
   type RealtimeKitTokenPayload,
   addRealtimeKitGuestParticipant,
@@ -98,6 +102,13 @@ type SessionState = {
       | "billing"
       | "escalate";
     text: string;
+  };
+  /** Active selection state - tracks which selection type we're waiting for */
+  activeSelection?: {
+    kind: "appointment" | "slot" | "confirmation";
+    options: Array<{ id: string; label: string }>;
+    presentedAt: number;
+    workflowType: "cancel" | "reschedule";
   };
 };
 
@@ -1745,6 +1756,10 @@ export class ConversationSession {
     if (!callSessionId) {
       return null;
     }
+
+    // Determine expected selection kind from conversation state
+    const expectedKind = this.getExpectedSelectionKind();
+
     this.logger.info(
       {
         callSessionId,
@@ -1755,56 +1770,112 @@ export class ConversationSession {
           this.sessionState.conversation?.appointments.length ?? 0,
         availableSlotsCount: this.sessionState.availableSlots?.length ?? 0,
         inputText: input.text,
+        expectedSelectionKind: expectedKind,
+        conversationStatus: this.sessionState.conversation?.status ?? null,
       },
       "conversation.session.workflow.selection",
     );
+
     if (
       !this.sessionState.cancelWorkflowId &&
       !this.sessionState.rescheduleWorkflowId
     ) {
       return null;
     }
+
     const text = input.text.trim();
-    const confirmationSelection = await this.selectOption(
-      input,
-      deps,
-      "confirmation",
-      [
-        { id: "confirm", label: "Yes, confirm" },
-        { id: "decline", label: "No, do not change it" },
-      ],
-    );
-    const confirmation =
-      confirmationSelection === "confirm"
-        ? true
-        : confirmationSelection === "decline"
-          ? false
-          : this.parseConfirmation(text);
-    const appointmentIdMatch = text.match(/^appt_[\w-]+$/i);
-    const slotIdMatch = text.match(/^slot_[\w-]+$/i);
+
+    // Check for context change (user wants to abort or start over)
+    if (this.detectContextChange(text)) {
+      await this.clearActiveSelection();
+      // Let the tool calling flow handle the new intent
+      return null;
+    }
+
+    // Clear stale selections
+    if (this.isActiveSelectionStale()) {
+      await this.clearActiveSelection();
+    }
+
+    // Build options based on current state
     const appointments =
       this.sessionState.conversation?.appointments ?? ([] as const);
     const appointmentOptions = appointments.map((appointment) => ({
       id: appointment.id,
       label: this.formatAppointmentLabel(appointment),
     }));
-    const resolvedAppointmentId =
-      appointmentIdMatch?.[0] ??
-      (await this.selectOption(
-        input,
-        deps,
-        "appointment",
-        appointmentOptions,
-      )) ??
-      this.resolveAppointmentSelection(text, appointments);
     const availableSlots = this.sessionState.availableSlots ?? [];
     const slotOptions = availableSlots.map((slot) => ({
       id: slot.id,
       label: this.formatSlotLabel(slot),
     }));
-    const resolvedSlotId =
-      slotIdMatch?.[0] ??
-      (await this.selectOption(input, deps, "slot", slotOptions));
+    const confirmationOptions = [
+      { id: "confirm", label: "Yes, confirm" },
+      { id: "decline", label: "No, do not change it" },
+    ];
+
+    // Try direct ID matching first (no LLM call needed)
+    // cspell:ignore appt
+    const appointmentIdMatch = text.match(/^appt_[\w-]+$/i);
+    const slotIdMatch = text.match(/^slot_[\w-]+$/i);
+
+    // Resolve selections based on expected kind - single LLM call
+    let resolvedAppointmentId: string | null = null;
+    let resolvedSlotId: string | null = null;
+    let confirmation: boolean | null = null;
+
+    // First try direct matching without LLM
+    if (appointmentIdMatch) {
+      resolvedAppointmentId = appointmentIdMatch[0];
+    }
+    if (slotIdMatch) {
+      resolvedSlotId = slotIdMatch[0];
+    }
+    confirmation = this.parseConfirmation(text);
+
+    // Only call LLM if we haven't resolved via direct matching and we have a clear expected kind
+    if (expectedKind && !appointmentIdMatch && !slotIdMatch && confirmation === null) {
+      switch (expectedKind) {
+        case "confirmation": {
+          const confirmationSelection = await this.selectOption(
+            input,
+            deps,
+            "confirmation",
+            confirmationOptions,
+          );
+          if (confirmationSelection === "confirm") {
+            confirmation = true;
+          } else if (confirmationSelection === "decline") {
+            confirmation = false;
+          }
+          break;
+        }
+        case "appointment": {
+          if (appointmentOptions.length) {
+            resolvedAppointmentId = await this.selectOption(
+              input,
+              deps,
+              "appointment",
+              appointmentOptions,
+            );
+            if (!resolvedAppointmentId) {
+              // Fallback to text-based resolution
+              resolvedAppointmentId = this.resolveAppointmentSelection(text, appointments);
+            }
+          }
+          break;
+        }
+        case "slot": {
+          if (slotOptions.length) {
+            resolvedSlotId = await this.selectOption(input, deps, "slot", slotOptions);
+          }
+          break;
+        }
+      }
+    } else if (!expectedKind && !appointmentIdMatch && !slotIdMatch && confirmation === null) {
+      // No clear expected kind from state - fallback to text-based resolution
+      resolvedAppointmentId = this.resolveAppointmentSelection(text, appointments);
+    }
 
     if (this.sessionState.cancelWorkflowId) {
       if (resolvedAppointmentId) {
@@ -2197,6 +2268,41 @@ export class ConversationSession {
         this.emitNarratorTokens(replyText, streamId);
         return { callSessionId, replyText, actions: [] };
       }
+
+      // Handle multiple tool calls in parallel
+      if (isMultipleToolCalls(decision)) {
+        const acknowledgementText = decision.acknowledgement?.trim() || "";
+        if (acknowledgementText) {
+          this.logger.info(
+            {
+              callSessionId,
+              turnId: this.activeTurnId,
+              callCount: decision.calls.length,
+              toolNames: decision.calls.map((c) => c.toolName),
+              acknowledgementLength: acknowledgementText.length,
+            },
+            "conversation.session.tool_calls.ack",
+          );
+          this.emitNarratorTokens(acknowledgementText, streamId);
+        }
+        return await this.executeMultipleToolCalls(
+          decision,
+          input,
+          deps,
+          streamId,
+          callSessionId,
+          acknowledgementText,
+        );
+      }
+
+      // Handle single tool call (backwards compatible path)
+      if (!isSingleToolCall(decision)) {
+        // Should not reach here, but fallback for type safety
+        const replyText = "I could not interpret the request. Can you rephrase?";
+        this.emitNarratorTokens(replyText, streamId);
+        return { callSessionId, replyText, actions: [] };
+      }
+
       const acknowledgementText = decision.acknowledgement?.trim() || "";
       if (acknowledgementText) {
         this.logger.info(
@@ -3091,6 +3197,404 @@ export class ConversationSession {
     }
   }
 
+  /** Read-only tools that can be safely executed in parallel */
+  private static readonly PARALLELIZABLE_TOOLS = new Set([
+    "crm.listUpcomingAppointments",
+    "crm.getNextAppointment",
+    "crm.getAppointmentById",
+    "crm.getOpenInvoices",
+    "crm.getAvailableSlots",
+    "crm.getServicePolicy",
+  ]);
+
+  /** Maximum number of tools to execute in parallel */
+  private static readonly MAX_PARALLEL_TOOLS = 3;
+
+  /**
+   * Executes multiple tool calls in parallel and combines results for narration.
+   * Only parallelizes read-only tools; mutating tools are executed sequentially.
+   */
+  private async executeMultipleToolCalls(
+    decision: { calls: Array<{ toolName: string; arguments?: Record<string, unknown> }>; acknowledgement?: string },
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+    streamId: number,
+    callSessionId: string,
+    acknowledgementText: string,
+  ): Promise<AgentMessageOutput> {
+    const { calls } = decision;
+
+    // Limit the number of parallel calls
+    const limitedCalls = calls.slice(0, ConversationSession.MAX_PARALLEL_TOOLS);
+
+    this.logger.info(
+      {
+        callSessionId,
+        turnId: this.activeTurnId,
+        totalCalls: calls.length,
+        limitedCalls: limitedCalls.length,
+        toolNames: limitedCalls.map((c) => c.toolName),
+      },
+      "conversation.session.tool_calls.start",
+    );
+
+    // Separate parallelizable and sequential tools
+    const parallelizable = limitedCalls.filter((call) =>
+      ConversationSession.PARALLELIZABLE_TOOLS.has(call.toolName),
+    );
+    const sequential = limitedCalls.filter(
+      (call) => !ConversationSession.PARALLELIZABLE_TOOLS.has(call.toolName),
+    );
+
+    // Execute parallelizable tools in parallel
+    const parallelResults = await Promise.allSettled(
+      parallelizable.map((call) =>
+        this.executeSingleToolForMulti(call, input, deps),
+      ),
+    );
+
+    // Execute sequential/mutating tools one at a time
+    const sequentialResults: Array<{ toolName: string; result: ToolResult | null; error?: string }> = [];
+    for (const call of sequential) {
+      try {
+        const result = await this.executeSingleToolForMulti(call, input, deps);
+        sequentialResults.push(result);
+      } catch (error) {
+        sequentialResults.push({
+          toolName: call.toolName,
+          result: null,
+          error: error instanceof Error ? error.message : "unknown error",
+        });
+      }
+    }
+
+    // Combine all results
+    const allResults: Array<{ toolName: string; result: ToolResult | null; error?: string }> = [
+      ...parallelResults.map((settled, index) => {
+        if (settled.status === "fulfilled") {
+          return settled.value;
+        }
+        const call = parallelizable[index];
+        return {
+          toolName: call?.toolName ?? "unknown",
+          result: null as ToolResult | null,
+          error: settled.reason instanceof Error ? settled.reason.message : "unknown error",
+        };
+      }),
+      ...sequentialResults,
+    ];
+
+    this.logger.info(
+      {
+        callSessionId,
+        turnId: this.activeTurnId,
+        successCount: allResults.filter((r) => r.result !== null).length,
+        failureCount: allResults.filter((r) => r.result === null).length,
+        toolNames: allResults.map((r) => r.toolName),
+      },
+      "conversation.session.tool_calls.complete",
+    );
+
+    // Narrate combined results
+    return await this.narrateMultiToolResults(
+      allResults,
+      input,
+      deps,
+      streamId,
+      callSessionId,
+      acknowledgementText,
+    );
+  }
+
+  /**
+   * Executes a single tool for multi-tool flow (without narration).
+   * Returns the raw tool result for later combined narration.
+   */
+  private async executeSingleToolForMulti(
+    call: { toolName: string; arguments?: Record<string, unknown> },
+    _input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+  ): Promise<{ toolName: string; result: ToolResult | null; error?: string }> {
+    const normalizedArgs = this.normalizeToolArgs(
+      call.toolName,
+      call.arguments ?? {},
+    ) as {
+      customerId?: string;
+      appointmentId?: string;
+    };
+
+    const validation = validateToolArgs(call.toolName as never, normalizedArgs);
+    if (!validation.ok) {
+      return { toolName: call.toolName, result: null, error: validation.message };
+    }
+
+    try {
+      switch (call.toolName) {
+        case "crm.listUpcomingAppointments": {
+          const customerId =
+            this.sessionState.conversation?.verification.customerId ?? "";
+          const appointments = await listUpcomingAppointments(
+            deps.crm,
+            customerId,
+          );
+          return {
+            toolName: call.toolName,
+            result: {
+              toolName: "crm.listUpcomingAppointments" as const,
+              result: appointments.map((a) => ({
+                id: a.id,
+                customerId,
+                date: a.date,
+                timeWindow: a.timeWindow,
+                addressSummary: a.addressSummary,
+              })),
+            },
+          };
+        }
+        case "crm.getNextAppointment": {
+          const customerId =
+            this.sessionState.conversation?.verification.customerId ?? "";
+          const appointments = await listUpcomingAppointments(
+            deps.crm,
+            customerId,
+          );
+          const appointment = appointments[0] ?? null;
+          return {
+            toolName: call.toolName,
+            result: {
+              toolName: "crm.getNextAppointment" as const,
+              result: appointment
+                ? {
+                    date: appointment.date,
+                    timeWindow: appointment.timeWindow,
+                    addressSummary: appointment.addressSummary,
+                  }
+                : null,
+            },
+          };
+        }
+        case "crm.getOpenInvoices": {
+          const customerId =
+            this.sessionState.conversation?.verification.customerId ?? "";
+          const invoices = await getOpenInvoices(deps.crm, customerId);
+          const balanceCents = invoices.reduce(
+            (sum, inv) => sum + (inv.balanceCents ?? 0),
+            0,
+          );
+          const balance =
+            invoices.find((inv) => inv.balance)?.balance ??
+            (balanceCents / 100).toFixed(2);
+          const currency = invoices.find((inv) => inv.currency)?.currency;
+          return {
+            toolName: call.toolName,
+            result: {
+              toolName: "crm.getOpenInvoices" as const,
+              result: {
+                balanceCents,
+                balance,
+                currency,
+                invoiceCount: invoices.length,
+              },
+            },
+          };
+        }
+        case "crm.getServicePolicy": {
+          const topic = (normalizedArgs as { topic?: string }).topic ?? "";
+          const policyText = await getServicePolicy(deps.crm, topic);
+          return {
+            toolName: call.toolName,
+            result: {
+              toolName: "crm.getServicePolicy" as const,
+              result: { text: policyText },
+            },
+          };
+        }
+        case "crm.getAvailableSlots": {
+          const customerId =
+            this.sessionState.conversation?.verification.customerId ?? "";
+          const slots = await getAvailableSlots(deps.crm, customerId, {
+            daysAhead: 14,
+          });
+          return {
+            toolName: call.toolName,
+            result: {
+              toolName: "crm.getAvailableSlots" as const,
+              result: slots.map((s) => ({
+                date: s.date,
+                timeWindow: s.timeWindow,
+              })),
+            },
+          };
+        }
+        case "crm.getAppointmentById": {
+          const appointmentId = normalizedArgs.appointmentId ?? "";
+          const appointment = await deps.crm.getAppointmentById(appointmentId);
+          return {
+            toolName: call.toolName,
+            result: {
+              toolName: "crm.getAppointmentById" as const,
+              result: appointment
+                ? {
+                    date: appointment.date,
+                    timeWindow: appointment.timeWindow,
+                    addressSummary: appointment.addressSummary,
+                  }
+                : null,
+            },
+          };
+        }
+        default:
+          return {
+            toolName: call.toolName,
+            result: null,
+            error: `Tool ${call.toolName} not supported for parallel execution`,
+          };
+      }
+    } catch (error) {
+      return {
+        toolName: call.toolName,
+        result: null,
+        error: error instanceof Error ? error.message : "unknown error",
+      };
+    }
+  }
+
+  /**
+   * Narrates combined results from multiple tool calls.
+   */
+  private async narrateMultiToolResults(
+    results: Array<{ toolName: string; result: ToolResult | null; error?: string }>,
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+    streamId: number,
+    callSessionId: string,
+    acknowledgementText: string,
+  ): Promise<AgentMessageOutput> {
+    // Build combined context for narration
+    const successfulResults = results.filter((r) => r.result !== null);
+    const failedResults = results.filter((r) => r.result === null);
+
+    if (successfulResults.length === 0) {
+      const replyText = await this.narrateText(
+        input,
+        deps,
+        streamId,
+        "I had trouble looking that up. Could you try asking again?",
+        "Apologize and ask them to try again.",
+      );
+      return {
+        callSessionId,
+        replyText: this.joinNarration(acknowledgementText, replyText),
+        actions: [],
+      };
+    }
+
+    // Build combined tool results for narration
+    const combinedResults = successfulResults
+      .map((r) => {
+        if (!r.result) return "";
+        const resultData = r.result.result;
+        switch (r.toolName) {
+          case "crm.listUpcomingAppointments":
+          case "crm.getNextAppointment":
+            return `Appointments: ${JSON.stringify(resultData)}`;
+          case "crm.getOpenInvoices":
+            return `Billing: ${JSON.stringify(resultData)}`;
+          case "crm.getServicePolicy":
+            return `Policy: ${JSON.stringify(resultData)}`;
+          case "crm.getAvailableSlots":
+            return `Available slots: ${JSON.stringify(resultData)}`;
+          default:
+            return `${r.toolName}: ${JSON.stringify(resultData)}`;
+        }
+      })
+      .filter(Boolean)
+      .join("; ");
+
+    // Build fallback text
+    const fallbackParts: string[] = [];
+    for (const r of successfulResults) {
+      if (!r.result) continue;
+      const resultData = r.result.result;
+      switch (r.toolName) {
+        case "crm.listUpcomingAppointments": {
+          const appointments = resultData as Array<{
+            id: string;
+            date: string;
+            timeWindow: string;
+            addressSummary: string;
+          }>;
+          if (appointments.length) {
+            fallbackParts.push(
+              `You have ${appointments.length} upcoming appointment${appointments.length > 1 ? "s" : ""}.`,
+            );
+          } else {
+            fallbackParts.push("You don't have any upcoming appointments.");
+          }
+          break;
+        }
+        case "crm.getOpenInvoices": {
+          const invoices = resultData as {
+            balanceCents: number;
+            balance?: string;
+            invoiceCount?: number;
+          };
+          if (invoices.balanceCents > 0) {
+            fallbackParts.push(
+              `Your current balance is $${invoices.balance ?? (invoices.balanceCents / 100).toFixed(2)}.`,
+            );
+          } else {
+            fallbackParts.push("You're all set with no open balance.");
+          }
+          break;
+        }
+        case "crm.getServicePolicy": {
+          const policy = resultData as { text: string };
+          fallbackParts.push(policy.text);
+          break;
+        }
+      }
+    }
+
+    if (failedResults.length > 0) {
+      fallbackParts.push(
+        `I couldn't get some information right now, but here's what I found.`,
+      );
+    }
+
+    const fallbackText =
+      fallbackParts.join(" ") || "Here's what I found for you.";
+
+    // Use the first successful result's tool name for narration context
+    // We know successfulResults[0] exists since we returned early if length === 0
+    const primaryResult = successfulResults[0];
+    if (!primaryResult || !primaryResult.result) {
+      // This should not happen given the length check above, but satisfy TypeScript
+      return {
+        callSessionId,
+        replyText: fallbackText,
+        actions: [],
+      };
+    }
+    const replyText = await this.narrateToolResult(
+      primaryResult.result,
+      {
+        input,
+        deps,
+        streamId,
+        fallback: fallbackText,
+        contextHint: `Summarize these combined results naturally: ${combinedResults}`,
+        priorAcknowledgement: acknowledgementText,
+      },
+    );
+
+    return {
+      callSessionId,
+      replyText: this.joinNarration(acknowledgementText, replyText),
+      actions: [],
+    };
+  }
+
   private joinNarration(first: string, second: string): string {
     return [first, second]
       .filter(Boolean)
@@ -3107,6 +3611,85 @@ export class ConversationSession {
       return false;
     }
     return null;
+  }
+
+  /**
+   * Maps conversation status to the expected selection kind.
+   * Returns null if no selection is expected in the current state.
+   */
+  private getExpectedSelectionKind(): "appointment" | "slot" | "confirmation" | null {
+    const status = this.sessionState.conversation?.status;
+    switch (status) {
+      case "PresentingAppointments":
+        return "appointment";
+      case "PresentingSlots":
+        return "slot";
+      case "PendingCancellationConfirmation":
+      case "PendingRescheduleConfirmation":
+        return "confirmation";
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Detects if the user wants to change context or abort the current flow.
+   */
+  private detectContextChange(text: string): boolean {
+    const patterns = [
+      /\bnever ?mind\b/i,
+      /\bcancel (that|this)\b/i,
+      /\bstart over\b/i,
+      /\bforget (it|that)\b/i,
+      /\bactually,? ?(I want|let me|can we)\b/i,
+    ];
+    return patterns.some((p) => p.test(text));
+  }
+
+  /**
+   * Clears the active selection state and persists to storage.
+   */
+  private async clearActiveSelection(): Promise<void> {
+    if (!this.sessionState.activeSelection) {
+      return;
+    }
+    this.sessionState = {
+      ...this.sessionState,
+      activeSelection: undefined,
+    };
+    await this.state.storage.put("state", this.sessionState);
+  }
+
+  /**
+   * Sets the active selection state for tracking which selection we're waiting for.
+   */
+  private async setActiveSelection(
+    kind: "appointment" | "slot" | "confirmation",
+    options: Array<{ id: string; label: string }>,
+    workflowType: "cancel" | "reschedule",
+  ): Promise<void> {
+    this.sessionState = {
+      ...this.sessionState,
+      activeSelection: {
+        kind,
+        options,
+        presentedAt: Date.now(),
+        workflowType,
+      },
+    };
+    await this.state.storage.put("state", this.sessionState);
+  }
+
+  /**
+   * Checks if the active selection is stale (older than 5 minutes).
+   */
+  private isActiveSelectionStale(): boolean {
+    const selection = this.sessionState.activeSelection;
+    if (!selection) {
+      return false;
+    }
+    const STALE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+    return Date.now() - selection.presentedAt > STALE_TIMEOUT_MS;
   }
 
   private async getModelAdapter(

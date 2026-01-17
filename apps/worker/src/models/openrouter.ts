@@ -11,6 +11,7 @@ import {
   type ModelAdapter,
   agentRouteSchema,
   agentToolCallSchema,
+  agentToolCallsSchema,
 } from "./types";
 
 const MAX_NEW_TOKENS = 512;
@@ -725,40 +726,80 @@ export const createOpenRouterAdapter = (
         },
         "openrouter.tool_call.result",
       );
-      const toolCall = Array.isArray(toolCalls) ? toolCalls[0] : null;
-      if (toolCall && typeof toolCall === "object") {
-        const toolCallObject = toolCall as {
-          function?: { name?: string; arguments?: string };
-        };
-        const toolName = toolCallObject.function?.name;
-        if (toolName) {
-          const rawArgs = toolCallObject.function?.arguments ?? "{}";
-          let parsedArgs: Record<string, unknown> = {};
-          if (typeof rawArgs === "string" && rawArgs.trim()) {
-            try {
-              parsedArgs = JSON.parse(rawArgs) as Record<string, unknown>;
-            } catch (error) {
-              logger.error(
-                {
-                  error: error instanceof Error ? error.message : "unknown",
-                  rawArgs: truncate(rawArgs, 240),
-                },
-                "openrouter.tool.args.parse_failed",
-              );
-              parsedArgs = {};
+      // Parse all tool calls
+      const parsedCalls: Array<{
+        toolName: string;
+        arguments: Record<string, unknown>;
+      }> = [];
+
+      if (Array.isArray(toolCalls)) {
+        for (const toolCall of toolCalls) {
+          if (toolCall && typeof toolCall === "object") {
+            const toolCallObject = toolCall as {
+              function?: { name?: string; arguments?: string };
+            };
+            const toolName = toolCallObject.function?.name;
+            if (toolName) {
+              const rawArgs = toolCallObject.function?.arguments ?? "{}";
+              let parsedArgs: Record<string, unknown> = {};
+              if (typeof rawArgs === "string" && rawArgs.trim()) {
+                try {
+                  parsedArgs = JSON.parse(rawArgs) as Record<string, unknown>;
+                } catch (error) {
+                  logger.error(
+                    {
+                      error: error instanceof Error ? error.message : "unknown",
+                      rawArgs: truncate(rawArgs, 240),
+                    },
+                    "openrouter.tool.args.parse_failed",
+                  );
+                  parsedArgs = {};
+                }
+              }
+              parsedCalls.push({ toolName, arguments: parsedArgs });
             }
-          }
-          const validated = agentToolCallSchema.safeParse({
-            type: "tool_call",
-            toolName,
-            arguments: parsedArgs,
-            acknowledgement: extractAcknowledgement(responseToText(response)),
-          });
-          if (validated.success) {
-            return validated.data;
           }
         }
       }
+
+      const acknowledgement = extractAcknowledgement(responseToText(response));
+
+      // Handle multiple tool calls
+      if (parsedCalls.length > 1) {
+        const validated = agentToolCallsSchema.safeParse({
+          type: "tool_calls",
+          calls: parsedCalls.map((call) => ({
+            toolName: call.toolName,
+            arguments: call.arguments,
+          })),
+          acknowledgement,
+        });
+        if (validated.success) {
+          logger.info(
+            {
+              callCount: parsedCalls.length,
+              toolNames: parsedCalls.map((c) => c.toolName),
+            },
+            "openrouter.tool_calls.multiple",
+          );
+          return validated.data;
+        }
+      }
+
+      // Handle single tool call (backwards compatible)
+      const firstCall = parsedCalls[0];
+      if (parsedCalls.length === 1 && firstCall) {
+        const validated = agentToolCallSchema.safeParse({
+          type: "tool_call",
+          toolName: firstCall.toolName,
+          arguments: firstCall.arguments,
+          acknowledgement,
+        });
+        if (validated.success) {
+          return validated.data;
+        }
+      }
+
       const text = responseToText(response);
       return {
         type: "final",

@@ -874,6 +874,15 @@ export const handleAgentMessage = async (
         arguments: output.arguments ?? null,
       };
     }
+    if (output.type === "tool_calls") {
+      return {
+        type: output.type,
+        calls: output.calls.map((c) => ({
+          toolName: c.toolName,
+          arguments: c.arguments ?? null,
+        })),
+      };
+    }
     return {
       type: output.type,
       text: output.text.slice(0, 400),

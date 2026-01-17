@@ -133,6 +133,18 @@ export function RealtimeKitChatPanel({
   const [, setFinalTranscripts] = useState<Array<{ id: string; text: string }>>(
     [],
   );
+  const log = useCallback(
+    (message: string, data?: Record<string, unknown>) => {
+      // eslint-disable-next-line no-console
+      console.info("[RTK Chat]", message, {
+        sessionId,
+        customerId: customer?.id ?? null,
+        meetingReady,
+        ...data,
+      });
+    },
+    [customer?.id, meetingReady, sessionId],
+  );
 
   // Visual indicator states
   const [, setWsConnected] = useState(false);
@@ -260,18 +272,13 @@ export function RealtimeKitChatPanel({
       currentSession.sessionId === sessionId &&
       currentSession.customerId === customer.id
     ) {
-      console.log(
-        "[RTK Chat] Skipping recreation, meeting already exists for session",
-        {
-          sessionId,
-          customerId: customer.id,
-        },
-      );
+      log("meeting.reuse", { sessionId, customerId: customer.id });
       return;
     }
 
     const loadMeeting = async () => {
       setStatus("Requesting realtime token...");
+      log("token.request.start");
       const response = await fetch(
         `${getBaseUrl()}/api/conversations/${sessionId}/rtk-token`,
         { method: "POST", headers: getApiHeaders() },
@@ -288,6 +295,10 @@ export function RealtimeKitChatPanel({
       if (!sdk?.init) throw new Error("RealtimeKit SDK unavailable");
 
       setStatus("Joining realtime meeting...");
+      log("meeting.join.start", {
+        participantId: payload.participantId,
+        meetingId: payload.meetingId,
+      });
       const client = (await sdk.init({
         authToken,
         defaults: { audio: true, video: false },
@@ -305,6 +316,11 @@ export function RealtimeKitChatPanel({
       setMeeting(client);
       setMeetingReady(false);
       setStatus("RealtimeKit chat ready");
+      log("meeting.join.success", {
+        participantId: payload.participantId,
+        meetingId: payload.meetingId,
+        preset: payload.presetName ?? undefined,
+      });
     };
 
     const scheduleRetry = () => {
@@ -318,6 +334,7 @@ export function RealtimeKitChatPanel({
       const message = err instanceof Error ? err.message : "Connection failed";
       setStatus("RealtimeKit unavailable");
       setStatusError(message);
+      log("meeting.error", { error: message });
       scheduleRetry();
     };
 
@@ -347,6 +364,10 @@ export function RealtimeKitChatPanel({
         isEmitterReady(participants)
       ) {
         setMeetingReady(true);
+        log("meeting.ready", {
+          hasChat: Boolean(chat),
+          hasParticipants: Boolean(participants),
+        });
       } else {
         timers.current.uiReady = window.setTimeout(checkReady, 100);
       }
@@ -383,39 +404,36 @@ export function RealtimeKitChatPanel({
       const msg = detail && "message" in detail ? detail.message : undefined;
 
       // Log all chat events for debugging
-      console.log("[RTK Chat] chatUpdate event:", {
+      log("chat.event", {
         hasMsg: Boolean(msg),
         msgId: msg?.id,
         msgType: msg?.type,
         msgUserId: msg?.userId,
         selfUserId: meeting.self?.userId,
-        text: msg?.message?.slice(0, 30),
+        textPreview: msg?.message?.slice(0, 30),
       });
 
       // Accept both "chat" and "text" message types from RTK
       if (!msg?.id || (msg.type !== "chat" && msg.type !== "text")) {
-        console.log(
-          "[RTK Chat] Skipping: not a chat message, type:",
-          msg?.type,
-        );
+        log("chat.skip.nonchat", { type: msg?.type });
         return;
       }
       if (msg.userId !== meeting.self?.userId) {
-        console.log("[RTK Chat] Skipping: not from local user");
+        log("chat.skip.remote", { userId: msg.userId });
         return;
       }
       if (sentMessageIds.current.has(msg.id)) {
-        console.log("[RTK Chat] Skipping: duplicate message ID");
+        log("chat.skip.duplicate", { msgId: msg.id });
         return;
       }
 
       const text = msg.message?.trim();
       if (!text) {
-        console.log("[RTK Chat] Skipping: empty message");
+        log("chat.skip.empty");
         return;
       }
 
-      console.log("[RTK Chat] Sending to conversation:", text.slice(0, 50));
+      log("chat.forward", { textPreview: text.slice(0, 50) });
       sentMessageIds.current.add(msg.id);
       void sendToConversation(text, "rtk_chat");
     };
@@ -476,11 +494,16 @@ export function RealtimeKitChatPanel({
 
       if (event.isPartialTranscript) {
         setPartialTranscript(text);
+        log("transcript.partial", { textPreview: text.slice(0, 60) });
       } else {
         setPartialTranscript(null);
         setFinalTranscripts((prev) =>
           [...prev, { id: crypto.randomUUID(), text }].slice(-4),
         );
+        log("transcript.final", {
+          textPreview: text.slice(0, 120),
+          userId: event.userId ?? null,
+        });
         void sendToConversation(text, "rtk_transcript");
       }
     };
