@@ -163,21 +163,11 @@ export function RealtimeKitChatPanel({
     const cleanup = () => {
       const client = meetingRef.current;
       if (client) {
-        const chatElement = chatElementRef.current;
-        if (chatElement) {
-          chatElement.meeting =
-            undefined as unknown as typeof chatElement.meeting;
-        }
-        const micElement = micToggleRef.current;
-        if (micElement) {
-          micElement.meeting =
-            undefined as unknown as typeof micElement.meeting;
-        }
-        // Allow RTK web components to detach listeners before tearing down.
-        window.setTimeout(() => {
-          client.leave().catch(() => {});
-        }, 0);
+        // Clear refs before leaving to avoid stale references.
         meetingRef.current = null;
+        // Leave the meeting; the web components will handle their own cleanup
+        // when they detect the meeting state change or unmount.
+        client.leave().catch(() => {});
       }
       setMeeting(null);
       setMeetingReady(false);
@@ -451,9 +441,18 @@ export function RealtimeKitChatPanel({
       );
       void sendToConversation(text, "rtk_transcript");
     };
-    aiOn("transcript", handleTranscript);
+    try {
+      aiOn("transcript", handleTranscript);
+    } catch {
+      // ai module may not be fully initialized; ignore.
+      return;
+    }
     return () => {
-      aiOff("transcript", handleTranscript);
+      try {
+        aiOff("transcript", handleTranscript);
+      } catch {
+        // ai module may already be destroyed; ignore.
+      }
     };
   }, [meeting, meetingReady, sessionId, customer, sendToConversation]);
 
