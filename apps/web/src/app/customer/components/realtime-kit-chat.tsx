@@ -642,7 +642,7 @@ export function RealtimeKitChatPanel({
   }, []);
 
   return (
-    <div className="absolute inset-0">
+    <div className="relative w-full h-full">
       {/* Always render rtk-chat to prevent unmounting and focus loss */}
       {/* Key forces remount on session change to clear stale messages */}
       {meeting && (
