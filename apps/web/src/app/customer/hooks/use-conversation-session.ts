@@ -64,6 +64,9 @@ export function useConversationSession(phoneNumber: string) {
     }
   }, []);
 
+  // Ref to always access the latest sendMessage callback
+  const sendMessageRef = useRef<typeof sendMessage | null>(null);
+
   useEffect(() => {
     return () => {
       clearAutoZipTimer();
@@ -445,6 +448,9 @@ export function useConversationSession(phoneNumber: string) {
     [callSessionId, phoneNumber, ensureSocket, logEvent],
   );
 
+  // Keep ref in sync with latest sendMessage to avoid stale closures in timeouts
+  sendMessageRef.current = sendMessage;
+
   const startCall = useCallback(
     async (zip?: string) => {
       if (!phoneNumber) {
@@ -461,7 +467,8 @@ export function useConversationSession(phoneNumber: string) {
       autoZipTimerRef.current = window.setTimeout(() => {
         autoZipTimerRef.current = null;
         logEvent("chat.auto_zip", { phoneNumber });
-        void sendMessage(normalizedZip);
+        // Use ref to access the latest sendMessage with correct callSessionId
+        void sendMessageRef.current?.(normalizedZip);
       }, DELAY_MS);
     },
     [clearAutoZipTimer, logEvent, phoneNumber, sendMessage],
