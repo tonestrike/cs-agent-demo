@@ -51,7 +51,7 @@ const ensureRealtimeKitConfig = (env: Env): RealtimeKitConfig => {
     appId,
     meetingId,
     apiToken,
-    presetName: env.REALTIMEKIT_PRESET_NAME ?? null,
+    presetName: env.REALTIMEKIT_PRESET_NAME?.trim() ?? "default",
     baseUrl: baseUrl.replace(/\/$/, ""),
   };
 };
@@ -67,7 +67,7 @@ export const getRealtimeKitConfigSummary = (env: Env) => {
     accountId,
     appId,
     meetingId,
-    presetName: env.REALTIMEKIT_PRESET_NAME ?? null,
+    presetName: env.REALTIMEKIT_PRESET_NAME?.trim() ?? "default",
     baseUrl: baseUrl.replace(/\/$/, ""),
     apiTokenLength: apiToken.length,
     apiTokenFingerprint: hashToken(apiToken),
@@ -136,7 +136,9 @@ const parseRealtimeKitResponse = async (
     const errorDetail = extra ? `${errorMessage} (${extra})` : errorMessage;
     throw new Error(errorDetail);
   }
-  const result = payload.result ?? {};
+  const result =
+    (payload.result ?? (payload as { data?: Record<string, unknown> }).data) ??
+    {};
   const participantId =
     (result as { participant_id?: string }).participant_id ??
     (result as { participantId?: string }).participantId ??
@@ -198,10 +200,12 @@ export const addRealtimeKitParticipant = async (
 ): Promise<RealtimeKitTokenPayload> => {
   const config = ensureRealtimeKitConfig(env);
   const url = `${config.baseUrl}/client/v4/accounts/${config.accountId}/realtime/kit/${config.appId}/meetings/${config.meetingId}/participants`;
+  const presetName = config.presetName;
   const body = {
     name: customer.displayName,
     custom_participant_id: customer.id,
-    ...(config.presetName ? { preset_name: config.presetName } : {}),
+    presetName,
+    preset_name: presetName,
   };
   logger.info(
     {
@@ -233,10 +237,12 @@ export const addRealtimeKitGuestParticipant = async (
 ): Promise<RealtimeKitTokenPayload> => {
   const config = ensureRealtimeKitConfig(env);
   const url = `${config.baseUrl}/client/v4/accounts/${config.accountId}/realtime/kit/${config.appId}/meetings/${config.meetingId}/participants`;
+  const presetName = config.presetName;
   const body = {
     name: input.displayName,
     custom_participant_id: input.customParticipantId,
-    ...(config.presetName ? { preset_name: config.presetName } : {}),
+    presetName,
+    preset_name: presetName,
   };
   logger.info(
     {

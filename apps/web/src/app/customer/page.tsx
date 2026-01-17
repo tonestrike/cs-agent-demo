@@ -27,8 +27,12 @@ export default function CustomerPage() {
     confirmedSessionId,
     callSessionId,
     sendMessage,
-    startCall,
     resetSession,
+  } = useConversationSession(phoneNumber);
+  const {
+    callSessionId: realtimeCallSessionId,
+    startCall: startRealtimeCall,
+    resetSession: resetRealtimeSession,
   } = useConversationSession(phoneNumber);
   const [startingCall, setStartingCall] = useState(false);
 
@@ -38,23 +42,25 @@ export default function CustomerPage() {
     }
     setStartingCall(true);
     try {
-      await startCall(selectedCustomer.zipCode ?? undefined);
+      await startRealtimeCall(selectedCustomer.zipCode ?? undefined);
     } finally {
       setStartingCall(false);
     }
-  }, [selectedCustomer, startCall, startingCall]);
+  }, [selectedCustomer, startRealtimeCall, startingCall]);
 
   const handleCustomerChange = useCallback(
     (phone: string) => {
       selectCustomer(phone);
       resetSession();
+      resetRealtimeSession();
     },
-    [selectCustomer, resetSession],
+    [selectCustomer, resetSession, resetRealtimeSession],
   );
 
   const handleNewSession = useCallback(() => {
     resetSession();
-  }, [resetSession]);
+    resetRealtimeSession();
+  }, [resetSession, resetRealtimeSession]);
 
   const copyConversation = useCallback(async () => {
     const payload = { callSessionId, phoneNumber, status, messages, logs };
@@ -266,7 +272,7 @@ export default function CustomerPage() {
                 </button>
               </div>
               <RealtimeKitChatPanel
-                sessionId={callSessionId}
+                sessionId={realtimeCallSessionId}
                 customer={selectedCustomer}
               />
             </div>

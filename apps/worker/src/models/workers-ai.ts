@@ -160,6 +160,7 @@ const buildDecisionInstructions = (
     `Use this greeting only for the first turn when the caller just says hello: ${config.greeting}`,
     "Call tools when needed; otherwise respond with plain text.",
     "Do not include JSON in responses.",
+    "If you call a tool, include a short acknowledgement in the assistant response content as plain text.",
     "Keep the tone friendly, warm, and conversational.",
     ...NON_OVERRIDABLE_POLICY,
     ...buildToolGuidanceLines(config, { hideVerification }),
@@ -251,6 +252,17 @@ const buildStatusInstructions = (contextHint?: string) => {
   ]
     .filter(Boolean)
     .join("\n");
+};
+
+const extractAcknowledgement = (text: string | null | undefined) => {
+  const trimmed = text?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    return null;
+  }
+  return trimmed;
 };
 
 const selectionSchema = z.object({
@@ -428,6 +440,7 @@ export const createWorkersAiAdapter = (
             type: "tool_call",
             toolName: toolCall.name,
             arguments: toolCall.arguments ?? {},
+            acknowledgement: extractAcknowledgement(responseToText(response)),
           });
           if (validated.success) {
             return validated.data;

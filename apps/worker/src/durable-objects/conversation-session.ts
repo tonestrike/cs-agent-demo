@@ -458,12 +458,21 @@ export class ConversationSession {
     if (!customer) {
       const guestParticipantId = this.sessionState.rtkGuestParticipantId;
       if (guestParticipantId) {
-        const token = await refreshRealtimeKitToken(
-          this.env,
-          guestParticipantId,
-          this.logger,
-        );
-        return Response.json({ ok: true, ...token });
+        try {
+          const token = await refreshRealtimeKitToken(
+            this.env,
+            guestParticipantId,
+            this.logger,
+          );
+          return Response.json({ ok: true, ...token });
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "unknown";
+          this.logger.warn(
+            { error: message, participantId: guestParticipantId },
+            "conversation.session.rtk_guest_refresh_failed",
+          );
+        }
       }
       const phoneNumber = this.sessionState.lastPhoneNumber;
       const rawCustomId =
@@ -513,11 +522,21 @@ export class ConversationSession {
   ): Promise<RealtimeKitTokenPayload> {
     let token: RealtimeKitTokenPayload;
     if (customer.participantId) {
-      token = await refreshRealtimeKitToken(
-        this.env,
-        customer.participantId,
-        this.logger,
-      );
+      try {
+        token = await refreshRealtimeKitToken(
+          this.env,
+          customer.participantId,
+          this.logger,
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "unknown";
+        this.logger.warn(
+          { error: message, participantId: customer.participantId },
+          "conversation.session.rtk_refresh_failed",
+        );
+        token = await addRealtimeKitParticipant(this.env, customer, this.logger);
+      }
     } else {
       token = await addRealtimeKitParticipant(this.env, customer, this.logger);
     }
@@ -554,6 +573,15 @@ export class ConversationSession {
       firstTokenAt: null,
       firstStatusAt: null,
     };
+    this.logger.info(
+      {
+        callSessionId,
+        turnId: this.activeTurnId,
+        streamId,
+        textLength: input.text?.length ?? 0,
+      },
+      "conversation.session.turn.start",
+    );
     let fillerTimer: ReturnType<typeof setTimeout> | null = null;
     let fillerEmitted = false;
     const scheduleFiller = () => {
@@ -1911,9 +1939,6 @@ export class ConversationSession {
     const customer = await this.getCustomerContext(deps, input);
     const context = this.buildModelContext();
     const messages = await this.getRecentMessages(deps, callSessionId);
-    const acknowledgementPromise = this.shouldPreAcknowledge(input.text)
-      ? this.startTurnAcknowledgement(input, deps, streamId)
-      : null;
     try {
       const decision = await model.generate({
         text: input.text,
@@ -1923,13 +1948,28 @@ export class ConversationSession {
         messages,
       });
       if (decision.type === "final") {
-        const replyText = this.joinNarration(
-          acknowledgementPromise ? await acknowledgementPromise : "",
+        const replyText =
           decision.text.trim() ||
-            "I could not interpret the request. Can you rephrase?",
-        );
+          "I could not interpret the request. Can you rephrase?";
         this.emitNarratorTokens(replyText, streamId);
         return { callSessionId, replyText, actions: [] };
+      }
+      const acknowledgementText =
+        decision.acknowledgement?.trim() ||
+        (this.shouldPreAcknowledge(input.text)
+          ? "Got it. Give me a moment while I check."
+          : "");
+      if (acknowledgementText) {
+        this.logger.info(
+          {
+            callSessionId,
+            turnId: this.activeTurnId,
+            toolName: decision.toolName,
+            acknowledgementLength: acknowledgementText.length,
+          },
+          "conversation.session.tool_call.ack",
+        );
+        this.emitNarratorTokens(acknowledgementText, streamId);
       }
       const actionPlan = actionPlanSchema.safeParse({
         kind: "tool",
@@ -1967,13 +2007,22 @@ export class ConversationSession {
         );
         return { callSessionId, replyText, actions: [] };
       }
+      this.logger.info(
+        {
+          callSessionId,
+          turnId: this.activeTurnId,
+          toolName: actionPlan.data.toolName,
+          argKeys: Object.keys(actionPlan.data.arguments ?? {}),
+        },
+        "conversation.session.tool_call.start",
+      );
       return await this.executeToolCall(
         actionPlan.data.toolName,
         actionPlan.data.arguments ?? {},
         input,
         deps,
         streamId,
-        acknowledgementPromise,
+        acknowledgementText,
       );
     } catch (error) {
       this.logger.error(
@@ -2114,27 +2163,13 @@ export class ConversationSession {
     return { ok: true };
   }
 
-  private startTurnAcknowledgement(
-    input: AgentMessageInput,
-    deps: ReturnType<typeof createDependencies>,
-    streamId: number,
-  ): Promise<string> {
-    return this.narrateText(
-      input,
-      deps,
-      streamId,
-      "Got it. Give me a moment while I check.",
-      "Acknowledge the request briefly and say you're checking. Don't ask questions yet.",
-    );
-  }
-
   private async executeToolCall(
     toolName: string,
     args: Record<string, unknown>,
     input: AgentMessageInput,
     deps: ReturnType<typeof createDependencies>,
     streamId: number,
-    acknowledgementPromise?: Promise<string> | null,
+    acknowledgementText?: string,
   ): Promise<AgentMessageOutput> {
     const callSessionId = input.callSessionId ?? crypto.randomUUID();
     const normalizedArgs = this.normalizeToolArgs(toolName, args) as {
@@ -2144,12 +2179,11 @@ export class ConversationSession {
       summary?: string;
       customerId?: string;
     };
-    const activeAcknowledgementPromise =
-      acknowledgementPromise ??
-      this.startToolAcknowledgement(toolName, input, deps, streamId);
-    if (acknowledgementPromise) {
-      this.emitToolStatus(toolName, input, deps, streamId);
-    }
+    const toolAck = toolAcknowledgementSchema.safeParse(toolName);
+    const activeAcknowledgementText =
+      acknowledgementText?.trim() ||
+      (toolAck.success ? toolAcknowledgements[toolAck.data].fallback : "") ||
+      "Got it. Give me a moment while I check.";
 
     if (toolName === "crm.cancelAppointment") {
       const appointmentId =
@@ -2164,7 +2198,6 @@ export class ConversationSession {
         message: input.text,
       });
       if (!startResult.ok) {
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateText(
           input,
           deps,
@@ -2174,13 +2207,12 @@ export class ConversationSession {
         );
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
       const appointments = startResult.appointments ?? [];
       if (!appointmentId) {
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateToolResult(
           {
             toolName: "crm.listUpcomingAppointments",
@@ -2205,7 +2237,7 @@ export class ConversationSession {
         );
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
@@ -2228,7 +2260,6 @@ export class ConversationSession {
         };
         await this.state.storage.put("state", this.sessionState);
       }
-      const acknowledgementText = await activeAcknowledgementPromise;
       const replyText = await this.narrateText(
         input,
         deps,
@@ -2238,7 +2269,7 @@ export class ConversationSession {
       );
       return {
         callSessionId,
-        replyText: this.joinNarration(acknowledgementText, replyText),
+        replyText: this.joinNarration(activeAcknowledgementText, replyText),
         actions: [],
       };
     }
@@ -2260,7 +2291,6 @@ export class ConversationSession {
         message: input.text,
       });
       if (!startResult.ok) {
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateText(
           input,
           deps,
@@ -2270,13 +2300,12 @@ export class ConversationSession {
         );
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
       const appointments = startResult.appointments ?? [];
       if (!appointmentId) {
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateToolResult(
           {
             toolName: "crm.listUpcomingAppointments",
@@ -2317,7 +2346,7 @@ export class ConversationSession {
         await this.state.storage.put("state", this.sessionState);
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
@@ -2352,7 +2381,6 @@ export class ConversationSession {
           ),
         };
         await this.state.storage.put("state", this.sessionState);
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateToolResult(
           {
             toolName: "crm.getAvailableSlots",
@@ -2374,7 +2402,7 @@ export class ConversationSession {
         );
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
@@ -2398,7 +2426,6 @@ export class ConversationSession {
         ),
       };
       await this.state.storage.put("state", this.sessionState);
-      const acknowledgementText = await activeAcknowledgementPromise;
       const replyText = await this.narrateText(
         input,
         deps,
@@ -2408,14 +2435,13 @@ export class ConversationSession {
       );
       return {
         callSessionId,
-        replyText: this.joinNarration(acknowledgementText, replyText),
+        replyText: this.joinNarration(activeAcknowledgementText, replyText),
         actions: [],
       };
     }
 
     const validation = validateToolArgs(toolName as never, normalizedArgs);
     if (!validation.ok) {
-      const acknowledgementText = await activeAcknowledgementPromise;
       const replyText = await this.narrateText(
         input,
         deps,
@@ -2425,7 +2451,7 @@ export class ConversationSession {
       );
       return {
         callSessionId,
-        replyText: this.joinNarration(acknowledgementText, replyText),
+        replyText: this.joinNarration(activeAcknowledgementText, replyText),
         actions: [],
       };
     }
@@ -2452,7 +2478,6 @@ export class ConversationSession {
           input.phoneNumber,
           appointments,
         );
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateToolResult(
           {
             toolName: "crm.listUpcomingAppointments",
@@ -2491,7 +2516,7 @@ export class ConversationSession {
         await this.state.storage.put("state", this.sessionState);
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
@@ -2502,7 +2527,6 @@ export class ConversationSession {
           this.sessionState.conversation?.verification.customerId ??
           "";
         const appointment = await deps.crm.getNextAppointment(customerId);
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateToolResult(
           {
             toolName: "crm.getNextAppointment",
@@ -2536,7 +2560,7 @@ export class ConversationSession {
         );
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
@@ -2544,7 +2568,6 @@ export class ConversationSession {
         const appointmentId = (validation.data as { appointmentId: string })
           .appointmentId;
         const appointment = await deps.crm.getAppointmentById(appointmentId);
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateToolResult(
           {
             toolName: "crm.getAppointmentById",
@@ -2579,7 +2602,7 @@ export class ConversationSession {
         );
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
@@ -2596,7 +2619,6 @@ export class ConversationSession {
           invoices.find((invoice) => invoice.balance)?.balance ??
           (balanceCents / 100).toFixed(2);
         const currency = invoices.find((invoice) => invoice.currency)?.currency;
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateToolResult(
           {
             toolName: "crm.getOpenInvoices",
@@ -2619,7 +2641,7 @@ export class ConversationSession {
         );
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
@@ -2645,7 +2667,6 @@ export class ConversationSession {
           })),
         };
         await this.state.storage.put("state", this.sessionState);
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateToolResult(
           {
             toolName: "crm.getAvailableSlots",
@@ -2667,14 +2688,13 @@ export class ConversationSession {
         );
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
       case "crm.getServicePolicy": {
         const topic = (validation.data as { topic: string }).topic;
         const policyText = await getServicePolicy(deps.crm, topic);
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateToolResult(
           {
             toolName: "crm.getServicePolicy",
@@ -2690,7 +2710,7 @@ export class ConversationSession {
         );
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
@@ -2710,7 +2730,6 @@ export class ConversationSession {
             this.sessionState.conversation?.verification.customerId ??
             undefined,
         });
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = result.ok
           ? await this.narrateToolResult(
               {
@@ -2735,7 +2754,7 @@ export class ConversationSession {
             );
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
@@ -2754,7 +2773,6 @@ export class ConversationSession {
           notes?: string;
           pestType?: string;
         });
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateToolResult(
           {
             toolName: "crm.createAppointment",
@@ -2783,12 +2801,11 @@ export class ConversationSession {
         }
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
       case "agent.fallback": {
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateText(
           input,
           deps,
@@ -2798,12 +2815,11 @@ export class ConversationSession {
         );
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
       default: {
-        const acknowledgementText = await activeAcknowledgementPromise;
         const replyText = await this.narrateText(
           input,
           deps,
@@ -2813,63 +2829,10 @@ export class ConversationSession {
         );
         return {
           callSessionId,
-          replyText: this.joinNarration(acknowledgementText, replyText),
+          replyText: this.joinNarration(activeAcknowledgementText, replyText),
           actions: [],
         };
       }
-    }
-  }
-
-  private startToolAcknowledgement(
-    toolName: string,
-    input: AgentMessageInput,
-    deps: ReturnType<typeof createDependencies>,
-    streamId: number,
-  ): Promise<string> {
-    const parsed = toolAcknowledgementSchema.safeParse(toolName);
-    if (!parsed.success) {
-      return Promise.resolve("");
-    }
-    const acknowledgement = toolAcknowledgements[parsed.data];
-    if (acknowledgement.status) {
-      void this.emitNarratorStatus(
-        input,
-        deps,
-        streamId,
-        acknowledgement.status,
-        acknowledgement.contextHint,
-        toolName,
-      );
-    }
-    return this.narrateText(
-      input,
-      deps,
-      streamId,
-      acknowledgement.fallback,
-      acknowledgement.contextHint,
-    );
-  }
-
-  private emitToolStatus(
-    toolName: string,
-    input: AgentMessageInput,
-    deps: ReturnType<typeof createDependencies>,
-    streamId: number,
-  ): void {
-    const parsed = toolAcknowledgementSchema.safeParse(toolName);
-    if (!parsed.success) {
-      return;
-    }
-    const acknowledgement = toolAcknowledgements[parsed.data];
-    if (acknowledgement.status) {
-      void this.emitNarratorStatus(
-        input,
-        deps,
-        streamId,
-        acknowledgement.status,
-        acknowledgement.contextHint,
-        toolName,
-      );
     }
   }
 

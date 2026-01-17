@@ -23,6 +23,7 @@ export const agentToolCallSchema = z.object({
   type: z.literal("tool_call"),
   toolName: agentToolNameSchema,
   arguments: z.record(z.unknown()).optional(),
+  acknowledgement: z.string().optional(),
 });
 
 export const agentFinalSchema = z.object({
