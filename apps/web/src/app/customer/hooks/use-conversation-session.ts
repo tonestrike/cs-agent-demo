@@ -4,18 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
 import type { ChatMessage, ClientLog } from "../types";
 
-const INITIAL_MESSAGE: ChatMessage = {
-  id: "intro",
-  role: "agent",
-  text: "Hi! This is PestCall. How can I help today?",
-};
-
 export function useConversationSession(phoneNumber: string) {
   const [callSessionId, setCallSessionId] = useState<string | null>(null);
   const [confirmedSessionId, setConfirmedSessionId] = useState<string | null>(
     null,
   );
-  const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [status, setStatus] = useState("New session");
   const [logs, setLogs] = useState<ClientLog[]>([]);
 
@@ -191,7 +185,7 @@ export function useConversationSession(phoneNumber: string) {
     setCallSessionId(null);
     setConfirmedSessionId(null);
     hasDeltaRef.current = false;
-    setMessages([INITIAL_MESSAGE]);
+    setMessages([]);
     setStatus("New session");
     socketRef.current?.close();
     socketRef.current = null;
