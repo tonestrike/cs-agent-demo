@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
 import type { Customer } from "../types";
@@ -11,8 +11,14 @@ type RealtimeKitClient = {
   self?: { userId?: string };
   chat?: RealtimeKitChat;
   ai?: {
-    on?: (event: "transcript", handler: (event: RealtimeKitTranscriptEvent) => void) => void;
-    off?: (event: "transcript", handler: (event: RealtimeKitTranscriptEvent) => void) => void;
+    on?: (
+      event: "transcript",
+      handler: (event: RealtimeKitTranscriptEvent) => void,
+    ) => void;
+    off?: (
+      event: "transcript",
+      handler: (event: RealtimeKitTranscriptEvent) => void,
+    ) => void;
   };
 };
 
@@ -98,34 +104,39 @@ export function RealtimeKitChatPanel({
   const [partialTranscript, setPartialTranscript] = useState<string | null>(
     null,
   );
-  const [finalTranscripts, setFinalTranscripts] = useState<string[]>([]);
+  const [finalTranscripts, setFinalTranscripts] = useState<
+    Array<{ id: string; text: string }>
+  >([]);
 
-  const sendToConversation = async (text: string, source: string) => {
-    if (!sessionId || !customer) {
-      return;
-    }
-    const base = apiBaseUrl || window.location.origin;
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-    };
-    if (demoAuthToken) {
-      headers["x-demo-auth"] = demoAuthToken;
-    }
-    try {
-      await fetch(`${base}/api/conversations/${sessionId}/message`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          phoneNumber: customer.phoneE164,
-          text,
-          callSessionId: sessionId,
-          source,
-        }),
-      });
-    } catch (error) {
-      console.error("rtk message send failed", error);
-    }
-  };
+  const sendToConversation = useCallback(
+    async (text: string, source: string) => {
+      if (!sessionId || !customer) {
+        return;
+      }
+      const base = apiBaseUrl || window.location.origin;
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+      };
+      if (demoAuthToken) {
+        headers["x-demo-auth"] = demoAuthToken;
+      }
+      try {
+        await fetch(`${base}/api/conversations/${sessionId}/message`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            phoneNumber: customer.phoneE164,
+            text,
+            callSessionId: sessionId,
+            source,
+          }),
+        });
+      } catch (error) {
+        console.error("rtk message send failed", error);
+      }
+    },
+    [customer, sessionId],
+  );
 
   useEffect(() => {
     ttsEnabledRef.current = enableTts;
@@ -270,14 +281,16 @@ export function RealtimeKitChatPanel({
     return () => {
       chat.removeListener("chatUpdate", handleChatUpdate);
     };
-  }, [meeting, sessionId, customer]);
+  }, [meeting, sessionId, customer, sendToConversation]);
 
   useEffect(() => {
     if (!meeting || !sessionId || !customer) {
       return;
     }
-    const ai = (meeting as { ai?: { on?: Function; off?: Function } }).ai;
-    if (!ai?.on || !ai?.off) {
+    const ai = meeting.ai;
+    const aiOn = ai?.on;
+    const aiOff = ai?.off;
+    if (!aiOn || !aiOff) {
       return;
     }
     const localUserId = meeting.self?.userId;
@@ -296,14 +309,16 @@ export function RealtimeKitChatPanel({
         return;
       }
       setPartialTranscript(null);
-      setFinalTranscripts((prev) => [...prev, text].slice(-4));
+      setFinalTranscripts((prev) =>
+        [...prev, { id: crypto.randomUUID(), text }].slice(-4),
+      );
       void sendToConversation(text, "rtk_transcript");
     };
-    ai.on("transcript", handleTranscript);
+    aiOn("transcript", handleTranscript);
     return () => {
-      ai.off("transcript", handleTranscript);
+      aiOff("transcript", handleTranscript);
     };
-  }, [meeting, sessionId, customer]);
+  }, [meeting, sessionId, customer, sendToConversation]);
 
   useEffect(() => {
     if (!sessionId || !customer) {
@@ -382,9 +397,7 @@ export function RealtimeKitChatPanel({
       <div className="flex items-center justify-between border-b border-ink-100 px-4 py-3">
         <div className="flex items-center gap-3">
           <h3 className="text-sm font-semibold text-ink">RealtimeKit chat</h3>
-          {meeting && (
-            <rtk-mic-toggle ref={micToggleRef} size="sm" />
-          )}
+          {meeting && <rtk-mic-toggle ref={micToggleRef} size="sm" />}
         </div>
         <span className="text-xs text-ink/70" title={status.error ?? undefined}>
           {status.status}
@@ -394,13 +407,15 @@ export function RealtimeKitChatPanel({
         <div className="border-b border-ink-100 bg-sand-50 px-4 py-2 text-xs text-ink-600">
           {finalTranscripts.length > 0 && (
             <div className="space-y-1">
-              {finalTranscripts.map((line, index) => (
-                <p key={`${line}-${index}`}>You: {line}</p>
+              {finalTranscripts.map((line) => (
+                <p key={line.id}>You: {line.text}</p>
               ))}
             </div>
           )}
           {partialTranscript && (
-            <p className="italic text-ink-500">Listening… {partialTranscript}</p>
+            <p className="italic text-ink-500">
+              Listening… {partialTranscript}
+            </p>
           )}
         </div>
       )}

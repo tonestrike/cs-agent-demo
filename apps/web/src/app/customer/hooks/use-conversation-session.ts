@@ -125,22 +125,20 @@ export function useConversationSession(phoneNumber: string) {
     (
       turnId: number,
       sessionId: string,
-      updater: (
-        metric: {
-          turnId: number;
-          sessionId: string;
-          userText: string;
-          userTextLength: number;
-          startedAt: number;
-          firstTokenAt: number | null;
-          firstStatusAt: number | null;
-          finalAt: number | null;
-          firstTokenMs: number | null;
-          firstStatusMs: number | null;
-          totalMs: number | null;
-          statusTexts: string[];
-        },
-      ) => void,
+      updater: (metric: {
+        turnId: number;
+        sessionId: string;
+        userText: string;
+        userTextLength: number;
+        startedAt: number;
+        firstTokenAt: number | null;
+        firstStatusAt: number | null;
+        finalAt: number | null;
+        firstTokenMs: number | null;
+        firstStatusMs: number | null;
+        totalMs: number | null;
+        statusTexts: string[];
+      }) => void,
     ) => {
       const metric = ensureTurnMetric(turnId, sessionId);
       updater(metric);
@@ -343,7 +341,7 @@ export function useConversationSession(phoneNumber: string) {
         });
       });
     },
-    [buildWsUrl, logEvent],
+    [buildWsUrl, logEvent, updateTurnMetric],
   );
 
   const resetSession = useCallback(() => {

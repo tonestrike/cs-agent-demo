@@ -5,14 +5,14 @@ declare global {
     interface IntrinsicElements {
       "rtk-chat": HTMLAttributes<HTMLElement> &
         RefAttributes<HTMLElement> & {
-        meeting?: unknown;
-        style?: CSSProperties;
-      };
+          meeting?: unknown;
+          style?: CSSProperties;
+        };
       "rtk-mic-toggle": HTMLAttributes<HTMLElement> &
         RefAttributes<HTMLElement> & {
-        meeting?: unknown;
-        size?: string;
-      };
+          meeting?: unknown;
+          size?: string;
+        };
     }
   }
 }
