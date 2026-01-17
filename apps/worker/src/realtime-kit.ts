@@ -91,7 +91,10 @@ const parseRealtimeKitResponse = async (
       "RealtimeKit error";
     const extra =
       payload?.errors && payload.errors.length > 1
-        ? payload.errors.map((entry) => entry.message).filter(Boolean).join("; ")
+        ? payload.errors
+            .map((entry) => entry.message)
+            .filter(Boolean)
+            .join("; ")
         : null;
     const errorDetail = extra ? `${errorMessage} (${extra})` : errorMessage;
     throw new Error(errorDetail);
