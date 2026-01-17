@@ -1066,6 +1066,11 @@ export class ConversationSession {
         message: "Customer verification is required before cancelling.",
       };
     }
+    // Emit status immediately to give user feedback while we fetch data
+    this.emitEvent({
+      type: "status",
+      text: "Sure - I'm pulling your upcoming appointments now so we can pick the right one to cancel.",
+    });
     const instance = await deps.workflows.cancel.create({
       params: {
         callSessionId,
@@ -1091,10 +1096,6 @@ export class ConversationSession {
       availableSlots: undefined,
     };
     await this.state.storage.put("state", this.sessionState);
-    this.emitEvent({
-      type: "status",
-      text: "Sure - I'm pulling your upcoming appointments now so we can pick the right one to cancel.",
-    });
     await this.syncConversationState(callSessionId, deps);
     return { ok: true, message: instance.id, appointments };
   }
