@@ -4,8 +4,8 @@
  * Manages WebSocket lifecycle, message parsing, and connection state.
  */
 
-import type { ClientMessage, Logger } from "./types";
 import type { EventEmitter } from "./events";
+import type { ClientMessage, Logger } from "./types";
 
 /**
  * Message handler callback type.
@@ -21,10 +21,16 @@ export type MessageHandler = (message: ClientMessage) => Promise<void>;
  * - Connection lifecycle management
  * - Barge-in handling
  */
+/**
+ * Connection handler callback type (called when a new WebSocket connects).
+ */
+export type ConnectHandler = () => Promise<void>;
+
 export class ConnectionManager {
   private logger: Logger;
   private events: EventEmitter;
   private messageHandler: MessageHandler | null = null;
+  private connectHandler: ConnectHandler | null = null;
   private activeConnections = new Map<WebSocket, { id: string }>();
   private isSpeaking = false;
   private lastBargeInAt = 0;
@@ -39,6 +45,13 @@ export class ConnectionManager {
    */
   setMessageHandler(handler: MessageHandler): void {
     this.messageHandler = handler;
+  }
+
+  /**
+   * Set the connect handler (called when a WebSocket connects).
+   */
+  setConnectHandler(handler: ConnectHandler): void {
+    this.connectHandler = handler;
   }
 
   /**
@@ -88,6 +101,19 @@ export class ConnectionManager {
       );
       this.handleClose(ws, connectionId);
     });
+
+    // Call connect handler (e.g., to send greeting)
+    if (this.connectHandler) {
+      this.connectHandler().catch((error) => {
+        this.logger.error(
+          {
+            connectionId,
+            error: error instanceof Error ? error.message : "unknown",
+          },
+          "connection.connect_handler_error",
+        );
+      });
+    }
   }
 
   /**

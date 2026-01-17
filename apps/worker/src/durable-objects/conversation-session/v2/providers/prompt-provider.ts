@@ -86,10 +86,16 @@ function buildWorkflowContext(state: SessionState): string | null {
  * });
  * ```
  */
-export function createPromptProvider(config: PromptProviderConfig): PromptProvider {
+export function createPromptProvider(
+  config: PromptProviderConfig,
+): PromptProvider {
   const { agentConfig } = config;
 
   return {
+    getGreeting: (): string => {
+      return agentConfig.greeting;
+    },
+
     buildSystemPrompt: (state: SessionState): string => {
       const verified = isVerified(state);
       const activeWorkflow = hasActiveWorkflow(state);
@@ -153,6 +159,7 @@ export function createPromptProvider(config: PromptProviderConfig): PromptProvid
  */
 export function createMinimalPromptProvider(): PromptProvider {
   return {
+    getGreeting: () => "Hello, how can I help you?",
     buildSystemPrompt: () => "You are a helpful assistant.",
   };
 }
@@ -162,8 +169,10 @@ export function createMinimalPromptProvider(): PromptProvider {
  */
 export function createCustomPromptProvider(
   builder: (state: SessionState) => string,
+  greeting = "Hello, how can I help you?",
 ): PromptProvider {
   return {
+    getGreeting: () => greeting,
     buildSystemPrompt: builder,
   };
 }

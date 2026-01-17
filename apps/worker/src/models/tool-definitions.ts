@@ -23,6 +23,8 @@ type ToolDefinition = {
   inputSchema: z.ZodTypeAny;
   outputSchema: z.ZodTypeAny;
   missingArgsMessage: string;
+  /** Brief message to show while tool is executing (e.g., "Looking up your appointments...") */
+  acknowledgement?: string;
   /** Tool only available after customer account is verified */
   requiresVerification?: boolean;
   /** Tool only available when a workflow is active (e.g., selecting from a list) */
@@ -42,6 +44,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     inputSchema: z.object({ phoneE164: z.string().optional() }),
     outputSchema: customerMatchResultSchema,
     missingArgsMessage: "A phone number is required to look up the account.",
+    acknowledgement: "Got it—pulling up your account now.",
   },
   "crm.lookupCustomerByNameAndZip": {
     description: "Look up a customer by full name and ZIP code.",
@@ -52,6 +55,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: customerMatchResultSchema,
     missingArgsMessage:
       "Full name and a 5-digit ZIP code are required to look up the account.",
+    acknowledgement: "Thanks—checking your account details now.",
   },
   "crm.lookupCustomerByEmail": {
     description: "Look up a customer by email address.",
@@ -59,6 +63,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: customerMatchResultSchema,
     missingArgsMessage:
       "A valid email address is required to look up the account.",
+    acknowledgement: "On it—searching for your account by email.",
   },
   "crm.verifyAccount": {
     description: "Verify a customer account with ZIP code.",
@@ -69,6 +74,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: verifyAccountResultSchema,
     missingArgsMessage:
       "Please provide a 5-digit ZIP code to verify the account.",
+    acknowledgement: "Thanks—verifying your account now.",
   },
   "crm.getNextAppointment": {
     description: "Fetch the next scheduled appointment.",
@@ -76,6 +82,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: appointmentResultSchema,
     missingArgsMessage: "Customer ID is required to load appointments.",
     requiresVerification: true,
+    acknowledgement: "Pulling up your next appointment...",
   },
   "crm.listUpcomingAppointments": {
     description: "List upcoming appointments for a customer.",
@@ -86,6 +93,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: appointmentListResultSchema,
     missingArgsMessage: "Customer ID is required to list appointments.",
     requiresVerification: true,
+    acknowledgement: "Let me list your upcoming appointments.",
   },
   "crm.getAppointmentById": {
     description: "Fetch a specific appointment by ID.",
@@ -93,6 +101,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: appointmentResultSchema,
     missingArgsMessage: "Appointment ID is required to load that appointment.",
     requiresVerification: true,
+    acknowledgement: "Checking that appointment now.",
   },
   "crm.getOpenInvoices": {
     description: "Fetch open invoices for a customer.",
@@ -100,6 +109,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: invoicesSummaryResultSchema,
     missingArgsMessage: "Customer ID is required to look up invoices.",
     requiresVerification: true,
+    acknowledgement: "Reviewing your invoices now.",
   },
   "crm.getAvailableSlots": {
     description: "Fetch available appointment slots for a customer.",
@@ -114,6 +124,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: availableSlotListResultSchema,
     missingArgsMessage: "Customer ID is required to look up available slots.",
     requiresVerification: true,
+    acknowledgement: "Looking up available time windows for you.",
   },
   "crm.rescheduleAppointment": {
     description: "Reschedule an appointment to a chosen slot.",
@@ -125,6 +136,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     missingArgsMessage:
       "Which appointment should I reschedule, and which time works best? If you have multiple appointments, I can list them.",
     requiresVerification: true,
+    acknowledgement: "Got it—rescheduling that appointment now.",
   },
   "crm.cancelAppointment": {
     description: "Cancel a scheduled appointment.",
@@ -135,6 +147,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     missingArgsMessage:
       "Which appointment should I cancel? If you have multiple appointments, I can list them.",
     requiresVerification: true,
+    acknowledgement: "Understood—cancelling that appointment.",
   },
   "crm.createAppointment": {
     description: "Create a new appointment for a customer.",
@@ -148,12 +161,14 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     missingArgsMessage:
       "Customer ID and preferred window are required to create an appointment.",
     requiresVerification: true,
+    acknowledgement: "I'll schedule that appointment now.",
   },
   "crm.getServicePolicy": {
     description: "Fetch a service policy by topic.",
     inputSchema: z.object({ topic: z.string().min(1) }),
     outputSchema: servicePolicyResultSchema,
     missingArgsMessage: "A policy topic is required.",
+    acknowledgement: "Checking that policy for you.",
   },
   "crm.escalate": {
     description: "Escalate a request and create a ticket.",
@@ -165,6 +180,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: crmEscalateResultSchema,
     missingArgsMessage: "Escalation details are required.",
     requiresVerification: true,
+    acknowledgement: "I'll connect you with a specialist to help.",
   },
   "agent.escalate": {
     description: "Escalate to a human agent.",
@@ -175,6 +191,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     }),
     outputSchema: escalateResultSchema,
     missingArgsMessage: "Escalation details are required.",
+    acknowledgement: "I'll bring in a specialist to assist.",
   },
   "agent.fallback": {
     description: "Fallback tool for out-of-scope requests.",

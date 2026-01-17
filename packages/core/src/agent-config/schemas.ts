@@ -86,7 +86,9 @@ export const agentPromptConfigSchema = z.object({
   greeting: z
     .string()
     .min(1)
-    .default("Hey there — thanks for calling PestCall. How can I help today?"),
+    .default(
+      "Hi, thank you for calling PestCall! To get started, can I get your 5-digit ZIP code to verify your account?",
+    ),
   scopeMessage: z
     .string()
     .min(1)

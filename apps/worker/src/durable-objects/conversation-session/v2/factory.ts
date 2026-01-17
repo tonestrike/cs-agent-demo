@@ -11,7 +11,7 @@ import type { createDependencies } from "../../../context";
 import type { Logger } from "../../../logger";
 import { createPromptProvider } from "./providers/prompt-provider";
 import { createToolProvider } from "./providers/tool-provider";
-import { ConversationSessionV2, SessionBuilder } from "./session";
+import { type ConversationSessionV2, SessionBuilder } from "./session";
 
 /**
  * Configuration for creating a v2 session.
@@ -54,7 +54,9 @@ export type SessionFactoryConfig = {
  * const response = await session.fetch(request);
  * ```
  */
-export function createSession(config: SessionFactoryConfig): ConversationSessionV2 {
+export function createSession(
+  config: SessionFactoryConfig,
+): ConversationSessionV2 {
   const {
     durableState,
     ai,
@@ -96,7 +98,9 @@ export function createTestSession(
   logger: Logger,
 ): ConversationSessionV2 {
   const { createEmptyToolProvider } = require("./providers/tool-provider");
-  const { createMinimalPromptProvider } = require("./providers/prompt-provider");
+  const {
+    createMinimalPromptProvider,
+  } = require("./providers/prompt-provider");
 
   return SessionBuilder.create(durableState)
     .withLogger(logger)

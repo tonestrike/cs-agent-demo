@@ -35,8 +35,8 @@ name = "CONVERSATION_HUB"
 class_name = "ConversationHub"
 
 [[durable_objects.bindings]]
-name = "CONVERSATION_SESSION"
-class_name = "ConversationSession"
+name = "CONVERSATION_SESSION_V2"
+class_name = "ConversationSessionV2DO"
 
 [[workflows]]
 name = "pestcall-reschedule"
@@ -62,8 +62,12 @@ tag = "v2"
 new_classes = ["ConversationHub"]
 
 [[migrations]]
-tag = "v3"
-new_classes = ["ConversationSession"]
+tag = "v4"
+new_classes = ["ConversationSessionV2DO"]
+
+[[migrations]]
+tag = "v5"
+deleted_classes = ["ConversationSession"]
 
 [observability]
 

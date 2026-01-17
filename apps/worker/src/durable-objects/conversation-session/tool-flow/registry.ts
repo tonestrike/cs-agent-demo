@@ -15,6 +15,7 @@ import { handleGetAvailableSlots } from "./handlers/get-available-slots";
 import { handleGetInvoices } from "./handlers/get-invoices";
 import { handleListAppointments } from "./handlers/list-appointments";
 import { handleGetServicePolicy } from "./handlers/service-policy";
+import { handleVerifyAccount } from "./handlers/verify-account";
 import type { ToolHandler, ToolHandlerRegistry } from "./types";
 
 /**
@@ -22,6 +23,7 @@ import type { ToolHandler, ToolHandlerRegistry } from "./types";
  * Each handler receives validated, typed args.
  */
 export const toolHandlerRegistry: ToolHandlerRegistry = {
+  "crm.verifyAccount": handleVerifyAccount,
   "crm.listUpcomingAppointments": handleListAppointments,
   "crm.getNextAppointment": handleGetNextAppointment,
   "crm.getAppointmentById": handleGetAppointmentById,

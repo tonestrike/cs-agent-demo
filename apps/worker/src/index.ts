@@ -10,7 +10,7 @@ import { router } from "./router";
 export { PestCallAgent } from "./agents/pestcall";
 export { CancelWorkflow } from "./workflows/cancel";
 export { ConversationHub } from "./durable-objects/conversation-hub";
-export { ConversationSession } from "./durable-objects/conversation-session";
+export { ConversationSessionV2DO } from "./durable-objects/conversation-session/v2";
 export { RescheduleWorkflow } from "./workflows/reschedule";
 export { VerificationWorkflow } from "./workflows/verification";
 
@@ -54,16 +54,17 @@ const handler = new RPCHandler(router, {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    // Conversation Session v2 routes (supports /api/conversations and /api/v2/conversations)
     const conversationMatch = url.pathname.match(
-      /^\/api\/conversations\/([^/]+)\/(socket|message|resync|rtk-token|summary|debug)$/,
+      /^\/api\/(?:v2\/)?conversations\/([^/]+)\/(socket|message|resync|debug|rtk-token|summary)$/,
     );
     if (conversationMatch) {
       if (request.method === "OPTIONS") {
         return new Response(null, { status: 204, headers: corsHeaders });
       }
-      if (!env.CONVERSATION_SESSION) {
+      if (!env.CONVERSATION_SESSION_V2) {
         return withCors(
-          new Response("Conversation session not configured", {
+          new Response("Conversation session v2 not configured", {
             status: 500,
           }),
         );
@@ -83,12 +84,12 @@ export default {
           new Response("Conversation id required", { status: 400 }),
         );
       }
-      const id = env.CONVERSATION_SESSION.idFromName(conversationId);
-      const stub = env.CONVERSATION_SESSION.get(id);
+      const id = env.CONVERSATION_SESSION_V2.idFromName(conversationId);
+      const stub = env.CONVERSATION_SESSION_V2.get(id);
       if (action === "socket") {
         return stub.fetch(request);
       }
-      const target = `https://conversation-session/${action}?callSessionId=${conversationId}`;
+      const target = `https://conversation-session-v2/${action}?callSessionId=${conversationId}`;
       try {
         const response = await stub.fetch(new Request(target, request));
         return withCors(response);
@@ -96,7 +97,7 @@ export default {
         const logger = createLogger(env);
         logger.error(
           { error: error instanceof Error ? error.message : "unknown", action },
-          "conversation.session.fetch.error",
+          "conversation.session.v2.fetch.error",
         );
         return withCors(
           Response.json({ error: "Internal server error" }, { status: 500 }),

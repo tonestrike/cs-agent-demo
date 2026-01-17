@@ -81,8 +81,18 @@ export type SessionEvent = {
 export type ClientMessage =
   | { type: "barge_in" }
   | { type: "resync"; lastEventId?: number }
-  | { type: "message"; text: string; phoneNumber?: string; callSessionId?: string }
-  | { type: "final_transcript"; text: string; phoneNumber?: string; callSessionId?: string };
+  | {
+      type: "message";
+      text: string;
+      phoneNumber?: string;
+      callSessionId?: string;
+    }
+  | {
+      type: "final_transcript";
+      text: string;
+      phoneNumber?: string;
+      callSessionId?: string;
+    };
 
 /**
  * Configuration for the session.
@@ -129,6 +139,8 @@ export type ToolDefinition = {
     properties: Record<string, { type: string; description?: string }>;
     required: string[];
   };
+  /** Optional acknowledgement to stream while the tool runs */
+  acknowledgement?: string;
 };
 
 /**
@@ -173,6 +185,8 @@ export type ToolProvider = {
 export type PromptProvider = {
   /** Build system instructions based on current state */
   buildSystemPrompt: (state: SessionState) => string;
+  /** Get the initial greeting message */
+  getGreeting: () => string;
 };
 
 /**

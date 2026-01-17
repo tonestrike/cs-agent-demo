@@ -6,11 +6,7 @@
  */
 
 import type { DurableObjectState } from "@cloudflare/workers-types";
-import {
-  type Logger,
-  type SessionState,
-  initialSessionState,
-} from "./types";
+import { type Logger, type SessionState, initialSessionState } from "./types";
 
 /** Storage key for session state */
 const STATE_KEY = "session_state";
@@ -41,7 +37,8 @@ export class StateManager {
    */
   async load(): Promise<SessionState> {
     try {
-      const stored = await this.durableState.storage.get<SessionState>(STATE_KEY);
+      const stored =
+        await this.durableState.storage.get<SessionState>(STATE_KEY);
       if (stored) {
         this.state = stored;
         this.logger.debug({ hasState: true }, "state.loaded");
@@ -69,7 +66,9 @@ export class StateManager {
   /**
    * Update session metadata (phone, callSessionId, etc.).
    */
-  async updateMeta(updates: Partial<Omit<SessionState, "domainState">>): Promise<void> {
+  async updateMeta(
+    updates: Partial<Omit<SessionState, "domainState">>,
+  ): Promise<void> {
     this.state = {
       ...this.state,
       ...updates,

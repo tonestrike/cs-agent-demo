@@ -49,7 +49,11 @@ export { createEventEmitter, EventEmitter } from "./events";
 export { createConnectionManager, ConnectionManager } from "./connection";
 
 // Factory exports
-export { createSession, createTestSession, type SessionFactoryConfig } from "./factory";
+export {
+  createSession,
+  createTestSession,
+  type SessionFactoryConfig,
+} from "./factory";
 
 // Provider exports
 export {

@@ -13,7 +13,6 @@ import {
   type AgentToolName,
   type ToolGatingState,
   getAvailableTools,
-  toolDefinitions,
 } from "../../../../models/tool-definitions";
 import { getToolHandler, hasToolHandler } from "../../tool-flow/registry";
 import type { ToolFlowContext, ToolRawResult } from "../../tool-flow/types";
@@ -41,7 +40,9 @@ export type ToolProviderConfig = {
  * Convert Zod schema to v2 ToolDefinition parameters format.
  */
 function schemaToParameters(schema: unknown): ToolDefinition["parameters"] {
-  const jsonSchema = zodToJsonSchema(schema as Parameters<typeof zodToJsonSchema>[0]);
+  const jsonSchema = zodToJsonSchema(
+    schema as Parameters<typeof zodToJsonSchema>[0],
+  );
 
   const result: ToolDefinition["parameters"] = {
     type: "object",
@@ -50,8 +51,12 @@ function schemaToParameters(schema: unknown): ToolDefinition["parameters"] {
   };
 
   if (typeof jsonSchema === "object" && jsonSchema !== null) {
-    if ("properties" in jsonSchema && typeof jsonSchema.properties === "object") {
-      result.properties = jsonSchema.properties as ToolDefinition["parameters"]["properties"];
+    if (
+      "properties" in jsonSchema &&
+      typeof jsonSchema.properties === "object"
+    ) {
+      result.properties =
+        jsonSchema.properties as ToolDefinition["parameters"]["properties"];
     }
     if ("required" in jsonSchema && Array.isArray(jsonSchema.required)) {
       result.required = jsonSchema.required as string[];
@@ -66,8 +71,14 @@ function schemaToParameters(schema: unknown): ToolDefinition["parameters"] {
  */
 function extractGatingState(state: SessionState): ToolGatingState {
   const domainState = state.domainState;
+  // Check verification in conversation state (where handleVerifyAccount stores it)
+  const conversation = domainState["conversation"] as
+    | { verification?: { verified?: boolean } }
+    | undefined;
+  const isVerified = Boolean(conversation?.verification?.verified);
+
   return {
-    isVerified: Boolean(domainState["verified"]),
+    isVerified,
     hasActiveWorkflow:
       Boolean(domainState["rescheduleWorkflowId"]) ||
       Boolean(domainState["cancelWorkflowId"]) ||
@@ -256,6 +267,7 @@ export function createToolProvider(config: ToolProviderConfig): ToolProvider {
             name: toolName,
             description: definition.description,
             parameters: schemaToParameters(definition.inputSchema),
+            acknowledgement: definition.acknowledgement,
           },
           execute: createExecutor(toolName, config),
         });
