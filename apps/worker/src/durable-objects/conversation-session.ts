@@ -62,9 +62,14 @@ type ConversationEventType =
 
 type ConversationEvent = {
   id: number;
+  seq: number;
   type: ConversationEventType;
   text?: string;
   data?: unknown;
+  turnId?: number | null;
+  messageId?: string | null;
+  role?: "assistant" | "system";
+  correlationId?: string;
   at: string;
 };
 
@@ -184,6 +189,9 @@ export class ConversationSession {
   private activeStreamId = 0;
   private canceledStreamIds = new Set<number>();
   private activeCallSessionId: string | null = null;
+  private activeTurnId: number | null = null;
+  private activeMessageId: string | null = null;
+  private turnCounter = 0;
   private turnMetrics: {
     callSessionId: string;
     startedAt: number;
@@ -489,6 +497,8 @@ export class ConversationSession {
       callSessionId,
     };
     const streamId = ++this.activeStreamId;
+    this.activeTurnId = ++this.turnCounter;
+    this.activeMessageId = crypto.randomUUID();
     this.canceledStreamIds.delete(streamId);
     await this.setSpeaking(true);
     let lastStatus = "";
@@ -625,6 +635,8 @@ export class ConversationSession {
       );
       this.turnMetrics = null;
       this.activeCallSessionId = null;
+      this.activeTurnId = null;
+      this.activeMessageId = null;
       await this.setSpeaking(false);
     }
   }
@@ -2648,7 +2660,11 @@ export class ConversationSession {
     }
     const acknowledgement = toolAcknowledgements[parsed.data];
     if (acknowledgement.status) {
-      this.emitEvent({ type: "status", text: acknowledgement.status });
+      this.emitEvent({
+        type: "status",
+        text: acknowledgement.status,
+        correlationId: toolName,
+      });
     }
     return this.narrateText(
       input,
@@ -2666,7 +2682,11 @@ export class ConversationSession {
     }
     const acknowledgement = toolAcknowledgements[parsed.data];
     if (acknowledgement.status) {
-      this.emitEvent({ type: "status", text: acknowledgement.status });
+      this.emitEvent({
+        type: "status",
+        text: acknowledgement.status,
+        correlationId: toolName,
+      });
     }
   }
 
@@ -3072,16 +3092,27 @@ export class ConversationSession {
     });
   }
 
-  private emitEvent(event: Omit<ConversationEvent, "id" | "at">): void {
+  private emitEvent(event: Omit<ConversationEvent, "id" | "seq" | "at">): void {
     if (event.type === "token") {
       this.recordTurnToken();
     }
     if (event.type === "status") {
       this.recordTurnStatus();
     }
+    const defaultRole =
+      event.type === "status" ||
+      event.type === "error" ||
+      event.type === "resync" ||
+      event.type === "speaking"
+        ? "system"
+        : "assistant";
     const enriched: ConversationEvent = {
       ...event,
       id: ++this.lastEventId,
+      seq: this.lastEventId,
+      turnId: event.turnId ?? this.activeTurnId,
+      messageId: event.messageId ?? this.activeMessageId,
+      role: event.role ?? defaultRole,
       at: new Date().toISOString(),
     };
     this.eventBuffer.push(enriched);
@@ -3139,7 +3170,7 @@ export class ConversationSession {
 
   private sendTo(
     socket: WebSocket,
-    event: Omit<ConversationEvent, "id" | "at"> | ConversationEvent,
+    event: Omit<ConversationEvent, "id" | "seq" | "at"> | ConversationEvent,
   ) {
     const payload =
       "id" in event && "at" in event
@@ -3147,6 +3178,17 @@ export class ConversationSession {
         : {
             ...event,
             id: this.lastEventId,
+            seq: this.lastEventId,
+            turnId: event.turnId ?? this.activeTurnId,
+            messageId: event.messageId ?? this.activeMessageId,
+            role:
+              event.role ??
+              (event.type === "status" ||
+              event.type === "error" ||
+              event.type === "resync" ||
+              event.type === "speaking"
+                ? "system"
+                : "assistant"),
             at: new Date().toISOString(),
           };
     try {

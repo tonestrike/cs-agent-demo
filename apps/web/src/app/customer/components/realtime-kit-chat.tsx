@@ -8,6 +8,30 @@ import type { Customer } from "../types";
 type RealtimeKitClient = {
   join: () => Promise<void>;
   leave: () => Promise<void>;
+  self?: { userId?: string };
+  chat?: RealtimeKitChat;
+};
+
+type RealtimeKitChatMessage = {
+  id?: string;
+  type?: string;
+  userId?: string;
+  message?: string;
+};
+
+type RealtimeKitChatEvent =
+  | { detail?: { message?: RealtimeKitChatMessage } }
+  | { message?: RealtimeKitChatMessage };
+
+type RealtimeKitChat = {
+  addListener: (
+    event: "chatUpdate",
+    handler: (event: RealtimeKitChatEvent) => void,
+  ) => void;
+  removeListener: (
+    event: "chatUpdate",
+    handler: (event: RealtimeKitChatEvent) => void,
+  ) => void;
 };
 
 declare global {
@@ -51,6 +75,7 @@ export function RealtimeKitChatPanel({
   });
   const [meeting, setMeeting] = useState<RealtimeKitClient | null>(null);
   const meetingRef = useRef<RealtimeKitClient | null>(null);
+  const sentMessageIds = useRef(new Set<string>());
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +151,63 @@ export function RealtimeKitChatPanel({
       cleanup();
     };
   }, [sessionId, customer]);
+
+  useEffect(() => {
+    if (!meeting || !sessionId || !customer) {
+      return;
+    }
+    const chat = meeting.chat;
+    if (!chat?.addListener || !chat?.removeListener) {
+      return;
+    }
+    const handleChatUpdate = (event: RealtimeKitChatEvent) => {
+      const detail = "detail" in event ? event.detail : event;
+      const message =
+        detail && "message" in detail ? detail.message : undefined;
+      if (!message || !message.id || message.type !== "chat") {
+        return;
+      }
+      const selfUserId = meeting.self?.userId;
+      if (message.userId !== selfUserId) {
+        return;
+      }
+      if (sentMessageIds.current.has(message.id)) {
+        return;
+      }
+      const text = message.message?.trim();
+      if (!text) {
+        return;
+      }
+      sentMessageIds.current.add(message.id);
+      const transmitMessage = async () => {
+        const base = apiBaseUrl || window.location.origin;
+        const headers: Record<string, string> = {
+          "content-type": "application/json",
+        };
+        if (demoAuthToken) {
+          headers["x-demo-auth"] = demoAuthToken;
+        }
+        try {
+          await fetch(`${base}/api/conversations/${sessionId}/message`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              phoneNumber: customer.phoneE164,
+              text,
+              callSessionId: sessionId,
+            }),
+          });
+        } catch (error) {
+          console.error("rtk chat send failed", error);
+        }
+      };
+      void transmitMessage();
+    };
+    chat.addListener("chatUpdate", handleChatUpdate);
+    return () => {
+      chat.removeListener("chatUpdate", handleChatUpdate);
+    };
+  }, [meeting, sessionId, customer]);
 
   return (
     <div className="rounded-xl border border-ink-200 bg-white shadow-soft">

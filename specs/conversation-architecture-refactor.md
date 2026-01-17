@@ -271,7 +271,7 @@ Workstream A: RealtimeKit UI + text transport (frontend)
   - [x] Register the RealtimeKit loader and core UI components in the Next.js app so the `<rtk-chat>` elements can render (Web & voice share the same assets).
   - [x] Instantiate the RealtimeKit meeting that uses the chat config and render `<rtk-chat>` inside the existing chat page/layout.
   - [x] Issue RTK auth tokens from `/api/conversations/:id/rtk-token` so verified customers can join the meeting with their persistent participant id.
-  - [ ] Hook chat events to hit `/api/conversations/:id/message` (oRPC) and keep the doc’s task list in sync whenever we finish a step; this area is isolated to Workstream A so others can update their sections independently.
+  - [x] Hook chat events to hit `/api/conversations/:id/message` (oRPC) and keep the doc’s task list in sync whenever we finish a step; this area is isolated to Workstream A so others can update their sections independently.
 
 Workstream B: DO streaming loop + latency (backend)
 - Emit immediate narrator token on turn start (first-token-fast).

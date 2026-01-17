@@ -15,7 +15,7 @@ export function useConversationSession(phoneNumber: string) {
 
   const socketRef = useRef<WebSocket | null>(null);
   const responseIdRef = useRef<string | null>(null);
-  const statusMessageIdRef = useRef<string | null>(null);
+  const pendingPlaceholderIdRef = useRef<string | null>(null);
   const sessionRef = useRef<string | null>(null);
   const hasDeltaRef = useRef(false);
 
@@ -88,6 +88,11 @@ export function useConversationSession(phoneNumber: string) {
         try {
           const payload = JSON.parse(String(event.data)) as {
             id?: number;
+            seq?: number;
+            turnId?: number;
+            messageId?: string | null;
+            role?: "assistant" | "system";
+            correlationId?: string;
             type?: string;
             text?: string;
             data?: { callSessionId?: string; replyText?: string };
@@ -102,19 +107,8 @@ export function useConversationSession(phoneNumber: string) {
             const text = payload.text ?? "";
             if (text.trim()) {
               setStatus(text);
-              const statusId =
-                statusMessageIdRef.current ??
-                `status-${payload.id ?? crypto.randomUUID()}`;
-              statusMessageIdRef.current = statusId;
               setMessages((prev) => {
-                const hasStatus = prev.some(
-                  (message) => message.id === statusId,
-                );
-                if (hasStatus) {
-                  return prev.map((message) =>
-                    message.id === statusId ? { ...message, text } : message,
-                  );
-                }
+                const statusId = `status-${payload.seq ?? payload.id ?? crypto.randomUUID()}`;
                 return [...prev, { id: statusId, role: "status", text }];
               });
             }
@@ -122,28 +116,41 @@ export function useConversationSession(phoneNumber: string) {
           }
           if (payload.type === "token") {
             const text = payload.text ?? "";
-            const responseId = responseIdRef.current;
-            if (!responseId || !text) {
+            const messageId = payload.messageId ?? responseIdRef.current;
+            if (!messageId || !text) {
               return;
             }
             hasDeltaRef.current = true;
-            setMessages((prev) =>
-              prev.map((message) =>
-                message.id === responseId
-                  ? { ...message, text: `${message.text}${text}` }
-                  : message,
-              ),
-            );
+            setMessages((prev) => {
+              const exists = prev.some((message) => message.id === messageId);
+              if (exists) {
+                return prev.map((message) =>
+                  message.id === messageId
+                    ? { ...message, text: `${message.text}${text}` }
+                    : message,
+                );
+              }
+              const pendingId = pendingPlaceholderIdRef.current;
+              if (pendingId) {
+                pendingPlaceholderIdRef.current = null;
+                return prev.map((message) =>
+                  message.id === pendingId
+                    ? { ...message, id: messageId, text }
+                    : message,
+                );
+              }
+              return [...prev, { id: messageId, role: "agent", text }];
+            });
             return;
           }
           if (payload.type === "final") {
             const data = payload.data;
             const replyText = data?.replyText ?? "";
-            const responseId = responseIdRef.current;
-            if (responseId && replyText) {
+            const messageId = payload.messageId ?? responseIdRef.current;
+            if (messageId && replyText) {
               setMessages((prev) =>
                 prev.map((message) =>
-                  message.id === responseId && !message.text
+                  message.id === messageId && !message.text
                     ? { ...message, text: replyText }
                     : message,
                 ),
@@ -153,7 +160,6 @@ export function useConversationSession(phoneNumber: string) {
               setCallSessionId(data.callSessionId);
               setConfirmedSessionId(data.callSessionId);
             }
-            statusMessageIdRef.current = null;
             return;
           }
           if (payload.type === "error") {
@@ -202,7 +208,7 @@ export function useConversationSession(phoneNumber: string) {
     setCallSessionId(null);
     setConfirmedSessionId(null);
     hasDeltaRef.current = false;
-    statusMessageIdRef.current = null;
+    pendingPlaceholderIdRef.current = null;
     setMessages([]);
     setStatus("New session");
     socketRef.current?.close();
@@ -229,8 +235,8 @@ export function useConversationSession(phoneNumber: string) {
 
       const responseId = crypto.randomUUID();
       responseIdRef.current = responseId;
+      pendingPlaceholderIdRef.current = responseId;
       hasDeltaRef.current = false;
-      statusMessageIdRef.current = null;
       setMessages((prev) => [
         ...prev,
         { id: responseId, role: "agent", text: "" },
