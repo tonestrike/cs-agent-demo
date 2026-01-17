@@ -295,7 +295,7 @@ export type StatusInput = {
 };
 
 export type ModelAdapter = {
-  name: "mock" | "workers-ai" | "openrouter" | "hybrid";
+  name: "mock" | "workers-ai" | "openrouter" | "hybrid" | "split";
   modelId?: string;
   generate: (input: AgentModelInput) => Promise<AgentModelOutput>;
   respond: (input: AgentResponseInput) => Promise<string>;
