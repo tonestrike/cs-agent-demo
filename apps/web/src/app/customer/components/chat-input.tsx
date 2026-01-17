@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Button } from "../../../components/ui";
 
 type ChatInputProps = {
   onSend: (message: string) => void;
@@ -23,7 +22,7 @@ export function ChatInput({ onSend, quickZip }: ChatInputProps) {
       <div className="relative flex-1">
         <input
           id="customer-message"
-          className="w-full rounded-2xl border border-ink/15 bg-white px-4 py-3 pr-12 text-sm shadow-soft focus:border-ink/30 focus:outline-none"
+          className="w-full rounded-xl border border-ink-200 bg-white px-4 py-3 pr-16 text-sm text-ink shadow-soft placeholder:text-ink-300 focus:border-ink-400 focus:outline-none focus:ring-0"
           placeholder="Type your message..."
           value={input}
           onChange={(event) => setInput(event.target.value)}
@@ -38,21 +37,22 @@ export function ChatInput({ onSend, quickZip }: ChatInputProps) {
           <button
             type="button"
             onClick={() => onSend(quickZip)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-ink/5 px-2 py-1 text-[10px] font-medium text-ink/50 hover:bg-ink/10 hover:text-ink/70"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-200"
             title={`Send ZIP: ${quickZip}`}
           >
             ZIP
           </button>
         )}
       </div>
-      <Button
+      <button
+        type="button"
         onClick={handleSend}
-        className="!rounded-2xl !py-3 !px-5"
         disabled={!input.trim()}
+        className="flex h-[46px] items-center justify-center rounded-xl bg-ink px-5 text-sm font-medium text-white shadow-medium transition-colors hover:bg-ink-800 disabled:cursor-not-allowed disabled:bg-ink-300"
       >
         <span className="hidden sm:inline">Send</span>
         <svg
-          className="h-4 w-4 sm:hidden"
+          className="h-5 w-5 sm:hidden"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -65,7 +65,7 @@ export function ChatInput({ onSend, quickZip }: ChatInputProps) {
             d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
           />
         </svg>
-      </Button>
+      </button>
     </div>
   );
 }

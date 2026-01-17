@@ -1,6 +1,5 @@
 "use client";
 
-import { Button } from "../../../components/ui";
 import type { Customer } from "../types";
 
 type CustomerBarProps = {
@@ -22,7 +21,7 @@ export function CustomerBar({
     <div className="space-y-3">
       <select
         id="customer-phone"
-        className="w-full rounded-lg border border-ink/15 bg-white px-3 py-2 text-sm"
+        className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2.5 text-sm font-medium text-ink focus:border-ink-400 focus:outline-none focus:ring-0"
         value={phoneNumber}
         onChange={(event) => onSelectCustomer(event.target.value)}
       >
@@ -34,10 +33,10 @@ export function CustomerBar({
       </select>
 
       {selectedCustomer && (
-        <div className="space-y-1 text-xs text-ink/60">
+        <div className="space-y-2 text-sm text-ink-600">
           <div className="flex items-center gap-2">
             <svg
-              className="h-3.5 w-3.5 text-ink/40"
+              className="h-4 w-4 text-ink-400"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -55,7 +54,7 @@ export function CustomerBar({
           {selectedCustomer.zipCode && (
             <div className="flex items-center gap-2">
               <svg
-                className="h-3.5 w-3.5 text-ink/40"
+                className="h-4 w-4 text-ink-400"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -80,13 +79,13 @@ export function CustomerBar({
         </div>
       )}
 
-      <Button
+      <button
         type="button"
         onClick={onNewSession}
-        className="w-full !py-2 text-xs"
+        className="w-full rounded-lg border border-ink-200 bg-sand-100 py-2 text-xs font-semibold text-ink-700 hover:bg-sand-200"
       >
         New Session
-      </Button>
+      </button>
     </div>
   );
 }

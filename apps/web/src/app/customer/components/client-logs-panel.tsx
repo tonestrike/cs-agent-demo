@@ -16,79 +16,96 @@ export function ClientLogsPanel({
   phoneNumber,
   onCopyConversation,
 }: ClientLogsPanelProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedLogs, setCopiedLogs] = useState(false);
   const [copiedConvo, setCopiedConvo] = useState(false);
 
   const copyLogs = async () => {
     const payload = { callSessionId, phoneNumber, logs };
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    setCopiedLogs(true);
+    setTimeout(() => setCopiedLogs(false), 2000);
   };
 
   const handleCopyConversation = async () => {
     await onCopyConversation();
     setCopiedConvo(true);
-    setTimeout(() => setCopiedConvo(false), 1500);
+    setTimeout(() => setCopiedConvo(false), 2000);
   };
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-2">
+    <div className="flex h-full flex-col">
+      {/* Header with copy buttons */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={() => setIsOpen(!isOpen)}
-          className="rounded-lg border border-ink/15 bg-white px-2.5 py-1.5 text-[10px] font-medium text-ink/60 hover:text-ink/80"
+          onClick={copyLogs}
+          className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+            copiedLogs
+              ? "bg-moss-100 text-moss-700"
+              : "bg-ink text-white hover:bg-ink-800"
+          }`}
         >
-          {isOpen ? "Hide logs" : "Show logs"}
+          {copiedLogs ? "Copied!" : "Copy Logs"}
         </button>
         <button
           type="button"
           onClick={handleCopyConversation}
-          className="rounded-lg border border-ink/15 bg-white px-2.5 py-1.5 text-[10px] font-medium text-ink/60 hover:text-ink/80"
+          className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+            copiedConvo
+              ? "border-moss-300 bg-moss-100 text-moss-700"
+              : "border-ink-200 bg-white text-ink-700 hover:bg-sand-100"
+          }`}
         >
-          {copiedConvo ? "Copied!" : "Copy convo"}
+          {copiedConvo ? "Copied!" : "Copy Conversation"}
         </button>
       </div>
 
-      {isOpen && (
-        <div className="rounded-lg border border-ink/10 bg-white/80 p-2">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-[9px] font-semibold uppercase tracking-wide text-ink/50">
-              Event Log
-            </span>
-            <button
-              type="button"
-              onClick={copyLogs}
-              className="text-[9px] font-medium text-ink/40 hover:text-ink/60"
-            >
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-          <div className="max-h-32 space-y-1.5 overflow-auto text-[9px] text-ink/60">
-            {logs.length === 0 ? (
-              <p className="text-ink/40">No events yet.</p>
-            ) : (
-              logs.slice(0, 30).map((entry) => (
-                <div key={entry.id}>
-                  <span className="font-mono text-ink/40">
-                    {entry.ts.slice(11, 19)}
-                  </span>{" "}
-                  <span className="font-medium text-ink/70">
-                    {entry.message}
-                  </span>
-                  {entry.data && (
-                    <pre className="mt-0.5 whitespace-pre-wrap text-[8px] text-ink/50">
-                      {JSON.stringify(entry.data)}
-                    </pre>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
+      {/* Session info */}
+      {callSessionId && (
+        <div className="mb-4 rounded-lg bg-sand-200 p-3">
+          <p className="text-xs font-medium text-ink-500">Session ID</p>
+          <p className="mt-1 font-mono text-sm text-ink">{callSessionId}</p>
         </div>
       )}
+
+      {/* Logs list */}
+      <div className="flex-1 overflow-y-auto rounded-lg border border-ink-200 bg-sand-100">
+        {logs.length === 0 ? (
+          <div className="flex h-full items-center justify-center p-8 text-center">
+            <div>
+              <p className="text-sm font-medium text-ink-500">No events yet</p>
+              <p className="mt-1 text-sm text-ink-400">
+                Events will appear here as the session progresses
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="divide-y divide-ink-200">
+            {logs.map((entry) => (
+              <div key={entry.id} className="p-3 hover:bg-sand-200">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="font-mono text-xs text-ink-400">
+                    {entry.ts.slice(11, 19)}
+                  </span>
+                  <span className="flex-1 text-sm font-medium text-ink">
+                    {entry.message}
+                  </span>
+                </div>
+                {entry.data && (
+                  <pre className="mt-2 overflow-x-auto rounded bg-white p-2 text-xs text-ink-600">
+                    {JSON.stringify(entry.data, null, 2)}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Log count */}
+      <div className="mt-3 text-center text-xs text-ink-400">
+        {logs.length} event{logs.length !== 1 ? "s" : ""} logged
+      </div>
     </div>
   );
 }

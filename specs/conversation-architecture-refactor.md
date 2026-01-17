@@ -212,6 +212,7 @@ The Worker forwards the DO event stream to the client unchanged.
 - [x] DO sends cancel/reschedule selection events directly (appointment/slot/confirm) for reliable e2e flows.
 - [x] Turn latency logging for `first_token_ms` and `time_to_status_ms`.
 - [x] Log filter helper for `callSessionId` via `bun run logs:call`.
+- [x] Reschedule/cancel acknowledgements now stream appointment options in the same turn.
 - Unit tests for state transitions and summary mapping.
 - Remote-only e2e tests for message/resync and WebSocket final events.
 - Resync payloads now include conversation state snapshots.

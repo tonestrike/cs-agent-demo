@@ -570,7 +570,16 @@ export class ConversationSession {
     customerId?: string;
     phoneNumber?: string;
     message?: string;
-  }): Promise<{ ok: boolean; message?: string }> {
+  }): Promise<{
+    ok: boolean;
+    message?: string;
+    appointments?: Array<{
+      id: string;
+      date: string;
+      timeWindow: string;
+      addressSummary: string;
+    }>;
+  }> {
     const deps = createDependencies(this.env);
     const callSessionId =
       input.callSessionId ?? this.sessionState.lastCallSessionId;
@@ -628,7 +637,7 @@ export class ConversationSession {
       text: "I'm pulling your upcoming appointments now.",
     });
     await this.syncConversationState(callSessionId, deps);
-    return { ok: true, message: instance.id };
+    return { ok: true, message: instance.id, appointments };
   }
 
   private async handleRescheduleStart(input: {
@@ -636,7 +645,16 @@ export class ConversationSession {
     customerId?: string;
     phoneNumber?: string;
     message?: string;
-  }): Promise<{ ok: boolean; message?: string }> {
+  }): Promise<{
+    ok: boolean;
+    message?: string;
+    appointments?: Array<{
+      id: string;
+      date: string;
+      timeWindow: string;
+      addressSummary: string;
+    }>;
+  }> {
     const deps = createDependencies(this.env);
     const callSessionId =
       input.callSessionId ?? this.sessionState.lastCallSessionId;
@@ -694,7 +712,7 @@ export class ConversationSession {
       text: "I'm pulling your upcoming appointments now.",
     });
     await this.syncConversationState(callSessionId, deps);
-    return { ok: true, message: instance.id };
+    return { ok: true, message: instance.id, appointments };
   }
 
   private async ensureCallSession(
@@ -1003,38 +1021,59 @@ export class ConversationSession {
     }
 
     if (wantsCancel) {
-      const replyText =
+      const introText =
         "Got it. I can help cancel that appointment. I'm pulling your upcoming appointments now.";
-      this.emitNarratorTokens(replyText, streamId);
+      this.emitNarratorTokens(introText, streamId);
       const result = await this.handleCancelStart({
         callSessionId: input.callSessionId,
         customerId: state.verification.customerId ?? undefined,
         phoneNumber: input.phoneNumber,
         message: input.text,
       });
+      if (!result.ok) {
+        return {
+          callSessionId: input.callSessionId ?? crypto.randomUUID(),
+          replyText:
+            result.message ?? "Cancellation is temporarily unavailable.",
+          actions: [],
+        };
+      }
+      const appointments = result.appointments ?? [];
+      const followupText = appointments.length
+        ? `${this.formatAppointmentsResponse(appointments)} Reply with the appointment id you'd like to cancel.`
+        : "I couldn't find any upcoming appointments to cancel.";
+      this.emitNarratorTokens(followupText, streamId);
       return {
         callSessionId: input.callSessionId ?? crypto.randomUUID(),
-        replyText: result.ok
-          ? replyText
-          : (result.message ?? "Cancellation is temporarily unavailable."),
+        replyText: `${introText} ${followupText}`.trim(),
         actions: [],
       };
     }
 
-    const replyText =
+    const introText =
       "Got it. I can help reschedule your appointment. I'm pulling your upcoming appointments now.";
-    this.emitNarratorTokens(replyText, streamId);
+    this.emitNarratorTokens(introText, streamId);
     const result = await this.handleRescheduleStart({
       callSessionId: input.callSessionId,
       customerId: state.verification.customerId ?? undefined,
       phoneNumber: input.phoneNumber,
       message: input.text,
     });
+    if (!result.ok) {
+      return {
+        callSessionId: input.callSessionId ?? crypto.randomUUID(),
+        replyText: result.message ?? "Rescheduling is temporarily unavailable.",
+        actions: [],
+      };
+    }
+    const appointments = result.appointments ?? [];
+    const followupText = appointments.length
+      ? `${this.formatAppointmentsResponse(appointments)} Reply with the appointment id you'd like to change.`
+      : "I couldn't find any upcoming appointments to reschedule.";
+    this.emitNarratorTokens(followupText, streamId);
     return {
       callSessionId: input.callSessionId ?? crypto.randomUUID(),
-      replyText: result.ok
-        ? replyText
-        : (result.message ?? "Rescheduling is temporarily unavailable."),
+      replyText: `${introText} ${followupText}`.trim(),
       actions: [],
     };
   }
