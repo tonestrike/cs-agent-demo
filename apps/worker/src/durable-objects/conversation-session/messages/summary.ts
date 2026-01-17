@@ -2,8 +2,8 @@
  * Session summary update functions
  */
 
-import type { MessagesContext, SummarySnapshot } from "./types";
 import { ensureCallSession } from "./turns";
+import type { MessagesContext, SummarySnapshot } from "./types";
 
 /**
  * Parse a session summary from JSON string.

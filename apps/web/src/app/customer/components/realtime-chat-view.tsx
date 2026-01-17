@@ -11,8 +11,6 @@ import {
   RealtimeLogsPanel,
 } from "./index";
 
-type SidebarTab = "settings";
-
 type RealtimeChatViewProps = {
   customers: Customer[];
   selectedCustomer: Customer | null;
@@ -27,7 +25,6 @@ export function RealtimeChatView({
   onSelectCustomer,
 }: RealtimeChatViewProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<SidebarTab>("settings");
   const [startingCall, setStartingCall] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [debugOpen, setDebugOpen] = useState(false);
@@ -107,41 +104,30 @@ export function RealtimeChatView({
           </div>
 
           <div className="flex-1 overflow-y-auto p-5">
-            {activeTab === "settings" ? (
-              <div className="space-y-6">
-                <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
-                  <h3 className="mb-4 text-sm font-semibold text-ink">
-                    Realtime Status
-                  </h3>
-                  <ChatHeader
-                    status={status}
-                    confirmedSessionId={confirmedSessionId}
-                  />
-                </div>
-
-                <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
-                  <h3 className="mb-4 text-sm font-semibold text-ink">
-                    Customer
-                  </h3>
-                  <CustomerBar
-                    customers={customers}
-                    selectedCustomer={selectedCustomer}
-                    phoneNumber={phoneNumber}
-                    onSelectCustomer={handleCustomerChange}
-                    onNewSession={handleNewSession}
-                  />
-                </div>
+            <div className="space-y-6">
+              <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+                <h3 className="mb-4 text-sm font-semibold text-ink">
+                  Realtime Status
+                </h3>
+                <ChatHeader
+                  status={status}
+                  confirmedSessionId={confirmedSessionId}
+                />
               </div>
-            ) : (
-              <RealtimeLogsPanel
-                logs={logs}
-                turnMetrics={turnMetrics}
-                callSessionId={callSessionId}
-                phoneNumber={phoneNumber}
-                status={status}
-                onCopyConversation={copyConversation}
-              />
-            )}
+
+              <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-soft">
+                <h3 className="mb-4 text-sm font-semibold text-ink">
+                  Customer
+                </h3>
+                <CustomerBar
+                  customers={customers}
+                  selectedCustomer={selectedCustomer}
+                  phoneNumber={phoneNumber}
+                  onSelectCustomer={handleCustomerChange}
+                  onNewSession={handleNewSession}
+                />
+              </div>
+            </div>
           </div>
         </div>
       </aside>

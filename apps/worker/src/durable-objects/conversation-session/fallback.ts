@@ -44,7 +44,8 @@ export function buildFallbackWithDiagnostics(
   // Truncate messages for readability
   const truncatedMessages = diagnostics.recentMessages.slice(-5).map((m) => ({
     role: m.role,
-    content: m.content.length > 100 ? `${m.content.slice(0, 100)}...` : m.content,
+    content:
+      m.content.length > 100 ? `${m.content.slice(0, 100)}...` : m.content,
   }));
 
   const debugPayload = {
@@ -127,11 +128,18 @@ export function analyzeDebugDiagnostics(
 
   // Analyze the user message for clear intent
   const userMsg = diagnostics.userMessage.toLowerCase();
-  const hasRescheduleIntent = /reschedule|move|change.*(time|date|appointment)/.test(userMsg);
+  const hasRescheduleIntent =
+    /reschedule|move|change.*(time|date|appointment)/.test(userMsg);
   const hasCancelIntent = /cancel|remove|delete/.test(userMsg);
-  const hasScheduleIntent = /schedule|book|set up|make.*(appointment)/.test(userMsg);
-  const hasBillingIntent = /bill|payment|invoice|pay|charge|balance/.test(userMsg);
-  const hasGreeting = /^(hi|hello|hey|good morning|good afternoon)\b/i.test(userMsg);
+  const hasScheduleIntent = /schedule|book|set up|make.*(appointment)/.test(
+    userMsg,
+  );
+  const hasBillingIntent = /bill|payment|invoice|pay|charge|balance/.test(
+    userMsg,
+  );
+  const hasGreeting = /^(hi|hello|hey|good morning|good afternoon)\b/i.test(
+    userMsg,
+  );
   const hasQuestion = userMsg.includes("?");
 
   const detectedIntent = hasRescheduleIntent
@@ -163,14 +171,18 @@ export function analyzeDebugDiagnostics(
         suggestions.push(
           `Check if "${detectedIntent}" tools are available and properly described`,
         );
-        suggestions.push("Model may need stronger prompting to use tools for this intent");
+        suggestions.push(
+          "Model may need stronger prompting to use tools for this intent",
+        );
       }
       break;
 
     case "invalid_tool_decision":
       issues.push("Model returned malformed tool call");
       suggestions.push("Check model response format matches expected schema");
-      suggestions.push("May need to adjust tool_choice parameter or model temperature");
+      suggestions.push(
+        "May need to adjust tool_choice parameter or model temperature",
+      );
       break;
 
     case "adapter_parse_error":
@@ -191,8 +203,12 @@ export function analyzeDebugDiagnostics(
   const userMsgs = history.filter((m) => m.role === "user");
 
   if (assistantMsgs.length > userMsgs.length + 1) {
-    issues.push("More assistant messages than user messages (possible status message pollution)");
-    suggestions.push("Check if status/system messages are leaking into tool model history");
+    issues.push(
+      "More assistant messages than user messages (possible status message pollution)",
+    );
+    suggestions.push(
+      "Check if status/system messages are leaking into tool model history",
+    );
   }
 
   // Check for repeated assistant messages (could indicate loop)
@@ -209,13 +225,18 @@ export function analyzeDebugDiagnostics(
     suggestions.push("Verify buildModelContext is generating context");
   } else if (diagnostics.modelContext.length < 50) {
     issues.push("Model context suspiciously short");
-    suggestions.push("Check if verification state and cached data are being included");
+    suggestions.push(
+      "Check if verification state and cached data are being included",
+    );
   }
 
   // Check if raw text gives clues
   if (diagnostics.rawText) {
     facts["Raw output"] = diagnostics.rawText.slice(0, 100);
-    if (diagnostics.rawText.includes("I cannot") || diagnostics.rawText.includes("I'm unable")) {
+    if (
+      diagnostics.rawText.includes("I cannot") ||
+      diagnostics.rawText.includes("I'm unable")
+    ) {
       issues.push("Model refused the request");
       suggestions.push("Check if request triggered safety filters");
     }
@@ -223,7 +244,11 @@ export function analyzeDebugDiagnostics(
 
   // Determine severity
   let severity: "low" | "medium" | "high" = "low";
-  if (detectedIntent && detectedIntent !== "greeting" && detectedIntent !== "question") {
+  if (
+    detectedIntent &&
+    detectedIntent !== "greeting" &&
+    detectedIntent !== "question"
+  ) {
     severity = "high"; // Clear actionable intent was missed
   } else if (issues.length > 2) {
     severity = "medium";
@@ -259,7 +284,12 @@ export function formatDebugAnalysis(analysis: DebugAnalysis): string {
   const lines: string[] = [];
 
   // Header with severity
-  const severityEmoji = analysis.severity === "high" ? "🔴" : analysis.severity === "medium" ? "🟡" : "🟢";
+  const severityEmoji =
+    analysis.severity === "high"
+      ? "🔴"
+      : analysis.severity === "medium"
+        ? "🟡"
+        : "🟢";
   lines.push(`${severityEmoji} ${analysis.summary.toUpperCase()}`);
   lines.push("");
 

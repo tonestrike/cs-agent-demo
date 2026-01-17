@@ -59,6 +59,10 @@ import {
 } from "../workflows/constants";
 
 import { buildModelContext } from "./conversation-session/context";
+import {
+  type FallbackDiagnostics,
+  buildFallbackWithDiagnostics,
+} from "./conversation-session/fallback";
 // Extracted modules
 import {
   type ClientMessage,
@@ -78,10 +82,6 @@ import {
 } from "./conversation-session/index";
 import { detectActionIntent } from "./conversation-session/intent";
 import {
-  type FallbackDiagnostics,
-  buildFallbackWithDiagnostics,
-} from "./conversation-session/fallback";
-import {
   type MessagesContext,
   ensureCallSession as ensureCallSessionFn,
   getRecentMessages as getRecentMessagesFn,
@@ -93,7 +93,6 @@ import {
   type WorkflowContext,
   handleWorkflowSelection as handleWorkflowSelectionFn,
 } from "./conversation-session/workflows";
-
 
 export class ConversationSession {
   private connections = new Set<WebSocket>();
