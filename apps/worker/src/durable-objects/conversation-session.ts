@@ -1242,16 +1242,20 @@ export class ConversationSession {
     const turns = await deps.calls.getRecentTurns({ callSessionId, limit: 10 });
     const messages = turns
       .filter((turn) => {
-        // Include user, agent, and status messages (status is what the bot said as acknowledgement)
+        // Include customer, agent, and status messages (status is what the bot said as acknowledgement)
         // Status messages are stored as speaker: "system" with kind: "status"
         const kind = (turn.meta as { kind?: string } | undefined)?.kind;
         const isStatus = kind === "status";
-        // Include: user messages, agent messages, and status messages
-        return turn.speaker === "user" || turn.speaker === "agent" || isStatus;
+        // Include: customer messages, agent messages, and status messages
+        return (
+          turn.speaker === "customer" ||
+          turn.speaker === "agent" ||
+          isStatus
+        );
       })
       .map((turn) => {
-        // Map status messages to assistant role (they're things the bot said)
-        const role = turn.speaker === "user" ? "user" : "assistant";
+        // Map customer to user role, everything else (agent, status) to assistant
+        const role = turn.speaker === "customer" ? "user" : "assistant";
         return { role: role as "user" | "assistant", content: turn.text };
       })
       .filter((turn) => turn.content.trim().length > 0);
@@ -2207,6 +2211,14 @@ export class ConversationSession {
           "conversation.session.tool_call.ack",
         );
         this.emitNarratorTokens(acknowledgementText, streamId);
+        // Store acknowledgement as a status message so the narrator sees it
+        // This prevents the narrator from repeating "I'm looking up..." phrasing
+        await this.emitStatusText(
+          callSessionId,
+          input.phoneNumber,
+          acknowledgementText,
+          `ack-${decision.toolName}`,
+        );
       }
       const actionPlan = actionPlanSchema.safeParse({
         kind: "tool",
