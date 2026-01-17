@@ -38,7 +38,7 @@ export default function CustomerPage() {
     }
     setStartingCall(true);
     try {
-      await startCall();
+      await startCall(selectedCustomer.zipCode ?? undefined);
     } finally {
       setStartingCall(false);
     }

@@ -616,17 +616,27 @@ export const createWorkersAiAdapter = (
         },
         "workers_ai.status.payload",
       );
+      const statusMessages: Array<{
+        role: "system" | "user" | "assistant";
+        content: string;
+      }> = [
+        {
+          role: "system",
+          content: buildStatusInstructions(input.contextHint),
+        },
+      ];
+      if (input.context) {
+        statusMessages.push({ role: "system", content: input.context });
+      }
+      if (input.messages?.length) {
+        statusMessages.push(...input.messages);
+      }
+      statusMessages.push({
+        role: "user",
+        content: input.text,
+      });
       const response = await ai.run(model as keyof AiModels, {
-        messages: [
-          {
-            role: "system",
-            content: buildStatusInstructions(input.contextHint),
-          },
-          {
-            role: "user",
-            content: input.text,
-          },
-        ],
+        messages: statusMessages,
         response_format: {
           type: "json_schema",
           json_schema: statusJsonSchema,

@@ -703,7 +703,7 @@ export const createOpenRouterAdapter = (
         index,
       };
     },
-    async status({ text, contextHint }) {
+    async status({ text, contextHint, context, messages }) {
       logger.info(
         {
           model,
@@ -716,10 +716,11 @@ export const createOpenRouterAdapter = (
         {
           model,
           messages: [
-            {
-              role: "system",
-              content: buildStatusInstructions(contextHint),
-            },
+            ...buildMessages(
+              buildStatusInstructions(contextHint),
+              context,
+              messages,
+            ),
             {
               role: "user",
               content: text,

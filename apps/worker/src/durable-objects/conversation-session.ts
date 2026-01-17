@@ -192,6 +192,8 @@ export class ConversationSession {
   private activeTurnId: number | null = null;
   private activeMessageId: string | null = null;
   private turnCounter = 0;
+  private statusSequence = 0;
+  private activeStatusText: string | null = null;
   private turnMetrics: {
     callSessionId: string;
     startedAt: number;
@@ -499,6 +501,8 @@ export class ConversationSession {
     const streamId = ++this.activeStreamId;
     this.activeTurnId = ++this.turnCounter;
     this.activeMessageId = crypto.randomUUID();
+    this.statusSequence = 0;
+    this.activeStatusText = null;
     this.canceledStreamIds.delete(streamId);
     await this.setSpeaking(true);
     let lastStatus = "";
@@ -511,7 +515,11 @@ export class ConversationSession {
     let fillerTimer: ReturnType<typeof setTimeout> | null = null;
     let fillerEmitted = false;
     const scheduleFiller = () => {
-      if (this.turnMetrics?.firstTokenAt !== null || fillerEmitted) {
+      if (
+        this.turnMetrics?.firstTokenAt !== null ||
+        fillerEmitted ||
+        this.statusSequence > 0
+      ) {
         return;
       }
       if (fillerTimer !== null) {
@@ -522,13 +530,19 @@ export class ConversationSession {
         if (
           this.canceledStreamIds.has(streamId) ||
           this.turnMetrics?.firstTokenAt !== null ||
-          fillerEmitted
+          fillerEmitted ||
+          this.statusSequence > 0
         ) {
           return;
         }
         fillerEmitted = true;
-        this.recordTurnStatus();
-        this.emitEvent({ type: "status", text: FILLER_STATUS_TEXT });
+        void this.emitNarratorStatus(
+          activeInput,
+          deps,
+          streamId,
+          FILLER_STATUS_TEXT,
+          "Acknowledge the request briefly while you check.",
+        );
       }, FILLER_TIMEOUT_MS);
     };
     scheduleFiller();
@@ -581,9 +595,14 @@ export class ConversationSession {
           if (!text || text === lastStatus) {
             return;
           }
-          this.recordTurnStatus();
           lastStatus = text;
-          this.emitEvent({ type: "status", text });
+          void this.emitNarratorStatus(
+            activeInput,
+            deps,
+            streamId,
+            text,
+            "Acknowledge the request briefly while you check.",
+          );
         },
         onToken: (token) => {
           if (this.canceledStreamIds.has(streamId)) {
@@ -637,6 +656,7 @@ export class ConversationSession {
       this.activeCallSessionId = null;
       this.activeTurnId = null;
       this.activeMessageId = null;
+      this.activeStatusText = null;
       await this.setSpeaking(false);
     }
   }
@@ -747,10 +767,21 @@ export class ConversationSession {
       payload: { confirmed },
     });
 
-    const statusText = confirmed
+    const fallbackText = confirmed
       ? "Thanks. I'll cancel that appointment now."
       : "Okay, I won't cancel that appointment.";
-    this.emitEvent({ type: "status", text: statusText });
+    const statusText =
+      (await this.emitNarratorStatus(
+        {
+          callSessionId: sessionId,
+          phoneNumber: this.sessionState.lastPhoneNumber ?? "unknown",
+          text: fallbackText,
+        },
+        deps,
+        this.activeStreamId,
+        fallbackText,
+        "Confirm or acknowledge the cancellation decision.",
+      )) ?? fallbackText;
     const current =
       this.sessionState.conversation ?? initialConversationState();
     this.sessionState = {
@@ -1118,7 +1149,13 @@ export class ConversationSession {
       };
       return response;
     }
-    this.emitEvent({ type: "status", text: "Checking that ZIP code now." });
+    await this.emitNarratorStatus(
+      input,
+      deps,
+      streamId,
+      "Checking that ZIP code now.",
+      "Acknowledge that you're checking the ZIP code.",
+    );
     const ok = await verifyAccount(deps.crm, customer.id, zipCode);
     if (ok) {
       await this.updateIdentitySummary(
@@ -1232,10 +1269,13 @@ export class ConversationSession {
     }
     switch (intent.kind) {
       case "appointments": {
-        this.emitEvent({
-          type: "status",
-          text: "Looking up your appointments now.",
-        });
+        await this.emitNarratorStatus(
+          input,
+          deps,
+          streamId,
+          "Looking up your appointments now.",
+          "Acknowledge that you're looking up appointments.",
+        );
         const appointments = await listUpcomingAppointments(
           deps.crm,
           this.sessionState.conversation.verification.customerId,
@@ -2066,7 +2106,7 @@ export class ConversationSession {
       acknowledgementPromise ??
       this.startToolAcknowledgement(toolName, input, deps, streamId);
     if (acknowledgementPromise) {
-      this.emitToolStatus(toolName);
+      this.emitToolStatus(toolName, input, deps, streamId);
     }
 
     if (toolName === "crm.cancelAppointment") {
@@ -2750,11 +2790,14 @@ export class ConversationSession {
     }
     const acknowledgement = toolAcknowledgements[parsed.data];
     if (acknowledgement.status) {
-      this.emitEvent({
-        type: "status",
-        text: acknowledgement.status,
-        correlationId: toolName,
-      });
+      void this.emitNarratorStatus(
+        input,
+        deps,
+        streamId,
+        acknowledgement.status,
+        acknowledgement.contextHint,
+        toolName,
+      );
     }
     return this.narrateText(
       input,
@@ -2765,18 +2808,26 @@ export class ConversationSession {
     );
   }
 
-  private emitToolStatus(toolName: string): void {
+  private emitToolStatus(
+    toolName: string,
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+    streamId: number,
+  ): void {
     const parsed = toolAcknowledgementSchema.safeParse(toolName);
     if (!parsed.success) {
       return;
     }
     const acknowledgement = toolAcknowledgements[parsed.data];
     if (acknowledgement.status) {
-      this.emitEvent({
-        type: "status",
-        text: acknowledgement.status,
-        correlationId: toolName,
-      });
+      void this.emitNarratorStatus(
+        input,
+        deps,
+        streamId,
+        acknowledgement.status,
+        acknowledgement.contextHint,
+        toolName,
+      );
     }
   }
 
@@ -3104,6 +3155,56 @@ export class ConversationSession {
       }
       this.emitEvent({ type: "token", text: `${part} ` });
     }
+  }
+
+  private async emitNarratorStatus(
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+    streamId: number,
+    fallback: string,
+    contextHint?: string,
+    correlationId?: string,
+  ): Promise<string | null> {
+    if (this.canceledStreamIds.has(streamId)) {
+      return null;
+    }
+    const model = await this.getModelAdapter(deps);
+    const callSessionId =
+      input.callSessionId ?? this.activeCallSessionId ?? null;
+    const messages = callSessionId
+      ? await this.getRecentMessages(deps, callSessionId)
+      : [];
+    const context = this.buildModelContext();
+    let statusText = fallback;
+    try {
+      statusText = await model.status({
+        text: input.text,
+        contextHint,
+        context,
+        messages,
+      });
+    } catch (error) {
+      this.logger.error(
+        { error: error instanceof Error ? error.message : "unknown" },
+        "conversation.session.status.failed",
+      );
+    }
+    const trimmed = this.sanitizeNarratorOutput(statusText).trim();
+    if (!trimmed) {
+      return null;
+    }
+    if (trimmed === this.activeStatusText) {
+      return trimmed;
+    }
+    this.activeStatusText = trimmed;
+    this.statusSequence += 1;
+    this.emitEvent({
+      type: "status",
+      text: trimmed,
+      correlationId,
+      role: "system",
+    });
+    return trimmed;
   }
 
   private formatAppointmentsResponse(

@@ -15,15 +15,23 @@ export function useConversationSession(phoneNumber: string) {
 
   const socketRef = useRef<WebSocket | null>(null);
   const responseIdRef = useRef<string | null>(null);
-  const pendingPlaceholderIdRef = useRef<string | null>(null);
   const sessionRef = useRef<string | null>(null);
   const hasDeltaRef = useRef(false);
+  const autoZipTimerRef = useRef<number | null>(null);
+
+  const clearAutoZipTimer = useCallback(() => {
+    if (autoZipTimerRef.current !== null) {
+      window.clearTimeout(autoZipTimerRef.current);
+      autoZipTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
+      clearAutoZipTimer();
       socketRef.current?.close();
     };
-  }, []);
+  }, [clearAutoZipTimer]);
 
   const logEvent = useCallback(
     (message: string, data?: Record<string, unknown>) => {
@@ -130,15 +138,6 @@ export function useConversationSession(phoneNumber: string) {
                     : message,
                 );
               }
-              const pendingId = pendingPlaceholderIdRef.current;
-              if (pendingId) {
-                pendingPlaceholderIdRef.current = null;
-                return prev.map((message) =>
-                  message.id === pendingId
-                    ? { ...message, id: messageId, text }
-                    : message,
-                );
-              }
               return [...prev, { id: messageId, role: "agent", text }];
             });
             return;
@@ -148,13 +147,20 @@ export function useConversationSession(phoneNumber: string) {
             const replyText = data?.replyText ?? "";
             const messageId = payload.messageId ?? responseIdRef.current;
             if (messageId && replyText) {
-              setMessages((prev) =>
-                prev.map((message) =>
+              setMessages((prev) => {
+                const exists = prev.some((message) => message.id === messageId);
+                if (!exists) {
+                  return [
+                    ...prev,
+                    { id: messageId, role: "agent", text: replyText },
+                  ];
+                }
+                return prev.map((message) =>
                   message.id === messageId && !message.text
                     ? { ...message, text: replyText }
                     : message,
-                ),
-              );
+                );
+              });
             }
             if (data?.callSessionId) {
               setCallSessionId(data.callSessionId);
@@ -208,14 +214,14 @@ export function useConversationSession(phoneNumber: string) {
     setCallSessionId(null);
     setConfirmedSessionId(null);
     hasDeltaRef.current = false;
-    pendingPlaceholderIdRef.current = null;
     setMessages([]);
     setStatus("New session");
     socketRef.current?.close();
     socketRef.current = null;
     sessionRef.current = null;
+    clearAutoZipTimer();
     logEvent("session.reset", { phoneNumber });
-  }, [phoneNumber, logEvent]);
+  }, [phoneNumber, logEvent, clearAutoZipTimer]);
 
   const sendMessage = useCallback(
     async (
@@ -244,12 +250,7 @@ export function useConversationSession(phoneNumber: string) {
 
       const responseId = crypto.randomUUID();
       responseIdRef.current = responseId;
-      pendingPlaceholderIdRef.current = responseId;
       hasDeltaRef.current = false;
-      setMessages((prev) => [
-        ...prev,
-        { id: responseId, role: "agent", text: "" },
-      ]);
 
       try {
         await ensureSocket(sessionId);
@@ -303,13 +304,27 @@ export function useConversationSession(phoneNumber: string) {
     [callSessionId, phoneNumber, ensureSocket, logEvent],
   );
 
-  const startCall = useCallback(async () => {
-    if (!phoneNumber) {
-      return;
-    }
-    logEvent("chat.start_call", { phoneNumber });
-    await sendMessage("Incoming call started", { skipUserMessage: true });
-  }, [logEvent, phoneNumber, sendMessage]);
+  const startCall = useCallback(
+    async (zip?: string) => {
+      if (!phoneNumber) {
+        return;
+      }
+      logEvent("chat.start_call", { phoneNumber });
+      clearAutoZipTimer();
+      await sendMessage("Incoming call started", { skipUserMessage: true });
+      const normalizedZip = zip?.trim();
+      if (!normalizedZip) {
+        return;
+      }
+      const DELAY_MS = 2500;
+      autoZipTimerRef.current = window.setTimeout(() => {
+        autoZipTimerRef.current = null;
+        logEvent("chat.auto_zip", { phoneNumber });
+        void sendMessage(normalizedZip);
+      }, DELAY_MS);
+    },
+    [clearAutoZipTimer, logEvent, phoneNumber, sendMessage],
+  );
 
   return {
     messages,

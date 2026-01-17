@@ -289,6 +289,8 @@ export type SelectionResult = {
 export type StatusInput = {
   text: string;
   contextHint?: string;
+  context?: string;
+  messages?: Array<{ role: "user" | "assistant"; content: string }>;
 };
 
 export type ModelAdapter = {
