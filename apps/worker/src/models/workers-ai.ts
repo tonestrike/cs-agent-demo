@@ -12,9 +12,37 @@ import {
   agentRouteSchema,
   agentToolCallSchema,
 } from "./types";
-import { responseToText } from "./workers-ai-language-model";
 
 const MAX_NEW_TOKENS = 512;
+
+const responseToText = (response: unknown) => {
+  if (
+    response &&
+    typeof response === "object" &&
+    "response" in response &&
+    typeof (response as { response?: unknown }).response === "string"
+  ) {
+    return (response as { response: string }).response;
+  }
+
+  if (
+    response &&
+    typeof response === "object" &&
+    "choices" in response &&
+    Array.isArray((response as { choices?: unknown }).choices)
+  ) {
+    const choice = (response as { choices: Array<{ message?: unknown }> })
+      .choices[0];
+    if (
+      choice?.message &&
+      typeof (choice.message as { content?: unknown }).content === "string"
+    ) {
+      return (choice.message as { content: string }).content;
+    }
+  }
+
+  return null;
+};
 
 const zodToJsonSchema = (schema: z.ZodTypeAny): Record<string, unknown> => {
   if (schema instanceof z.ZodString) {

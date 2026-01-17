@@ -52,7 +52,7 @@ export const initialConversationState = (): ConversationState => ({
   pendingScheduleAddressConfirmed: false,
 });
 
-export type ConversationIntent =
+type ConversationIntent =
   | { type: "request_verification"; reason: "missing" | "invalid_zip" }
   | { type: "verified"; customerId: string }
   | { type: "intent_ambiguous" }

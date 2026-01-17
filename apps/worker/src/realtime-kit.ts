@@ -11,7 +11,7 @@ export type RealtimeKitTokenPayload = {
   expiresAt?: string | null;
 };
 
-export type RealtimeKitParticipantInput = {
+type RealtimeKitParticipantInput = {
   displayName: string;
   customParticipantId: string;
 };
@@ -36,10 +36,16 @@ const hashToken = (value: string) => {
   return (hash >>> 0).toString(16).padStart(8, "0");
 };
 
-const ensureRealtimeKitConfig = (env: Env): RealtimeKitConfig => {
+const ensureRealtimeKitConfig = (
+  env: Env,
+  overrides?: { meetingId?: string },
+): RealtimeKitConfig => {
   const accountId = env.REALTIMEKIT_ACCOUNT_ID?.trim();
   const appId = env.REALTIMEKIT_APP_ID?.trim();
-  const meetingId = env.REALTIMEKIT_MEETING_ID?.trim() ?? HARDCODED_MEETING_ID;
+  const meetingId =
+    overrides?.meetingId?.trim() ??
+    env.REALTIMEKIT_MEETING_ID?.trim() ??
+    HARDCODED_MEETING_ID;
   const apiToken = env.REALTIMEKIT_API_TOKEN?.trim() ?? HARDCODED_API_TOKEN;
   const baseUrl =
     env.REALTIMEKIT_API_BASE_URL?.trim() ?? "https://api.cloudflare.com";
@@ -198,8 +204,11 @@ export const addRealtimeKitParticipant = async (
   env: Env,
   customer: CustomerCache,
   logger: Logger,
+  options?: { meetingId?: string },
 ): Promise<RealtimeKitTokenPayload> => {
-  const config = ensureRealtimeKitConfig(env);
+  const config = ensureRealtimeKitConfig(env, {
+    meetingId: options?.meetingId,
+  });
   const url = `${config.baseUrl}/client/v4/accounts/${config.accountId}/realtime/kit/${config.appId}/meetings/${config.meetingId}/participants`;
   const presetName = config.presetName;
   const body = {
@@ -235,8 +244,11 @@ export const addRealtimeKitGuestParticipant = async (
   env: Env,
   input: RealtimeKitParticipantInput,
   logger: Logger,
+  options?: { meetingId?: string },
 ): Promise<RealtimeKitTokenPayload> => {
-  const config = ensureRealtimeKitConfig(env);
+  const config = ensureRealtimeKitConfig(env, {
+    meetingId: options?.meetingId,
+  });
   const url = `${config.baseUrl}/client/v4/accounts/${config.accountId}/realtime/kit/${config.appId}/meetings/${config.meetingId}/participants`;
   const presetName = config.presetName;
   const body = {
@@ -272,8 +284,11 @@ export const refreshRealtimeKitToken = async (
   env: Env,
   participantId: string,
   logger: Logger,
+  options?: { meetingId?: string },
 ): Promise<RealtimeKitTokenPayload> => {
-  const config = ensureRealtimeKitConfig(env);
+  const config = ensureRealtimeKitConfig(env, {
+    meetingId: options?.meetingId,
+  });
   const url = `${config.baseUrl}/client/v4/accounts/${config.accountId}/realtime/kit/${config.appId}/meetings/${config.meetingId}/participants/${encodeURIComponent(
     participantId,
   )}/token/refresh`;

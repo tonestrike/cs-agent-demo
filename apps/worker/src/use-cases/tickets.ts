@@ -11,7 +11,7 @@ import {
 
 import type { createTicketRepository } from "../repositories";
 
-export type CreateTicketInput = {
+type CreateTicketInput = {
   subject: string;
   description: string;
   priority?: TicketPriority;

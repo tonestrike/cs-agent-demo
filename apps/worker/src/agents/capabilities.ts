@@ -8,7 +8,7 @@ type IntentId =
   | "payment"
   | "policy";
 
-export type AgentIntentCapability = {
+type AgentIntentCapability = {
   id: IntentId;
   description: string;
   tools: AgentToolName[];
@@ -16,7 +16,7 @@ export type AgentIntentCapability = {
   examples: string[];
 };
 
-export const AGENT_CAPABILITIES: AgentIntentCapability[] = [
+const AGENT_CAPABILITIES: AgentIntentCapability[] = [
   {
     id: "appointments",
     description: "Check upcoming or next appointments.",

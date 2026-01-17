@@ -179,6 +179,10 @@ export class ConversationSession {
       return this.handleSummaryRequest(request);
     }
 
+    if (request.method === "GET" && url.pathname.endsWith("/debug")) {
+      return this.handleDebugRequest(request);
+    }
+
     return new Response("Not found", { status: 404 });
   }
 
@@ -427,6 +431,31 @@ export class ConversationSession {
     return Response.json({ ok: true, callSessionId, summary });
   }
 
+  private async handleDebugRequest(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const callSessionId =
+      url.searchParams.get("callSessionId") ??
+      this.sessionState.lastCallSessionId ??
+      null;
+    const deps = createDependencies(this.env);
+    const record = callSessionId ? await deps.calls.get(callSessionId) : null;
+    const events = this.collectEventsAfter();
+    const snapshot = {
+      ok: true,
+      callSessionId,
+      sessionState: this.sessionState,
+      turnMetrics: this.turnMetrics,
+      turnTimings: this.turnTimings,
+      turnDecision: this.turnDecision,
+      activeTurnId: this.activeTurnId,
+      activeMessageId: this.activeMessageId,
+      eventBuffer: events.slice(-50),
+      dbSession: record?.session ?? null,
+      dbTurns: record?.turns ?? [],
+    };
+    return Response.json(snapshot);
+  }
+
   private async handleRealtimeTokenRequest(
     request: Request,
   ): Promise<Response> {
@@ -444,14 +473,22 @@ export class ConversationSession {
     const currentCallSessionId =
       url.searchParams.get("callSessionId") ??
       this.sessionState.lastCallSessionId;
+    const meetingId =
+      currentCallSessionId ??
+      this.sessionState.rtkMeetingId ??
+      this.state.id.toString();
     const storedRtkCallSessionId = this.sessionState.rtkCallSessionId;
+    const storedMeetingId = this.sessionState.rtkMeetingId;
     const needsFreshParticipant =
-      currentCallSessionId !== storedRtkCallSessionId;
+      currentCallSessionId !== storedRtkCallSessionId ||
+      Boolean(storedMeetingId && storedMeetingId !== meetingId);
 
     this.logger.info(
       {
         currentCallSessionId,
         storedRtkCallSessionId,
+        meetingId,
+        storedMeetingId,
         needsFreshParticipant,
         hasExistingParticipant: Boolean(
           this.sessionState.rtkGuestParticipantId,
@@ -475,6 +512,7 @@ export class ConversationSession {
             this.env,
             guestParticipantId,
             this.logger,
+            { meetingId },
           );
           return Response.json({ ok: true, ...token });
         } catch (error) {
@@ -499,12 +537,14 @@ export class ConversationSession {
           customParticipantId,
         },
         this.logger,
+        { meetingId },
       );
       this.sessionState = {
         ...this.sessionState,
         rtkGuestParticipantId: token.participantId,
         rtkGuestCustomId: customParticipantId,
         rtkCallSessionId: currentCallSessionId,
+        rtkMeetingId: meetingId,
       };
       await this.state.storage.put("state", this.sessionState);
       return Response.json({ ok: true, ...token });
@@ -516,11 +556,15 @@ export class ConversationSession {
       );
     }
     try {
-      const token = await this.getRealtimeKitToken(deps, customer);
+      const token = await this.getRealtimeKitToken(deps, customer, {
+        forceNewParticipant: needsFreshParticipant,
+        meetingId,
+      });
       // Update the call session tracking for verified customers too
       this.sessionState = {
         ...this.sessionState,
         rtkCallSessionId: currentCallSessionId,
+        rtkMeetingId: meetingId,
       };
       await this.state.storage.put("state", this.sessionState);
       return Response.json({ ok: true, ...token });
@@ -538,14 +582,16 @@ export class ConversationSession {
   private async getRealtimeKitToken(
     deps: ReturnType<typeof createDependencies>,
     customer: CustomerCache,
+    options?: { forceNewParticipant?: boolean; meetingId?: string },
   ): Promise<RealtimeKitTokenPayload> {
     let token: RealtimeKitTokenPayload;
-    if (customer.participantId) {
+    if (customer.participantId && !options?.forceNewParticipant) {
       try {
         token = await refreshRealtimeKitToken(
           this.env,
           customer.participantId,
           this.logger,
+          { meetingId: options?.meetingId },
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : "unknown";
@@ -557,10 +603,15 @@ export class ConversationSession {
           this.env,
           customer,
           this.logger,
+          {
+            meetingId: options?.meetingId,
+          },
         );
       }
     } else {
-      token = await addRealtimeKitParticipant(this.env, customer, this.logger);
+      token = await addRealtimeKitParticipant(this.env, customer, this.logger, {
+        meetingId: options?.meetingId,
+      });
     }
     const updatedCustomer: CustomerCache = {
       ...customer,
@@ -701,6 +752,15 @@ export class ConversationSession {
         );
         const meta = this.buildTurnMeta(callSessionId);
         await this.recordTurns(deps, activeInput, verificationResponse, meta);
+        this.logger.info(
+          {
+            callSessionId,
+            turnId: this.activeTurnId,
+            replyLength: verificationResponse.replyText.length,
+            actions: verificationResponse.actions,
+          },
+          "conversation.session.turn.complete",
+        );
         return verificationResponse;
       }
 
@@ -757,6 +817,15 @@ export class ConversationSession {
         await this.syncConversationState(toolResponse.callSessionId, deps);
         const meta = this.buildTurnMeta(callSessionId);
         await this.recordTurns(deps, activeInput, toolResponse, meta);
+        this.logger.info(
+          {
+            callSessionId,
+            turnId: this.activeTurnId,
+            replyLength: toolResponse.replyText.length,
+            actions: toolResponse.actions,
+          },
+          "conversation.session.turn.complete",
+        );
         return toolResponse;
       }
       const agentStart = Date.now();
@@ -1379,6 +1448,26 @@ export class ConversationSession {
         input.phoneNumber,
         customer.id,
       );
+      this.sessionState = {
+        ...this.sessionState,
+        conversation: applyIntent(state, {
+          type: "verified",
+          customerId: customer.id,
+        }),
+        pendingIntent: undefined,
+      };
+      await this.state.storage.put("state", this.sessionState);
+      this.logger.info(
+        {
+          callSessionId,
+          turnId: this.activeTurnId,
+          verifiedCustomerId: customer.id,
+          pendingIntentCleared: true,
+        },
+        "conversation.session.verification.completed",
+      );
+      // Continue to routing/workflows without emitting a standalone verification reply.
+      return null;
     }
     const verificationText = ok
       ? "Thanks, I've got your account. What would you like to do next?"
@@ -1533,6 +1622,7 @@ export class ConversationSession {
           {
             toolName: "crm.getAvailableSlots",
             result: slots.map((slot) => ({
+              id: slot.id,
               date: slot.date,
               timeWindow: slot.timeWindow,
             })),
@@ -1985,6 +2075,7 @@ export class ConversationSession {
             {
               toolName: "crm.getAvailableSlots",
               result: slots.map((slot) => ({
+                id: slot.id,
                 date: slot.date,
                 timeWindow: slot.timeWindow,
               })),
@@ -2234,7 +2325,16 @@ export class ConversationSession {
         // Model decided not to call any tools - respect its decision
         const replyText =
           decision.text.trim() ||
-          "I could not interpret the request. Can you rephrase?";
+          "I could not interpret the request. Can you rephrase? I can also connect you with a person.";
+        this.logger.info(
+          {
+            callSessionId,
+            turnId: this.activeTurnId,
+            decisionType: "final",
+            replyLength: replyText.length,
+          },
+          "conversation.session.final.no_tool",
+        );
         this.emitNarratorTokens(replyText, streamId);
         return { callSessionId, replyText, actions: [] };
       }
@@ -2269,7 +2369,15 @@ export class ConversationSession {
       if (!isSingleToolCall(decision)) {
         // Should not reach here, but fallback for type safety
         const replyText =
-          "I could not interpret the request. Can you rephrase?";
+          "I could not interpret the request. Can you rephrase? I can also connect you with a person.";
+        this.logger.warn(
+          {
+            callSessionId,
+            turnId: this.activeTurnId,
+            decisionType: (decision as { type?: string }).type ?? "unknown",
+          },
+          "conversation.session.tool_call.invalid_decision",
+        );
         this.emitNarratorTokens(replyText, streamId);
         return { callSessionId, replyText, actions: [] };
       }
@@ -3316,6 +3424,7 @@ export class ConversationSession {
             result: {
               toolName: "crm.getAvailableSlots" as const,
               result: slots.map((s) => ({
+                id: s.id,
                 date: s.date,
                 timeWindow: s.timeWindow,
               })),

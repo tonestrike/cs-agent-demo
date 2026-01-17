@@ -33,6 +33,7 @@ export type SessionState = {
   rtkGuestParticipantId?: string;
   rtkGuestCustomId?: string;
   rtkCallSessionId?: string;
+  rtkMeetingId?: string;
   pendingIntent?: {
     kind:
       | "appointments"

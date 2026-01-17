@@ -74,12 +74,20 @@ const friendlyFallbackText = (scopeMessage?: string) =>
 
 const buildFallbackToolResult = (
   kind: string,
-  details?: string,
+  details?:
+    | string
+    | {
+        details?: string;
+        lastTool?: string | null;
+      },
 ): ToolResult => ({
   toolName: "agent.message",
   result: {
     kind,
-    details,
+    details: typeof details === "string" ? details : details?.details,
+    ...(typeof details !== "string" && details?.lastTool
+      ? { lastTool: details.lastTool }
+      : {}),
   },
 });
 
@@ -661,24 +669,38 @@ const getMissingArgsDetails = (
 
 const zipCodeSchema = z.string().regex(/^\d{5}$/);
 
-const generateReply = async (
-  model: ModelAdapter,
-  input: AgentMessageInput,
+type GenerateReplyParams = {
+  model: ModelAdapter;
+  input: AgentMessageInput;
   customer: {
     id: string;
     displayName: string;
     phoneE164: string;
     addressSummary: string;
-  },
-  toolResult: ToolResult,
-  fallbackText: string,
-  context: string,
-  modelCalls: ModelCall[],
-  messages: Array<{ role: "user" | "assistant"; content: string }>,
-  logger: Logger,
-  callSessionId: string,
-  onToken?: (token: string) => void,
-) => {
+  };
+  toolResult: ToolResult;
+  fallbackText: string;
+  context: string;
+  modelCalls: ModelCall[];
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  logger: Logger;
+  callSessionId: string;
+  onToken?: (token: string) => void;
+};
+
+const generateReply = async ({
+  model,
+  input,
+  customer,
+  toolResult,
+  fallbackText,
+  context,
+  modelCalls,
+  messages,
+  logger,
+  callSessionId,
+  onToken,
+}: GenerateReplyParams) => {
   logger.debug(
     {
       callSessionId,
@@ -977,6 +999,26 @@ export const handleAgentMessage = async (
     },
     "agent.context.snapshot",
   );
+
+  const buildReplyParams = (
+    args: Pick<GenerateReplyParams, "toolResult" | "fallbackText"> & {
+      customerOverride?: GenerateReplyParams["customer"];
+      contextOverride?: string;
+      messagesOverride?: GenerateReplyParams["messages"];
+    },
+  ): GenerateReplyParams => ({
+    model,
+    input,
+    customer: args.customerOverride ?? customer,
+    toolResult: args.toolResult,
+    fallbackText: args.fallbackText,
+    context: args.contextOverride ?? context,
+    modelCalls,
+    messages: args.messagesOverride ?? messageHistory,
+    logger,
+    callSessionId,
+    onToken: options?.onToken,
+  });
 
   const summarizeModelOutput = (output: AgentModelOutput) => {
     if (output.type === "tool_call") {
@@ -1289,20 +1331,13 @@ export const handleAgentMessage = async (
 
         if (latestSummary?.workflowState?.step === "escalate") {
           const replyText = await generateReply(
-            model,
-            input,
-            customer,
-            {
-              toolName: "agent.escalate",
-              result: { escalated: true },
-            },
-            friendlyFallbackText(agentConfig.scopeMessage),
-            context,
-            modelCalls,
-            messageHistory,
-            logger,
-            callSessionId,
-            options?.onToken,
+            buildReplyParams({
+              toolResult: {
+                toolName: "agent.escalate",
+                result: { escalated: true },
+              },
+              fallbackText: friendlyFallbackText(agentConfig.scopeMessage),
+            }),
           );
           await updateCallSummary(replyText);
           await deps.calls.addTurn({
@@ -1359,17 +1394,10 @@ export const handleAgentMessage = async (
             "Still verifying identity; acknowledge and ask if they'd like a human.",
           );
           replyText = await generateReply(
-            model,
-            input,
-            customer,
-            fallbackResult,
-            friendlyFallbackText(agentConfig.scopeMessage),
-            context,
-            modelCalls,
-            messageHistory,
-            logger,
-            callSessionId,
-            options?.onToken,
+            buildReplyParams({
+              toolResult: fallbackResult,
+              fallbackText: friendlyFallbackText(agentConfig.scopeMessage),
+            }),
           );
         }
         await updateCallSummary(replyText);
@@ -1941,17 +1969,10 @@ export const handleAgentMessage = async (
               `${helpText}\n\nYou can also ask to speak with a person at any time.`,
             );
             const replyText = await generateReply(
-              model,
-              input,
-              customer,
-              fallbackResult,
-              friendlyFallbackText(agentConfig.scopeMessage),
-              context,
-              modelCalls,
-              messageHistory,
-              logger,
-              callSessionId,
-              options?.onToken,
+              buildReplyParams({
+                toolResult: fallbackResult,
+                fallbackText: friendlyFallbackText(agentConfig.scopeMessage),
+              }),
             );
             summary = {
               ...summary,
@@ -3130,17 +3151,10 @@ export const handleAgentMessage = async (
         "Model returned empty text; clarify the request or offer a human handoff.",
       );
       replyText = await generateReply(
-        model,
-        input,
-        customer,
-        fallbackResult,
-        friendlyFallbackText(agentConfig.scopeMessage),
-        context,
-        modelCalls,
-        messageHistory,
-        logger,
-        callSessionId,
-        options?.onToken,
+        buildReplyParams({
+          toolResult: fallbackResult,
+          fallbackText: friendlyFallbackText(agentConfig.scopeMessage),
+        }),
       );
       intent = "agent.fallback";
     }
@@ -3273,17 +3287,11 @@ export const handleAgentMessage = async (
     intent = toolCall.toolName;
 
     replyText = await generateReply(
-      model,
-      input,
-      toolCustomer,
-      exec.toolResult,
-      failureMessage,
-      context,
-      modelCalls,
-      messageHistory,
-      logger,
-      callSessionId,
-      options?.onToken,
+      buildReplyParams({
+        customerOverride: toolCustomer,
+        toolResult: exec.toolResult,
+        fallbackText: failureMessage,
+      }),
     );
     if (!replyText.trim()) {
       const fallbackResult = buildFallbackToolResult(
@@ -3291,17 +3299,11 @@ export const handleAgentMessage = async (
         `No response after tool ${toolCall ? toolCall.toolName : intent}; politely clarify or offer a human.`,
       );
       replyText = await generateReply(
-        model,
-        input,
-        toolCustomer,
-        fallbackResult,
-        friendlyFallbackText(agentConfig.scopeMessage),
-        context,
-        modelCalls,
-        messageHistory,
-        logger,
-        callSessionId,
-        options?.onToken,
+        buildReplyParams({
+          customerOverride: toolCustomer,
+          toolResult: fallbackResult,
+          fallbackText: friendlyFallbackText(agentConfig.scopeMessage),
+        }),
       );
     }
 
@@ -3332,17 +3334,11 @@ export const handleAgentMessage = async (
       "Agent reply was empty; ask a concise clarifying question or offer a human.",
     );
     replyText = await generateReply(
-      model,
-      input,
-      toolCustomer,
-      fallbackResult,
-      friendlyFallbackText(agentConfig.scopeMessage),
-      context,
-      modelCalls,
-      messageHistory,
-      logger,
-      callSessionId,
-      options?.onToken,
+      buildReplyParams({
+        customerOverride: toolCustomer,
+        toolResult: fallbackResult,
+        fallbackText: friendlyFallbackText(agentConfig.scopeMessage),
+      }),
     );
     replyUsedFallback = true;
   }
@@ -3360,17 +3356,11 @@ export const handleAgentMessage = async (
       "Still having trouble understanding; offering a human handoff.",
     );
     replyText = await generateReply(
-      model,
-      input,
-      toolCustomer,
-      escalateResult,
-      friendlyFallbackText(agentConfig.scopeMessage),
-      context,
-      modelCalls,
-      messageHistory,
-      logger,
-      callSessionId,
-      options?.onToken,
+      buildReplyParams({
+        customerOverride: toolCustomer,
+        toolResult: escalateResult,
+        fallbackText: friendlyFallbackText(agentConfig.scopeMessage),
+      }),
     );
     summary = {
       ...summary,

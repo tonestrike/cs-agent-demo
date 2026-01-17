@@ -55,7 +55,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const conversationMatch = url.pathname.match(
-      /^\/api\/conversations\/([^/]+)\/(socket|message|resync|rtk-token|summary)$/,
+      /^\/api\/conversations\/([^/]+)\/(socket|message|resync|rtk-token|summary|debug)$/,
     );
     if (conversationMatch) {
       if (request.method === "OPTIONS") {

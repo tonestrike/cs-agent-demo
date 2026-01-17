@@ -20,11 +20,6 @@ export const getAppointment = (
   appointmentId: string,
 ) => repo.get(appointmentId);
 
-export const getNextAppointment = (
-  repo: ReturnType<typeof createAppointmentRepository>,
-  customerId: string,
-) => repo.getLatestForCustomer(customerId);
-
 export const rescheduleAppointment = async (
   repo: ReturnType<typeof createAppointmentRepository>,
   input: {

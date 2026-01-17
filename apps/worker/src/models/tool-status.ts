@@ -1,6 +1,6 @@
 import type { AgentToolName } from "./tool-definitions";
 
-export type ToolStatusConfig = {
+type ToolStatusConfig = {
   fallback: string;
   contextHint: string;
   statusHint: string;

@@ -38,12 +38,12 @@ export const agentToolCallsSchema = z.object({
   acknowledgement: z.string().optional(),
 });
 
-export const agentFinalSchema = z.object({
+const agentFinalSchema = z.object({
   type: z.literal("final"),
   text: z.string().min(1),
 });
 
-export const agentModelOutputSchema = z.union([
+const agentModelOutputSchema = z.union([
   agentToolCallSchema,
   agentToolCallsSchema,
   agentFinalSchema,
@@ -62,7 +62,7 @@ export const isMultipleToolCalls = (
 ): output is z.infer<typeof agentToolCallsSchema> =>
   output.type === "tool_calls";
 
-export const actionPreconditionSchema = z.enum([
+const actionPreconditionSchema = z.enum([
   "verified",
   "has_appointments",
   "has_available_slots",
@@ -132,11 +132,11 @@ export const rescheduleResultSchema = z.object({
   timeWindow: z.string(),
 });
 
-export const cancelAppointmentResultSchema = z.object({
+const cancelAppointmentResultSchema = z.object({
   ok: z.boolean(),
 });
 
-export const availableSlotResultSchema = z.object({
+const availableSlotResultSchema = z.object({
   date: z.string(),
   timeWindow: z.string(),
 });
@@ -185,7 +185,7 @@ export const crmEscalateResultSchema = z.object({
   ticketId: z.string().optional(),
 });
 
-export const agentMessageResultSchema = z.object({
+const agentMessageResultSchema = z.object({
   kind: z.string().min(1),
   details: z.string().optional(),
   options: z
@@ -199,7 +199,7 @@ export const agentMessageResultSchema = z.object({
 });
 
 // Discriminated union for tool results
-export const toolResultSchema = z.discriminatedUnion("toolName", [
+const toolResultSchema = z.discriminatedUnion("toolName", [
   z.object({
     toolName: z.literal("crm.lookupCustomerByPhone"),
     result: customerMatchResultSchema,
@@ -301,19 +301,19 @@ export type SelectionOption = {
   label: string;
 };
 
-export type SelectionInput = {
+type SelectionInput = {
   text: string;
   options: SelectionOption[];
   kind: "appointment" | "slot" | "confirmation";
 };
 
-export type SelectionResult = {
+type SelectionResult = {
   selectedId: string | null;
   index: number | null;
   reason?: string;
 };
 
-export type StatusInput = {
+type StatusInput = {
   text: string;
   contextHint?: string;
   context?: string;

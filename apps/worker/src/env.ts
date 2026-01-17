@@ -1,10 +1,8 @@
 import { z } from "zod";
 
-export const crmProviderSchema = z.enum(["mock", "http"]);
-export type CrmProvider = z.infer<typeof crmProviderSchema>;
-
-export const agentModelSchema = z.enum(["mock", "workers-ai", "openrouter"]);
-export const agentToneSchema = z.enum(["warm", "neutral", "direct"]);
+const crmProviderSchema = z.enum(["mock", "http"]);
+const agentModelSchema = z.enum(["mock", "workers-ai", "openrouter"]);
+const agentToneSchema = z.enum(["warm", "neutral", "direct"]);
 
 export const envSchema = z.object({
   DB: z.custom<D1Database>(),

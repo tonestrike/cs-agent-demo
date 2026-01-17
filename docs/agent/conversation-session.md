@@ -73,3 +73,9 @@ See [`scripts/logs-call-session.ts`](../../scripts/logs-call-session.ts) for det
 
 ## Tests
 Conversational e2e tests live under `apps/worker/src/*.e2e.test.ts`. They validate state transitions and tool effects instead of matching brittle text.
+
+## Task list
+- [ ] Route back into intent/workflow selection automatically after verification in the DO (no standalone verification reply).
+- [ ] Add model-routed off-domain handling with human-offer escalation for repeated unclear turns.
+- [ ] Improve DO logging and debug ergonomics (per-turn completion logs, easier filtering/fetching by session id).
+- [x] Add debug endpoint to fetch session state/events by callSessionId.

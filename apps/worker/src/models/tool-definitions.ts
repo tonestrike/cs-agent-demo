@@ -164,22 +164,6 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
   },
 };
 
-export const aiTools = Object.fromEntries(
-  Object.entries(toolDefinitions).map(([name, definition]) => [
-    name,
-    {
-      description: definition.description,
-      parameters: definition.inputSchema,
-    },
-  ]),
-) as Record<
-  AgentToolName,
-  {
-    description: string;
-    parameters: z.ZodTypeAny;
-  }
->;
-
 export const validateToolArgs = (
   toolName: AgentToolName,
   args: Record<string, unknown> | undefined,
