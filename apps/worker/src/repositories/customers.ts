@@ -73,7 +73,7 @@ export const createCustomerRepository = (db: D1Database) => {
     async upsert(customer: CustomerCache) {
       await db
         .prepare(
-          "INSERT INTO customers_cache (id, phone_e164, crm_customer_id, display_name, address_summary, zip_code, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET phone_e164 = excluded.phone_e164, crm_customer_id = excluded.crm_customer_id, display_name = excluded.display_name, address_summary = excluded.address_summary, zip_code = excluded.zip_code, updated_at = excluded.updated_at",
+          "INSERT INTO customers_cache (id, phone_e164, crm_customer_id, display_name, address_summary, zip_code, participant_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET phone_e164 = excluded.phone_e164, crm_customer_id = excluded.crm_customer_id, display_name = excluded.display_name, address_summary = excluded.address_summary, zip_code = excluded.zip_code, participant_id = excluded.participant_id, updated_at = excluded.updated_at",
         )
         .bind(
           customer.id,
@@ -82,6 +82,7 @@ export const createCustomerRepository = (db: D1Database) => {
           customer.displayName,
           customer.addressSummary ?? null,
           customer.zipCode ?? null,
+          customer.participantId ?? null,
           customer.updatedAt,
         )
         .run();

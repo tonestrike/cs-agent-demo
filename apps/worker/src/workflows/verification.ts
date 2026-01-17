@@ -382,6 +382,8 @@ export class VerificationWorkflow extends WorkflowEntrypoint<
               );
               throw error;
             }
+            const existingCustomer = await deps.customers.get(verifiedMatch.id);
+            const participantId = existingCustomer?.participantId ?? null;
             try {
               await deps.customers.upsert({
                 id: verifiedMatch.id,
@@ -390,6 +392,7 @@ export class VerificationWorkflow extends WorkflowEntrypoint<
                 phoneE164: verifiedMatch.phoneE164 ?? params.phoneE164,
                 addressSummary: verifiedMatch.addressSummary ?? null,
                 zipCode: verifiedMatch.zipCode ?? null,
+                participantId,
                 updatedAt: new Date().toISOString(),
               });
               logger.info(

@@ -37,6 +37,12 @@ export const envSchema = z.object({
   RESCHEDULE_WORKFLOW: z.custom<Workflow>().optional(),
   VERIFY_WORKFLOW: z.custom<Workflow>().optional(),
   CANCEL_WORKFLOW: z.custom<Workflow>().optional(),
+  REALTIMEKIT_ACCOUNT_ID: z.string().optional(),
+  REALTIMEKIT_APP_ID: z.string().optional(),
+  REALTIMEKIT_MEETING_ID: z.string().optional(),
+  REALTIMEKIT_API_TOKEN: z.string().optional(),
+  REALTIMEKIT_PRESET_NAME: z.string().optional(),
+  REALTIMEKIT_API_BASE_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

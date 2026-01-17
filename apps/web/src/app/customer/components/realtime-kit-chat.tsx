@@ -3,10 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { Customer } from "../types";
-import { realtimeKitApiKey, realtimeKitRegion } from "../../../lib/env";
+import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
 
-type RealtimeKitMeeting = {
-  on: (event: string, handler: (...args: unknown[]) => void) => void;
+type RealtimeKitClient = {
   join: () => Promise<void>;
   leave: () => Promise<void>;
 };
@@ -14,18 +13,28 @@ type RealtimeKitMeeting = {
 declare global {
   interface Window {
     RealtimeKit?: {
-      Meeting?: new (options: {
-        roomName: string;
-        participantName: string;
-        apiKey?: string;
-        region?: string;
-      }) => RealtimeKitMeeting;
       init?: (options: {
         authToken: string;
         defaults?: { audio?: boolean; video?: boolean };
-      }) => Promise<unknown>;
+      }) => Promise<RealtimeKitClient>;
     };
   }
+}
+
+type RealtimeKitTokenResponse = {
+  ok: boolean;
+  meetingId: string;
+  authToken: string;
+  token?: string;
+  participantId: string;
+  presetName?: string | null;
+  expiresAt?: string | null;
+  error?: string;
+};
+
+interface PreloadState {
+  status: string;
+  error?: string;
 }
 
 interface RealtimeKitChatPanelProps {
@@ -37,81 +46,81 @@ export function RealtimeKitChatPanel({
   sessionId,
   customer,
 }: RealtimeKitChatPanelProps) {
-  const [meeting, setMeeting] = useState<RealtimeKitMeeting | null>(null);
-  const [status, setStatus] = useState("Waiting for session...");
-  const meetingRef = useRef<RealtimeKitMeeting | null>(null);
+  const [status, setStatus] = useState<PreloadState>({
+    status: "Waiting for session...",
+  });
+  const [meeting, setMeeting] = useState<RealtimeKitClient | null>(null);
+  const meetingRef = useRef<RealtimeKitClient | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const cleanup = () => {
-      meetingRef.current?.leave().catch(() => {});
-      meetingRef.current = null;
+      const client = meetingRef.current;
+      if (client) {
+        client.leave().catch(() => {});
+        meetingRef.current = null;
+      }
       setMeeting(null);
     };
 
-    if (!sessionId) {
+    if (!sessionId || !customer) {
       cleanup();
-      setStatus("Waiting for conversation session...");
+      setStatus({ status: "Waiting for conversation session..." });
       return;
     }
 
-    const loadMeeting = async () => {
-      if (!window.RealtimeKit?.Meeting) {
-        setStatus("RealtimeKit loader not ready.");
+    const loadRealtimeKit = async () => {
+      setStatus({ status: "Requesting realtime token..." });
+      const base = apiBaseUrl || window.location.origin;
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+      };
+      if (demoAuthToken) {
+        headers["x-demo-auth"] = demoAuthToken;
+      }
+      const response = await fetch(
+        `${base}/api/conversations/${sessionId}/rtk-token`,
+        {
+          method: "POST",
+          headers,
+        },
+      );
+      const payload = (await response.json()) as RealtimeKitTokenResponse;
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "RealtimeKit token request failed");
+      }
+      const authToken = payload.authToken ?? payload.token;
+      if (!authToken) {
+        throw new Error("RealtimeKit token missing");
+      }
+      const RealtimeKit = window.RealtimeKit;
+      if (!RealtimeKit || typeof RealtimeKit.init !== "function") {
+        throw new Error("RealtimeKit SDK unavailable");
+      }
+      setStatus({ status: "Joining realtime meeting..." });
+      const client = await RealtimeKit.init({
+        authToken,
+        defaults: { audio: true, video: false },
+      });
+      await client.join();
+      if (cancelled) {
+        await client.leave();
         return;
       }
-      const options: {
-        roomName: string;
-        participantName: string;
-        apiKey?: string;
-        region?: string;
-      } = {
-        roomName: sessionId,
-        participantName: customer?.displayName ?? "Customer",
-      };
-      if (realtimeKitApiKey) {
-        options.apiKey = realtimeKitApiKey;
-      }
-      if (realtimeKitRegion) {
-        options.region = realtimeKitRegion;
-      }
-
-      setStatus("Connecting to RealtimeKit...");
-      const instance = new window.RealtimeKit.Meeting(options);
-      meetingRef.current = instance;
-
-      instance.on("connected", () => {
-        if (cancelled) {
-          return;
-        }
-        setStatus("RealtimeKit chat ready");
-      });
-      instance.on("disconnected", () => {
-        if (!cancelled) {
-          setStatus("RealtimeKit disconnected");
-        }
-      });
-      instance.on("error", () => {
-        if (!cancelled) {
-          setStatus("RealtimeKit error");
-        }
-      });
-
-      try {
-        await instance.join();
-        if (cancelled) {
-          await instance.leave();
-          return;
-        }
-        setMeeting(instance);
-      } catch {
-        if (!cancelled) {
-          setStatus("Failed to join RealtimeKit chat");
-        }
-      }
+      meetingRef.current = client;
+      setMeeting(client);
+      setStatus({ status: "RealtimeKit chat ready" });
     };
 
-    loadMeeting();
+    loadRealtimeKit().catch((error) => {
+      if (cancelled) {
+        return;
+      }
+      const message =
+        error instanceof Error ? error.message : "RealtimeKit failed to load.";
+      setStatus({ status: "RealtimeKit unavailable", error: message });
+    });
+
     return () => {
       cancelled = true;
       cleanup();
@@ -121,10 +130,10 @@ export function RealtimeKitChatPanel({
   return (
     <div className="rounded-xl border border-ink-200 bg-white shadow-soft">
       <div className="flex items-center justify-between border-b border-ink-100 px-4 py-3">
-        <h3 className="text-sm font-semibold text-ink">
-          RealtimeKit chat preview
-        </h3>
-        <span className="text-xs text-ink/70">{status}</span>
+        <h3 className="text-sm font-semibold text-ink">RealtimeKit chat</h3>
+        <span className="text-xs text-ink/70" title={status.error ?? undefined}>
+          {status.status}
+        </span>
       </div>
       <div className="h-[360px] bg-sand-50">
         {meeting ? (
@@ -137,8 +146,8 @@ export function RealtimeKitChatPanel({
         ) : (
           <div className="flex h-full items-center justify-center px-4 text-sm text-ink/70">
             {sessionId
-              ? status
-              : "Send a message to establish a session before RealtimeKit loads."}
+              ? status.status
+              : "Send a message to establish a session before realtime chat loads."}
           </div>
         )}
       </div>

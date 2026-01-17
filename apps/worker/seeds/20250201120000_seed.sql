@@ -1,7 +1,7 @@
-INSERT OR REPLACE INTO customers_cache (id, phone_e164, crm_customer_id, display_name, address_summary, zip_code)
+INSERT OR REPLACE INTO customers_cache (id, phone_e164, crm_customer_id, display_name, address_summary, zip_code, participant_id)
 VALUES
-  ('cust_001', '+14155552671', 'cust_001', 'Alex Rivera', '742 Evergreen Terrace', '94107'),
-  ('cust_002', '+14155550987', 'cust_002', 'Morgan Lee', '123 Harbor Drive', '98109');
+  ('cust_001', '+14155552671', 'cust_001', 'Alex Rivera', '742 Evergreen Terrace', '94107', NULL),
+  ('cust_002', '+14155550987', 'cust_002', 'Morgan Lee', '123 Harbor Drive', '98109', NULL);
 
 INSERT OR REPLACE INTO call_sessions (id, started_at, ended_at, phone_e164, customer_cache_id, status, transport, summary)
 VALUES

@@ -17,4 +17,5 @@ export type Customer = {
   displayName: string;
   zipCode: string | null;
   addressSummary: string | null;
+  participantId?: string | null;
 };

@@ -1,4 +1,4 @@
-import { normalizePhoneE164 } from "@pestcall/core";
+import { normalizePhoneE164, type CustomerCache } from "@pestcall/core";
 import { z } from "zod";
 
 import { createDependencies } from "../context";
@@ -17,11 +17,14 @@ import type { Logger } from "../logger";
 import { createLogger } from "../logger";
 import { validateToolArgs } from "../models/tool-definitions";
 import type {
+  ActionPlan,
+  ActionPrecondition,
   AgentModelInput,
   AgentResponseInput,
   SelectionOption,
   ToolResult,
 } from "../models/types";
+import { actionPlanSchema } from "../models/types";
 import {
   type AgentMessageInput,
   type AgentMessageOutput,
@@ -43,6 +46,11 @@ import {
   RESCHEDULE_WORKFLOW_EVENT_SELECT_APPOINTMENT,
   RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
 } from "../workflows/constants";
+import {
+  addRealtimeKitParticipant,
+  refreshRealtimeKitToken,
+  type RealtimeKitTokenPayload,
+} from "../realtime-kit";
 
 type ConversationEventType =
   | "token"
@@ -222,6 +230,10 @@ export class ConversationSession {
 
     if (request.method === "POST" && url.pathname.endsWith("/resync")) {
       return this.handleResyncRequest(request);
+    }
+
+    if (request.method === "POST" && url.pathname.endsWith("/rtk-token")) {
+      return this.handleRealtimeTokenRequest(request);
     }
 
     return new Response("Not found", { status: 404 });
@@ -410,6 +422,60 @@ export class ConversationSession {
       latestEventId: this.lastEventId,
       state: this.sessionState.conversation ?? initialConversationState(),
     });
+  }
+
+  private async handleRealtimeTokenRequest(
+    request: Request,
+  ): Promise<Response> {
+    if (request.method !== "POST") {
+      return new Response("Method not allowed", { status: 405 });
+    }
+    const deps = createDependencies(this.env);
+    const customerId = this.sessionState.conversation?.verification.customerId;
+    if (!customerId) {
+      return Response.json(
+        { ok: false, error: "Customer verification required." },
+        { status: 400 },
+      );
+    }
+    const customer = await deps.customers.get(customerId);
+    if (!customer) {
+      return Response.json(
+        { ok: false, error: "Customer not found." },
+        { status: 404 },
+      );
+    }
+    try {
+      const token = await this.getRealtimeKitToken(deps, customer);
+      return Response.json({ ok: true, ...token });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "RealtimeKit token failed.";
+      this.logger.error(
+        { error: message, customerId },
+        "conversation.session.rtk_token_failed",
+      );
+      return Response.json({ ok: false, error: message }, { status: 500 });
+    }
+  }
+
+  private async getRealtimeKitToken(
+    deps: ReturnType<typeof createDependencies>,
+    customer: CustomerCache,
+  ): Promise<RealtimeKitTokenPayload> {
+    let token: RealtimeKitTokenPayload;
+    if (customer.participantId) {
+      token = await refreshRealtimeKitToken(this.env, customer.participantId);
+    } else {
+      token = await addRealtimeKitParticipant(this.env, customer);
+    }
+    const updatedCustomer: CustomerCache = {
+      ...customer,
+      participantId: token.participantId,
+      updatedAt: new Date().toISOString(),
+    };
+    await deps.customers.upsert(updatedCustomer);
+    return token;
   }
 
   private async runMessage(
@@ -1725,9 +1791,45 @@ export class ConversationSession {
         this.emitNarratorTokens(replyText, streamId);
         return { callSessionId, replyText, actions: [] };
       }
+      const actionPlan = actionPlanSchema.safeParse({
+        kind: "tool",
+        toolName: decision.toolName,
+        arguments: decision.arguments ?? {},
+        required: this.getActionPreconditions(decision.toolName),
+      });
+      if (!actionPlan.success) {
+        this.logger.warn(
+          {
+            callSessionId,
+            issues: actionPlan.error.issues.map((issue) => issue.message),
+          },
+          "conversation.session.action_plan.invalid",
+        );
+        const replyText = await this.narrateText(
+          input,
+          deps,
+          streamId,
+          "I couldn't take that action yet. Can you rephrase?",
+          "Ask the caller to rephrase their request.",
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+      const policyGate = this.evaluateActionPlan(actionPlan.data);
+      if (!policyGate.ok) {
+        const replyText = await this.narrateText(
+          input,
+          deps,
+          streamId,
+          policyGate.message ??
+            "I need to verify your account before I can help with that.",
+          policyGate.contextHint ??
+            "Ask for the 5-digit ZIP code to verify the account.",
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
       return await this.executeToolCall(
-        decision.toolName,
-        decision.arguments ?? {},
+        actionPlan.data.toolName,
+        actionPlan.data.arguments ?? {},
         input,
         deps,
         streamId,
@@ -1810,6 +1912,66 @@ export class ConversationSession {
     return /\b(appointment|appointments|reschedule|cancel|schedule|book|billing|invoice|balance|payment|pay|charge|policy)\b/i.test(
       text,
     );
+  }
+
+  private getActionPreconditions(
+    toolName: ActionPlan["toolName"],
+  ): ActionPrecondition[] {
+    switch (toolName) {
+      case "crm.verifyAccount":
+      case "crm.lookupCustomerByPhone":
+      case "crm.lookupCustomerByNameAndZip":
+      case "crm.lookupCustomerByEmail":
+      case "agent.escalate":
+      case "agent.fallback":
+        return [];
+      default:
+        return ["verified"];
+    }
+  }
+
+  private evaluateActionPlan(plan: ActionPlan): {
+    ok: boolean;
+    message?: string;
+    contextHint?: string;
+  } {
+    const state = this.sessionState.conversation ?? initialConversationState();
+    const required = plan.required ?? [];
+    if (required.includes("verified") && !state.verification.verified) {
+      return {
+        ok: false,
+        message: "Please share the 5-digit ZIP code on your account first.",
+        contextHint: "Ask for the 5-digit ZIP code to verify the account.",
+      };
+    }
+    if (required.includes("has_appointments") && !state.appointments.length) {
+      return {
+        ok: false,
+        message: "Let me pull up your upcoming appointments first.",
+        contextHint: "Acknowledge and say you're fetching appointments.",
+      };
+    }
+    if (
+      required.includes("has_available_slots") &&
+      !(this.sessionState.availableSlots?.length ?? 0)
+    ) {
+      return {
+        ok: false,
+        message: "Let me check the available times first.",
+        contextHint: "Acknowledge and say you're checking availability.",
+      };
+    }
+    if (
+      required.includes("pending_cancellation") &&
+      !state.pendingCancellationId
+    ) {
+      return {
+        ok: false,
+        message: "Which appointment would you like to cancel?",
+        contextHint: "Ask which appointment should be canceled.",
+      };
+    }
+    return { ok: true };
   }
 
   private startTurnAcknowledgement(

@@ -37,6 +37,24 @@ export const agentModelOutputSchema = z.union([
 
 export type AgentModelOutput = z.infer<typeof agentModelOutputSchema>;
 
+export const actionPreconditionSchema = z.enum([
+  "verified",
+  "has_appointments",
+  "has_available_slots",
+  "pending_cancellation",
+]);
+
+export type ActionPrecondition = z.infer<typeof actionPreconditionSchema>;
+
+export const actionPlanSchema = z.object({
+  kind: z.literal("tool"),
+  toolName: agentToolNameSchema,
+  arguments: z.record(z.unknown()).optional(),
+  required: z.array(actionPreconditionSchema).optional(),
+});
+
+export type ActionPlan = z.infer<typeof actionPlanSchema>;
+
 export const agentRouteSchema = z.object({
   intent: z.enum([
     "appointments",

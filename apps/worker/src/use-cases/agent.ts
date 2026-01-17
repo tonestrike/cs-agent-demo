@@ -2114,6 +2114,8 @@ export const handleAgentMessage = async (
                   ? summary.pendingCustomerProfile
                   : null);
               if (profile) {
+                const existingCustomer = await deps.customers.get(customerId);
+                const participantId = existingCustomer?.participantId ?? null;
                 await deps.customers.upsert({
                   id: customerId,
                   crmCustomerId: customerId,
@@ -2121,6 +2123,7 @@ export const handleAgentMessage = async (
                   phoneE164: profile.phoneE164 ?? phoneE164,
                   addressSummary: profile.addressSummary ?? null,
                   zipCode: profile.zipCode ?? null,
+                  participantId,
                   updatedAt: new Date().toISOString(),
                 });
               }

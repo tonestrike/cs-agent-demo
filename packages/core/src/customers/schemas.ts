@@ -12,6 +12,7 @@ export const customerCacheSchema = z.object({
     .string()
     .regex(/^\d{5}$/)
     .nullable(),
+  participantId: z.string().nullable(),
   updatedAt: z.string(),
 });
 

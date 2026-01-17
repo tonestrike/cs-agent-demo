@@ -16,6 +16,7 @@ type JoinedCustomerRow = {
   customer_display_name?: string | null;
   customer_address_summary?: string | null;
   customer_zip_code?: string | null;
+  customer_participant_id?: string | null;
   customer_updated_at?: string | null;
 };
 
@@ -84,6 +85,7 @@ export type CustomerCacheRow = {
   display_name: string;
   address_summary: string | null;
   zip_code: string | null;
+  participant_id: string | null;
   updated_at: string;
 };
 
@@ -124,6 +126,7 @@ const mapJoinedCustomer = (
     phoneE164: row.customer_phone_e164,
     addressSummary: row.customer_address_summary ?? null,
     zipCode: row.customer_zip_code ?? null,
+    participantId: row.customer_participant_id ?? null,
     updatedAt: row.customer_updated_at,
   };
 };
@@ -220,6 +223,7 @@ export const mapCustomerCacheRow = (row: CustomerCacheRow): CustomerCache => {
     phoneE164: row.phone_e164,
     addressSummary: row.address_summary ?? null,
     zipCode: row.zip_code ?? null,
+    participantId: row.participant_id ?? null,
     updatedAt: row.updated_at,
   };
 };

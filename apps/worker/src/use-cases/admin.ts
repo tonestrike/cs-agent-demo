@@ -21,6 +21,7 @@ export const createAdminCustomer = async (
     addressSummary: input.addressSummary ?? null,
     zipCode: input.zipCode ?? null,
     crmCustomerId: input.crmCustomerId ?? id,
+    participantId: null,
     updatedAt: new Date().toISOString(),
   });
   return { id };
