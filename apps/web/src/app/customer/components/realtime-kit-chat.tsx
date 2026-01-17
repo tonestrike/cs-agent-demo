@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
 import type { Meeting } from "@cloudflare/realtimekit-ui";
+import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
 import type { Customer } from "../types";
 
 type RealtimeKitClient = Meeting & {

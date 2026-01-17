@@ -1,5 +1,5 @@
-import type { DetailedHTMLProps, HTMLAttributes } from "react";
 import type { JSX as RtkJSX } from "@cloudflare/realtimekit-ui";
+import type { DetailedHTMLProps, HTMLAttributes } from "react";
 
 type RtkElement<T> = DetailedHTMLProps<HTMLAttributes<T>, T>;
 
