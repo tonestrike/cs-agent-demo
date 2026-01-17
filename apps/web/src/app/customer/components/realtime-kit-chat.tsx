@@ -119,12 +119,18 @@ interface RealtimeKitChatPanelProps {
   sessionId: string | null;
   customer?: Customer | null;
   enableTts?: boolean;
+  onDebugEvent?: (
+    message: string,
+    data?: Record<string, unknown>,
+    options?: { level?: "info" | "warn" | "error"; source?: string },
+  ) => void;
 }
 
 export function RealtimeKitChatPanel({
   sessionId,
   customer,
   enableTts = false,
+  onDebugEvent,
 }: RealtimeKitChatPanelProps) {
   const [status, setStatus] = useState("Waiting for session...");
   const [, setStatusError] = useState<string | undefined>();
@@ -180,6 +186,7 @@ export function RealtimeKitChatPanel({
         meetingReady: meetingReadyRef.current,
         ...data,
       };
+      onDebugEvent?.(message, payload, { level, source: "rtk" });
       if (level === "error") {
         logger.error(payload, message);
         return;
@@ -190,7 +197,7 @@ export function RealtimeKitChatPanel({
       }
       logger.info(payload, message);
     },
-    [],
+    [onDebugEvent],
   );
 
   // Keep refs in sync with props/state for stable logging
@@ -647,15 +654,25 @@ export function RealtimeKitChatPanel({
         text: "WebSocket connected",
         time: Date.now(),
       });
+      log("rtk.tts.ws.open", { sessionId });
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       setWsConnected(false);
       setLastActivity({
         type: "error",
         text: "WebSocket disconnected",
         time: Date.now(),
       });
+      log(
+        "rtk.tts.ws.close",
+        {
+          code: event.code,
+          reason: event.reason || undefined,
+          wasClean: event.wasClean,
+        },
+        "warn",
+      );
     };
 
     socket.onerror = () => {
@@ -664,6 +681,7 @@ export function RealtimeKitChatPanel({
         text: "WebSocket error",
         time: Date.now(),
       });
+      log("rtk.tts.ws.error", { sessionId }, "error");
     };
 
     socket.onmessage = (event) => {
@@ -683,6 +701,10 @@ export function RealtimeKitChatPanel({
             type: "status",
             text: `Status: ${text?.slice(0, 40) ?? ""}`,
             time: Date.now(),
+          });
+          log("rtk.tts.status", {
+            textPreview: text?.slice(0, 80) ?? "",
+            messageId: payload.messageId ?? null,
           });
           if (text && ttsEnabled.current) {
             window.speechSynthesis.cancel();
@@ -724,6 +746,10 @@ export function RealtimeKitChatPanel({
             text: `Reply: ${text.slice(0, 40)}...`,
             time: Date.now(),
           });
+          log("rtk.tts.final", {
+            textLength: text.length,
+            messageId,
+          });
           if (text && ttsEnabled.current) {
             window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
@@ -743,7 +769,7 @@ export function RealtimeKitChatPanel({
       socket.close();
       setWsConnected(false);
     };
-  }, [sessionId, customer?.id, appendAssistantChatMessage]);
+  }, [sessionId, customer?.id, appendAssistantChatMessage, log]);
 
   // Assign meeting to RTK web components with retry logic
   useEffect(() => {

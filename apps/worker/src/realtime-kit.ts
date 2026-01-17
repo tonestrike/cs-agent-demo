@@ -97,6 +97,7 @@ export const createRealtimeKitMeeting = async (
     errors?: Array<{ message?: string }>;
     message?: string;
     result?: { meeting_id?: string; meetingId?: string };
+    data?: { id?: string; meeting_id?: string; meetingId?: string };
   } | null;
   logger.info(
     {
@@ -108,9 +109,7 @@ export const createRealtimeKitMeeting = async (
     },
     "realtimekit.response",
   );
-  const meetingId =
-    (payload?.result?.meeting_id as string | undefined) ??
-    (payload?.result?.meetingId as string | undefined);
+  const meetingId = payload?.data?.id as string | undefined;
   if (!response.ok || !meetingId) {
     throw new Error(
       payload?.message ||
@@ -127,21 +126,29 @@ const sanitizeRealtimeKitPayload = (
     errors?: Array<{ message?: string }>;
     message?: string;
     result?: Record<string, unknown>;
+    data?: Record<string, unknown>;
   } | null,
 ) => {
   if (!payload) {
     return null;
   }
-  const result = payload.result
-    ? Object.fromEntries(
-        Object.entries(payload.result).map(([key, value]) => {
-          if (key === "token" || key === "authToken" || key === "auth_token") {
-            return [key, "[redacted]"];
-          }
-          return [key, value];
-        }),
-      )
-    : undefined;
+  const redactSecrets = (source?: Record<string, unknown>) =>
+    source
+      ? Object.fromEntries(
+          Object.entries(source).map(([key, value]) => {
+            if (
+              key === "token" ||
+              key === "authToken" ||
+              key === "auth_token"
+            ) {
+              return [key, "[redacted]"];
+            }
+            return [key, value];
+          }),
+        )
+      : undefined;
+  const result = redactSecrets(payload.result);
+  const data = redactSecrets(payload.data);
   return { ...payload, result };
 };
 

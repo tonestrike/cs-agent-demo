@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
-import type { ChatMessage, ClientLog } from "../types";
+import type { ChatMessage, ClientLog, TurnMetric } from "../types";
 
 export function useConversationSession(phoneNumber: string) {
   const [callSessionId, setCallSessionId] = useState<string | null>(null);
@@ -12,22 +12,7 @@ export function useConversationSession(phoneNumber: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [connectionStatus, setConnectionStatus] = useState("New session");
   const [logs, setLogs] = useState<ClientLog[]>([]);
-  const [turnMetrics, setTurnMetrics] = useState<
-    Array<{
-      turnId: number;
-      sessionId: string;
-      userText: string;
-      userTextLength: number;
-      startedAt: number;
-      firstTokenAt: number | null;
-      firstStatusAt: number | null;
-      finalAt: number | null;
-      firstTokenMs: number | null;
-      firstStatusMs: number | null;
-      totalMs: number | null;
-      statusTexts: string[];
-    }>
-  >([]);
+  const [turnMetrics, setTurnMetrics] = useState<TurnMetric[]>([]);
 
   const socketRef = useRef<WebSocket | null>(null);
   const responseIdRef = useRef<string | null>(null);
@@ -37,25 +22,7 @@ export function useConversationSession(phoneNumber: string) {
   const pendingTurnsRef = useRef<
     Array<{ sessionId: string; startedAt: number; userText: string }>
   >([]);
-  const turnMetricsRef = useRef(
-    new Map<
-      number,
-      {
-        turnId: number;
-        sessionId: string;
-        userText: string;
-        userTextLength: number;
-        startedAt: number;
-        firstTokenAt: number | null;
-        firstStatusAt: number | null;
-        finalAt: number | null;
-        firstTokenMs: number | null;
-        firstStatusMs: number | null;
-        totalMs: number | null;
-        statusTexts: string[];
-      }
-    >(),
-  );
+  const turnMetricsRef = useRef(new Map<number, TurnMetric>());
 
   const clearAutoZipTimer = useCallback(() => {
     if (autoZipTimerRef.current !== null) {
@@ -75,12 +42,25 @@ export function useConversationSession(phoneNumber: string) {
   }, [clearAutoZipTimer]);
 
   const logEvent = useCallback(
-    (message: string, data?: Record<string, unknown>) => {
+    (
+      message: string,
+      data?: Record<string, unknown>,
+      options?: { level?: "info" | "warn" | "error"; source?: string },
+    ) => {
+      const level =
+        options?.level ??
+        (/error|failed|issue/i.test(message)
+          ? "error"
+          : /timeout|retry/i.test(message)
+            ? "warn"
+            : "info");
       const entry: ClientLog = {
         id: crypto.randomUUID(),
         ts: new Date().toISOString(),
         message,
         data,
+        level,
+        source: options?.source ?? message.split(".")[0] ?? "client",
       };
       setLogs((prev) => [entry, ...prev].slice(0, 200));
     },
@@ -103,7 +83,7 @@ export function useConversationSession(phoneNumber: string) {
       const pending = pendingTurnsRef.current.shift();
       const startedAt = pending?.startedAt ?? Date.now();
       const userText = pending?.userText ?? "";
-      const metric = {
+      const metric: TurnMetric = {
         turnId,
         sessionId,
         userText,
@@ -128,20 +108,7 @@ export function useConversationSession(phoneNumber: string) {
     (
       turnId: number,
       sessionId: string,
-      updater: (metric: {
-        turnId: number;
-        sessionId: string;
-        userText: string;
-        userTextLength: number;
-        startedAt: number;
-        firstTokenAt: number | null;
-        firstStatusAt: number | null;
-        finalAt: number | null;
-        firstTokenMs: number | null;
-        firstStatusMs: number | null;
-        totalMs: number | null;
-        statusTexts: string[];
-      }) => void,
+      updater: (metric: TurnMetric) => void,
     ) => {
       const metric = ensureTurnMetric(turnId, sessionId);
       updater(metric);
@@ -457,8 +424,31 @@ export function useConversationSession(phoneNumber: string) {
     }
     logEvent("chat.start_call", { phoneNumber });
     clearAutoZipTimer();
-    await sendMessage("Incoming call started", { skipUserMessage: true });
-  }, [clearAutoZipTimer, logEvent, phoneNumber, sendMessage]);
+    const sessionId = callSessionId ?? crypto.randomUUID();
+    if (!callSessionId) {
+      setCallSessionId(sessionId);
+      setConfirmedSessionId(sessionId);
+    }
+    try {
+      setConnectionStatus("Connecting");
+      await ensureSocket(sessionId);
+      logEvent("ws.ready", { sessionId });
+    } catch {
+      setConnectionStatus("Connection issue. Try again.");
+      logEvent("ws.unavailable", { sessionId });
+    }
+  }, [callSessionId, clearAutoZipTimer, ensureSocket, logEvent, phoneNumber]);
+
+  const recordClientLog = useCallback(
+    (
+      message: string,
+      data?: Record<string, unknown>,
+      options?: { level?: "info" | "warn" | "error"; source?: string },
+    ) => {
+      logEvent(message, data, options);
+    },
+    [logEvent],
+  );
 
   return {
     messages,
@@ -470,5 +460,6 @@ export function useConversationSession(phoneNumber: string) {
     sendMessage,
     startCall,
     resetSession,
+    recordClientLog,
   };
 }

@@ -4,7 +4,12 @@ import { useCallback, useState } from "react";
 
 import { useConversationSession } from "../hooks";
 import type { Customer } from "../types";
-import { ChatHeader, CustomerBar, RealtimeKitChatPanel } from "./index";
+import {
+  ChatHeader,
+  CustomerBar,
+  RealtimeKitChatPanel,
+  RealtimeLogsPanel,
+} from "./index";
 
 type SidebarTab = "settings" | "logs";
 
@@ -33,6 +38,7 @@ export function RealtimeChatView({
     callSessionId,
     startCall,
     resetSession,
+    recordClientLog,
   } = useConversationSession(phoneNumber);
 
   const handleCustomerChange = useCallback(
@@ -152,26 +158,14 @@ export function RealtimeChatView({
                 </div>
               </div>
             ) : (
-              <div className="space-y-3 rounded-xl border border-ink-200 bg-white p-5 text-sm text-ink-600 shadow-soft">
-                <p className="font-semibold text-ink">Realtime logs</p>
-                <button
-                  type="button"
-                  onClick={copyConversation}
-                  className="w-full rounded-lg border border-ink-200 bg-sand-100 py-2 text-xs font-semibold text-ink-700 hover:bg-sand-200"
-                >
-                  Copy realtime logs
-                </button>
-                <div className="space-y-2 text-xs">
-                  {logs.length === 0 && (
-                    <p className="text-ink-400">No realtime logs yet.</p>
-                  )}
-                  {logs.slice(0, 8).map((entry) => (
-                    <p key={entry.id}>
-                      {entry.ts} — {entry.message}
-                    </p>
-                  ))}
-                </div>
-              </div>
+              <RealtimeLogsPanel
+                logs={logs}
+                turnMetrics={turnMetrics}
+                callSessionId={callSessionId}
+                phoneNumber={phoneNumber}
+                status={status}
+                onCopyConversation={copyConversation}
+              />
             )}
           </div>
         </div>
@@ -215,7 +209,7 @@ export function RealtimeChatView({
 
         <div className="flex flex-1 flex-col min-h-0">
           <div className="flex-shrink-0 px-4 pt-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-ink-200 pb-3">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 pb-3">
               <div className="space-y-1">
                 <p className="text-xs text-ink-500">
                   Start an incoming call session (runs verification before the
@@ -249,6 +243,7 @@ export function RealtimeChatView({
               sessionId={callSessionId}
               customer={selectedCustomer}
               enableTts={ttsEnabled}
+              onDebugEvent={recordClientLog}
             />
           </div>
         </div>
