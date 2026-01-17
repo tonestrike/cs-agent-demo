@@ -59,6 +59,7 @@ declare global {
       init?: (options: {
         authToken: string;
         defaults?: { audio?: boolean; video?: boolean };
+        modules?: { chat?: boolean; participant?: boolean };
       }) => Promise<RealtimeKitClient>;
     };
   }
@@ -196,6 +197,7 @@ export function RealtimeKitChatPanel({
       const client = await RealtimeKit.init({
         authToken,
         defaults: { audio: true, video: false },
+        modules: { chat: true, participant: true },
       });
       await client.join();
       if (cancelled) {

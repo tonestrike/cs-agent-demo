@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 
 const preloadRealtimeKit = async () => {
   try {
-    await import("@cloudflare/realtimekit-ui/loader");
+    const loader = await import("@cloudflare/realtimekit-ui/loader");
+    loader.defineCustomElements?.(window);
   } catch (error) {
     console.error("Failed to load RealtimeKit UI loader", error);
   }

@@ -1958,6 +1958,16 @@ export class ConversationSession {
         {
           callSessionId,
           turnId: this.activeTurnId,
+          provider: model.name,
+          modelId: model.modelId ?? null,
+          kind: "generate",
+        },
+        "conversation.session.model.call",
+      );
+      this.logger.info(
+        {
+          callSessionId,
+          turnId: this.activeTurnId,
           messageCount: messages.length,
           messages,
         },
@@ -1989,6 +1999,29 @@ export class ConversationSession {
         "conversation.session.generate.output",
       );
       if (decision.type === "final") {
+        const inferredTool = this.inferToolFromText(input.text);
+        if (inferredTool) {
+          this.logger.info(
+            {
+              callSessionId,
+              turnId: this.activeTurnId,
+              inferredTool,
+              text: input.text,
+            },
+            "conversation.session.tool_call.fallback",
+          );
+          const acknowledgementText = this.shouldPreAcknowledge(input.text)
+            ? "Got it. Give me a moment while I check."
+            : "";
+          return await this.executeToolCall(
+            inferredTool,
+            {},
+            input,
+            deps,
+            streamId,
+            acknowledgementText,
+          );
+        }
         const replyText =
           decision.text.trim() ||
           "I could not interpret the request. Can you rephrase?";
@@ -2142,6 +2175,36 @@ export class ConversationSession {
     return /\b(appointment|appointments|reschedule|cancel|schedule|book|billing|invoice|balance|payment|pay|charge|policy)\b/i.test(
       text,
     );
+  }
+
+  private inferToolFromText(text: string): ActionPlan["toolName"] | null {
+    const normalized = text.toLowerCase();
+    if (/\b(reschedule|change|move)\b/.test(normalized)) {
+      return "crm.rescheduleAppointment";
+    }
+    if (/\b(cancel|cancellation)\b/.test(normalized)) {
+      return "crm.cancelAppointment";
+    }
+    if (
+      /\b(schedule|book|available|availability|openings|time slots?)\b/.test(
+        normalized,
+      )
+    ) {
+      return "crm.getAvailableSlots";
+    }
+    if (/\b(next appointment|upcoming appointment)\b/.test(normalized)) {
+      return "crm.getNextAppointment";
+    }
+    if (/\b(appointments|appointment)\b/.test(normalized)) {
+      return "crm.listUpcomingAppointments";
+    }
+    if (/\b(billing|invoice|balance|payment|pay|charge)\b/.test(normalized)) {
+      return "crm.getOpenInvoices";
+    }
+    if (/\b(policy|cancellation policy|reschedule policy)\b/.test(normalized)) {
+      return "crm.getServicePolicy";
+    }
+    return null;
   }
 
   private getActionPreconditions(
@@ -2927,7 +2990,16 @@ export class ConversationSession {
     deps: ReturnType<typeof createDependencies>,
   ): Promise<ReturnType<typeof deps.modelFactory>> {
     const agentConfig = await deps.agentConfig.get(deps.agentConfigDefaults);
-    return deps.modelFactory(agentConfig);
+    const model = deps.modelFactory(agentConfig);
+    this.logger.info(
+      {
+        callSessionId: this.activeCallSessionId,
+        provider: model.name,
+        modelId: model.modelId ?? null,
+      },
+      "conversation.session.model.selected",
+    );
+    return model;
   }
 
   private async getCustomerContext(
@@ -3011,6 +3083,15 @@ export class ConversationSession {
       messages: recentMessages,
       ...toolResult,
     };
+    this.logger.info(
+      {
+        callSessionId,
+        provider: model.name,
+        modelId: model.modelId ?? null,
+        kind: "respond",
+      },
+      "conversation.session.model.call",
+    );
     this.logger.info(
       {
         callSessionId,
@@ -3257,6 +3338,15 @@ export class ConversationSession {
     const context = this.buildModelContext();
     let statusText = fallback;
     try {
+      this.logger.info(
+        {
+          callSessionId,
+          provider: model.name,
+          modelId: model.modelId ?? null,
+          kind: "status",
+        },
+        "conversation.session.model.call",
+      );
       this.logger.info(
         {
           callSessionId,

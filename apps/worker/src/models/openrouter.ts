@@ -536,6 +536,7 @@ export const createOpenRouterAdapter = (
         logger,
         "generate",
       );
+      const responseText = responseToText(response);
       const toolCalls = (
         response as {
           choices?: Array<{
@@ -543,6 +544,15 @@ export const createOpenRouterAdapter = (
           }>;
         }
       ).choices?.[0]?.message?.tool_calls;
+      logger.info(
+        {
+          toolCallCount: Array.isArray(toolCalls) ? toolCalls.length : 0,
+          responseTextPreview: responseText
+            ? truncate(responseText, 160)
+            : null,
+        },
+        "openrouter.tool_call.result",
+      );
       const toolCall = Array.isArray(toolCalls) ? toolCalls[0] : null;
       if (toolCall && typeof toolCall === "object") {
         const toolCallObject = toolCall as {

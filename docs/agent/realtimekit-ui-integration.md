@@ -32,6 +32,8 @@ current approach, and the package's guidance that affects our implementation.
 - The realtime tab has its own lifecycle, controls, and optional voice
   playback. See
   [`apps/web/src/app/customer/components/realtime-chat-view.tsx`](../../apps/web/src/app/customer/components/realtime-chat-view.tsx).
+- Web components must be registered via `defineCustomElements` before use. See
+  [`apps/web/src/app/providers.tsx`](../../apps/web/src/app/providers.tsx).
 
 ## Package guidance (what it says to do)
 
@@ -50,6 +52,9 @@ Reference:
   it to a string (`[object Object]`) and the component cannot initialize.
   Always set the property via a ref. See
   [`apps/web/src/app/customer/components/realtime-kit-chat.tsx`](../../apps/web/src/app/customer/components/realtime-kit-chat.tsx).
+- Do not omit chat/participants modules when calling `RealtimeKit.init`. The
+  UI `rtk-chat` component expects `meeting.chat` and `meeting.participants`
+  to exist.
 - Do not share hook state or message history between classic and realtime
   views. The tabs must be behaviorally independent. See
   [`apps/web/src/app/customer/page.tsx`](../../apps/web/src/app/customer/page.tsx).

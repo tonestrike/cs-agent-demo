@@ -430,10 +430,20 @@ export const createWorkersAiAdapter = (
           max_new_tokens: toolPayload.max_new_tokens,
           max_tokens: toolPayload.max_tokens,
         });
+        const responseText = responseToText(response);
         const responseWithTools = response as {
           tool_calls?: Array<{ name: string; arguments?: unknown }>;
         };
         const toolCalls = responseWithTools.tool_calls ?? [];
+        logger.info(
+          {
+            toolCallCount: toolCalls.length,
+            responseTextPreview: responseText
+              ? responseText.slice(0, 160)
+              : null,
+          },
+          "workers_ai.tool_call.result",
+        );
         const toolCall = toolCalls[0];
         if (toolCall?.name) {
           const validated = agentToolCallSchema.safeParse({
