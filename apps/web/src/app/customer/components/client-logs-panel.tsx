@@ -75,7 +75,9 @@ export function ClientLogsPanel({
                   <span className="font-mono text-ink/40">
                     {entry.ts.slice(11, 19)}
                   </span>{" "}
-                  <span className="font-medium text-ink/70">{entry.message}</span>
+                  <span className="font-medium text-ink/70">
+                    {entry.message}
+                  </span>
                   {entry.data && (
                     <pre className="mt-0.5 whitespace-pre-wrap text-[8px] text-ink/50">
                       {JSON.stringify(entry.data)}

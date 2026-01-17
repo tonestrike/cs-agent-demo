@@ -20,8 +20,19 @@ export function ChatHeader({ status, confirmedSessionId }: ChatHeaderProps) {
           className="inline-flex items-center gap-1 text-[11px] font-medium text-ink/50 hover:text-ink"
         >
           View in Agent Dashboard
-          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          <svg
+            className="h-3 w-3"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 5l7 7-7 7"
+            />
           </svg>
         </Link>
       )}
