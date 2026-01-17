@@ -356,14 +356,17 @@ const streamOpenRouterResponse = async function* (
       return null;
     }
     const delta =
-      "delta" in choice && typeof choice.delta === "object" ? choice.delta : null;
+      "delta" in choice && typeof choice.delta === "object"
+        ? choice.delta
+        : null;
     const message =
       "message" in choice && typeof choice.message === "object"
         ? choice.message
         : null;
     const deltaContent = delta && "content" in delta ? delta.content : null;
     const deltaText = delta && "text" in delta ? delta.text : null;
-    const messageContent = message && "content" in message ? message.content : null;
+    const messageContent =
+      message && "content" in message ? message.content : null;
     return (
       coerceContent(deltaContent) ??
       coerceContent(deltaText) ??
