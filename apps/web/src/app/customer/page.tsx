@@ -9,7 +9,7 @@ type ChatMode = "classic" | "realtime";
 export default function CustomerPage() {
   const { customers, selectedCustomer, phoneNumber, selectCustomer } =
     useCustomers();
-  const [chatMode, setChatMode] = useState<ChatMode>("classic");
+  const [chatMode, setChatMode] = useState<ChatMode>("realtime");
 
   const handleCustomerChange = useCallback(
     (phone: string) => {

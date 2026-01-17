@@ -262,44 +262,46 @@ export function RealtimeChatView({
             </div>
 
             {debugOpen && (
-              <>
-                <div
-                  className="absolute inset-0 bg-ink/25"
-                  aria-hidden
-                  onClick={() => setDebugOpen(false)}
-                />
-                <div className="absolute inset-y-0 right-0 z-10 w-full max-w-2xl shadow-2xl md:w-[560px]">
-                  <div className="flex h-full flex-col overflow-hidden rounded-l-2xl border border-ink-200 bg-white">
-                    <div className="flex flex-shrink-0 items-center justify-between border-b border-ink-200 px-4 py-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">
-                          Realtime debug drawer
-                        </p>
-                        <p className="text-sm text-ink-700">
-                          Expanded view for logs, latency, and summaries
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setDebugOpen(false)}
-                        className="rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-semibold text-ink-700 transition hover:bg-sand-100"
-                      >
-                        Close
-                      </button>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-4">
-                      <RealtimeLogsPanel
-                        logs={logs}
-                        turnMetrics={turnMetrics}
-                        callSessionId={callSessionId}
-                        phoneNumber={phoneNumber}
-                        status={status}
-                        onCopyConversation={copyConversation}
-                      />
-                    </div>
+              <div className="absolute inset-0 z-10 flex flex-col bg-ink/10 backdrop-blur-sm">
+                <div className="flex flex-shrink-0 items-center justify-between border-b border-ink-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-500">
+                      Realtime debugging cockpit
+                    </p>
+                    <p className="text-sm text-ink-800">
+                      Full-width view of live events, health, and summaries
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={copyConversation}
+                      className="rounded-lg border border-ink-200 bg-sand-100 px-3 py-2 text-xs font-semibold text-ink-700 transition hover:bg-sand-200"
+                    >
+                      Copy chat + debug
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDebugOpen(false)}
+                      className="rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-semibold text-ink-700 transition hover:bg-sand-100"
+                    >
+                      Close debug
+                    </button>
                   </div>
                 </div>
-              </>
+                <div className="flex-1 min-h-0 overflow-hidden bg-white shadow-2xl">
+                  <div className="h-full overflow-y-auto px-4 py-4 md:px-6">
+                    <RealtimeLogsPanel
+                      logs={logs}
+                      turnMetrics={turnMetrics}
+                      callSessionId={callSessionId}
+                      phoneNumber={phoneNumber}
+                      status={status}
+                      onCopyConversation={copyConversation}
+                    />
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         </div>
