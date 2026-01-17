@@ -211,3 +211,84 @@ Bot: "Done—I've cancelled your Tuesday appointment. Your current balance is $1
 - **Error handling**: Partial failures should still return successful results.
 - **Context limits**: Cap conversation history to avoid token overflow.
 - **Streaming**: Acknowledgement streams first, then tool execution, then response.
+
+## Implementation Progress
+
+### Phase 1: Context Preservation (Completed)
+
+- [x] Add `priorAcknowledgement` field to `AgentResponseInput` type
+- [x] Update `buildRespondInstructions` to include prior acknowledgement context in narrator prompt
+- [x] Pass `acknowledgementText` to `narrateToolResult` in all `executeToolCall` paths
+- [x] Store acknowledgements in conversation history via `emitStatusText`
+
+### Phase 2 & 3: Pending
+
+Not yet started.
+
+## Future Work: State Machine Approach for Selection Flows
+
+The current selection response logic (e.g., `isSelectionResponse` check) is too deterministic and rigid. A more flexible approach would use a state machine to track conversation state:
+
+### Current Problems
+
+1. **Deterministic checks**: Selection flows check for specific response patterns rather than tracking conversation state
+2. **State bleeding**: Prior conversation state can leak into new sessions
+3. **No cache invalidation**: When user says "nevermind, a different appointment", there's no mechanism to clear selection state
+
+### Proposed State Machine
+
+```typescript
+type ConversationFlowState = {
+  activeSelection?: {
+    kind: "appointment" | "slot" | "confirmation";
+    options: SelectionOption[];
+    presentedAt: number;
+    expiresAt: number;
+  };
+  pendingWorkflow?: {
+    type: "cancel" | "reschedule" | "schedule";
+    workflowId: string;
+    step: string;
+  };
+};
+```
+
+### State Transitions
+
+1. **Present selection** → Store in `activeSelection`
+2. **User responds** → Check against `activeSelection`, resolve, clear cache
+3. **User says "nevermind"** → Invalidate `activeSelection`, restart flow
+4. **Timeout** → Clear stale selections automatically
+
+### Benefits
+
+- Tool calls become intents that trigger state transitions
+- Selection matching uses stored state rather than response pattern detection
+- Clear invalidation points when user changes mind
+- Easier to debug and trace conversation flow
+
+## Known Issues (To Address)
+
+### RTK Participant ID Regeneration
+
+**Symptom**: Multiple disconnect/reconnect cycles with different `selfUserId` values.
+
+**Root cause investigation**:
+- React effect at `realtime-kit-chat.tsx:295` depends on `[sessionId, customer?.id, clearTimers]`
+- When `sessionId` or `customer?.id` changes, the effect cleans up and reinitializes
+- This triggers a new token request, which creates a new participant
+- The `needsFreshParticipant` logic in `handleRealtimeTokenRequest` creates new participant when `callSessionId` differs from `storedRtkCallSessionId`
+
+**Potential fixes**:
+- Persist RTK participant ID on the customer record (for verified customers)
+- Use a stable session identifier that doesn't change across component remounts
+- Add debouncing or guards against rapid reconnection cycles
+
+### Prior Conversations Populating
+
+**Symptom**: Chat shows messages from previous sessions.
+
+**Investigation needed**:
+- Check `getRecentMessages` logic for proper session scoping
+- Verify session state clearing when new sessions start
+- Ensure conversation history is properly isolated per call session

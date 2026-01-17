@@ -137,9 +137,9 @@ export function RealtimeKitChatPanel({
   >([]);
 
   // Visual indicator states
-  const [wsConnected, setWsConnected] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [lastActivity, setLastActivity] = useState<{
+  const [, setWsConnected] = useState(false);
+  const [, setIsSpeaking] = useState(false);
+  const [, setLastActivity] = useState<{
     type: "send" | "receive" | "status" | "error";
     text: string;
     time: number;
@@ -618,28 +618,6 @@ export function RealtimeKitChatPanel({
   const handleChatRef = useCallback((el: HTMLRtkChatElement | null) => {
     chatElementRef.current = el;
   }, []);
-
-  const handleMicRef = useCallback((el: HTMLRtkMicToggleElement | null) => {
-    micToggleRef.current = el;
-  }, []);
-
-  // Get activity indicator color based on type
-  const getActivityColor = (
-    type: typeof lastActivity extends { type: infer T } | null ? T : never,
-  ) => {
-    switch (type) {
-      case "send":
-        return "bg-blue-500";
-      case "receive":
-        return "bg-green-500";
-      case "status":
-        return "bg-yellow-500";
-      case "error":
-        return "bg-red-500";
-      default:
-        return "bg-gray-400";
-    }
-  };
 
   return (
     <div className="relative min-h-0 flex-1">

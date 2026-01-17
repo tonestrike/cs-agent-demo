@@ -1248,9 +1248,7 @@ export class ConversationSession {
         const isStatus = kind === "status";
         // Include: customer messages, agent messages, and status messages
         return (
-          turn.speaker === "customer" ||
-          turn.speaker === "agent" ||
-          isStatus
+          turn.speaker === "customer" || turn.speaker === "agent" || isStatus
         );
       })
       .map((turn) => {
