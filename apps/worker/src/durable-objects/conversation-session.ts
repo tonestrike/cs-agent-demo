@@ -1,4 +1,4 @@
-import { type CustomerCache, normalizePhoneE164 } from "@pestcall/core";
+import type { CustomerCache } from "@pestcall/core";
 
 import { createDependencies } from "../context";
 import {
@@ -54,7 +54,6 @@ import {
 import {
   CANCEL_WORKFLOW_EVENT_CONFIRM,
   CANCEL_WORKFLOW_EVENT_SELECT_APPOINTMENT,
-  RESCHEDULE_WORKFLOW_EVENT_CONFIRM,
   RESCHEDULE_WORKFLOW_EVENT_SELECT_APPOINTMENT,
   RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
 } from "../workflows/constants";
@@ -78,9 +77,23 @@ import {
   toolAcknowledgementSchema,
 } from "./conversation-session/index";
 import { detectActionIntent } from "./conversation-session/intent";
+import {
+  type FallbackDiagnostics,
+  buildFallbackWithDiagnostics,
+} from "./conversation-session/fallback";
+import {
+  type MessagesContext,
+  ensureCallSession as ensureCallSessionFn,
+  getRecentMessages as getRecentMessagesFn,
+  recordTurns as recordTurnsFn,
+  updateAppointmentSummary as updateAppointmentSummaryFn,
+  updateIdentitySummary as updateIdentitySummaryFn,
+} from "./conversation-session/messages";
+import {
+  type WorkflowContext,
+  handleWorkflowSelection as handleWorkflowSelectionFn,
+} from "./conversation-session/workflows";
 
-const INTERPRET_FALLBACK_TEXT =
-  "I could not interpret the request. Can you rephrase? I can also connect you with a person.";
 
 export class ConversationSession {
   private connections = new Set<WebSocket>();
@@ -214,6 +227,13 @@ export class ConversationSession {
       void this.handleSocketMessage(server, event.data);
     });
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** Create MessagesContext for the extracted messages module */
+  private getMessagesContext(
+    deps: ReturnType<typeof createDependencies>,
+  ): MessagesContext {
+    return { logger: this.logger, calls: deps.calls };
   }
 
   private async handleSocketMessage(
@@ -1228,20 +1248,7 @@ export class ConversationSession {
     callSessionId: string,
     phoneNumber: string,
   ): Promise<void> {
-    const existing = await deps.calls.getSession(callSessionId);
-    if (existing) {
-      return;
-    }
-    const nowIso = new Date().toISOString();
-    const phoneE164 = normalizePhoneE164(phoneNumber);
-    await deps.calls.createSession({
-      id: callSessionId,
-      startedAt: nowIso,
-      phoneE164,
-      status: "active",
-      transport: "web",
-      summary: null,
-    });
+    await ensureCallSessionFn(deps.calls, callSessionId, phoneNumber);
   }
 
   private async recordTurns(
@@ -1254,65 +1261,21 @@ export class ConversationSession {
     if (!callSessionId) {
       return;
     }
-    await this.ensureCallSession(deps, callSessionId, input.phoneNumber);
-    const nowIso = new Date().toISOString();
-    const userText = input.text.trim();
-    if (userText) {
-      await deps.calls.addTurn({
-        id: crypto.randomUUID(),
-        callSessionId,
-        ts: nowIso,
-        speaker: "customer",
-        text: userText,
-        meta: { turnId: this.activeTurnId },
-      });
-    }
-    const agentText = response.replyText.trim();
-    if (agentText) {
-      await deps.calls.addTurn({
-        id: crypto.randomUUID(),
-        callSessionId,
-        ts: nowIso,
-        speaker: "agent",
-        text: agentText,
-        meta: meta ?? {},
-      });
-    }
+    await recordTurnsFn(this.getMessagesContext(deps), {
+      callSessionId,
+      phoneNumber: input.phoneNumber,
+      userText: input.text,
+      agentText: response.replyText,
+      turnId: this.activeTurnId ?? undefined,
+      meta,
+    });
   }
 
   private async getRecentMessages(
     deps: ReturnType<typeof createDependencies>,
     callSessionId: string,
   ): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
-    const start = Date.now();
-    const turns = await deps.calls.getRecentTurns({ callSessionId, limit: 10 });
-    const messages = turns
-      .filter((turn) => {
-        // Include customer and agent messages, but drop system/status messages
-        // for the tool model to avoid “already answered” bias.
-        const kind = (turn.meta as { kind?: string } | undefined)?.kind;
-        const isStatus = kind === "status";
-        return (
-          (turn.speaker === "customer" || turn.speaker === "agent") && !isStatus
-        );
-      })
-      .map((turn) => {
-        // Map customer to user role, everything else (agent, status) to assistant
-        const role = turn.speaker === "customer" ? "user" : "assistant";
-        return { role: role as "user" | "assistant", content: turn.text };
-      })
-      .filter((turn) => turn.content.trim().length > 0);
-    const chronological = messages;
-    this.logger.info(
-      {
-        callSessionId,
-        durationMs: Date.now() - start,
-        messageCount: chronological.length,
-        messages: chronological,
-      },
-      "conversation.session.messages.recent",
-    );
-    return chronological;
+    return getRecentMessagesFn(this.getMessagesContext(deps), callSessionId);
   }
 
   private async updateIdentitySummary(
@@ -1321,28 +1284,12 @@ export class ConversationSession {
     phoneNumber: string,
     customerId: string,
   ): Promise<void> {
-    await this.ensureCallSession(deps, callSessionId, phoneNumber);
-    const session = await deps.calls.getSession(callSessionId);
-    let summary: SummarySnapshot = {};
-    if (session?.summary) {
-      try {
-        summary = JSON.parse(session.summary) as SummarySnapshot;
-      } catch (error) {
-        this.logger.error(
-          { error: error instanceof Error ? error.message : "unknown" },
-          "conversation.session.summary.parse_failed",
-        );
-      }
-    }
-    const nextSummary: SummarySnapshot = {
-      ...summary,
-      identityStatus: "verified",
-      verifiedCustomerId: customerId,
-    };
-    await deps.calls.updateSessionSummary({
+    await updateIdentitySummaryFn(
+      this.getMessagesContext(deps),
       callSessionId,
-      summary: JSON.stringify(nextSummary),
-    });
+      phoneNumber,
+      customerId,
+    );
   }
 
   private async updateAppointmentSummary(
@@ -1356,32 +1303,12 @@ export class ConversationSession {
       addressSummary: string;
     }>,
   ): Promise<void> {
-    await this.ensureCallSession(deps, callSessionId, phoneNumber);
-    const session = await deps.calls.getSession(callSessionId);
-    let summary: SummarySnapshot = {};
-    if (session?.summary) {
-      try {
-        summary = JSON.parse(session.summary) as SummarySnapshot;
-      } catch (error) {
-        this.logger.error(
-          { error: error instanceof Error ? error.message : "unknown" },
-          "conversation.session.summary.parse_failed",
-        );
-      }
-    }
-    const nextSummary: SummarySnapshot = {
-      ...summary,
-      lastAppointmentOptions: appointments.map((appointment) => ({
-        id: appointment.id,
-        date: appointment.date,
-        timeWindow: appointment.timeWindow,
-        addressSummary: appointment.addressSummary,
-      })),
-    };
-    await deps.calls.updateSessionSummary({
+    await updateAppointmentSummaryFn(
+      this.getMessagesContext(deps),
       callSessionId,
-      summary: JSON.stringify(nextSummary),
-    });
+      phoneNumber,
+      appointments,
+    );
   }
 
   private async classifyPendingIntent(
@@ -1840,442 +1767,10 @@ export class ConversationSession {
     deps: ReturnType<typeof createDependencies>,
     streamId: number,
   ): Promise<AgentMessageOutput | null> {
-    const callSessionId =
-      input.callSessionId ?? this.sessionState.lastCallSessionId;
-    if (!callSessionId) {
-      return null;
-    }
-
-    // Determine expected selection kind from conversation state
-    const expectedKind = this.getExpectedSelectionKind();
-
-    this.logger.info(
-      {
-        callSessionId,
-        turnId: this.activeTurnId,
-        cancelWorkflowId: this.sessionState.cancelWorkflowId ?? null,
-        rescheduleWorkflowId: this.sessionState.rescheduleWorkflowId ?? null,
-        appointmentsCount:
-          this.sessionState.conversation?.appointments.length ?? 0,
-        availableSlotsCount: this.sessionState.availableSlots?.length ?? 0,
-        inputText: input.text,
-        expectedSelectionKind: expectedKind,
-        conversationStatus: this.sessionState.conversation?.status ?? null,
-      },
-      "conversation.session.workflow.selection",
-    );
-
-    if (
-      !this.sessionState.cancelWorkflowId &&
-      !this.sessionState.rescheduleWorkflowId
-    ) {
-      return null;
-    }
-
-    const text = input.text.trim();
-
-    // Check for context change (user wants to abort or start over)
-    if (this.detectContextChange(text)) {
-      await this.clearActiveSelection();
-      // Let the tool calling flow handle the new intent
-      return null;
-    }
-
-    // Clear stale selections
-    if (this.isActiveSelectionStale()) {
-      await this.clearActiveSelection();
-    }
-
-    // Build options based on current state
-    const appointments =
-      this.sessionState.conversation?.appointments ?? ([] as const);
-    const appointmentOptions = appointments.map((appointment) => ({
-      id: appointment.id,
-      label: appointment.addressSummary
-        ? `${appointment.date} ${appointment.timeWindow} @ ${appointment.addressSummary}`
-        : `${appointment.date} ${appointment.timeWindow}`,
-    }));
-    const availableSlots = this.sessionState.availableSlots ?? [];
-    const slotOptions = availableSlots.map((slot) => ({
-      id: slot.id,
-      label: `${slot.date} ${slot.timeWindow}`,
-    }));
-    const confirmationOptions = [
-      { id: "confirm", label: "Yes, confirm" },
-      { id: "decline", label: "No, do not change it" },
-    ];
-
-    // Try direct ID matching first (no LLM call needed)
-    // cspell:ignore appt
-    const appointmentIdMatch = text.match(/^appt_[\w-]+$/i);
-    const slotIdMatch = text.match(/^slot_[\w-]+$/i);
-
-    // Resolve selections based on expected kind - single LLM call
-    let resolvedAppointmentId: string | null = null;
-    let resolvedSlotId: string | null = null;
-    let confirmation: boolean | null = null;
-
-    // First try direct matching without LLM
-    if (appointmentIdMatch) {
-      resolvedAppointmentId = appointmentIdMatch[0];
-    }
-    if (slotIdMatch) {
-      resolvedSlotId = slotIdMatch[0];
-    }
-    confirmation = this.parseConfirmation(text);
-
-    // Only call LLM if we haven't resolved via direct matching and we have a clear expected kind
-    if (
-      expectedKind &&
-      !appointmentIdMatch &&
-      !slotIdMatch &&
-      confirmation === null
-    ) {
-      switch (expectedKind) {
-        case "confirmation": {
-          const confirmationSelection = await this.selectOption(
-            input,
-            deps,
-            "confirmation",
-            confirmationOptions,
-          );
-          if (confirmationSelection === "confirm") {
-            confirmation = true;
-          } else if (confirmationSelection === "decline") {
-            confirmation = false;
-          }
-          break;
-        }
-        case "appointment": {
-          if (appointmentOptions.length) {
-            resolvedAppointmentId = await this.selectOption(
-              input,
-              deps,
-              "appointment",
-              appointmentOptions,
-            );
-            if (!resolvedAppointmentId) {
-              // Fallback to text-based resolution
-              resolvedAppointmentId = this.resolveAppointmentSelection(
-                text,
-                appointments,
-              );
-            }
-          }
-          break;
-        }
-        case "slot": {
-          if (slotOptions.length) {
-            resolvedSlotId = await this.selectOption(
-              input,
-              deps,
-              "slot",
-              slotOptions,
-            );
-          }
-          break;
-        }
-      }
-    } else if (
-      !expectedKind &&
-      !appointmentIdMatch &&
-      !slotIdMatch &&
-      confirmation === null
-    ) {
-      // No clear expected kind from state - fallback to text-based resolution
-      resolvedAppointmentId = this.resolveAppointmentSelection(
-        text,
-        appointments,
-      );
-    }
-
-    if (this.sessionState.cancelWorkflowId) {
-      if (resolvedAppointmentId) {
-        const instance = await deps.workflows.cancel?.get(
-          this.sessionState.cancelWorkflowId,
-        );
-        if (instance) {
-          await instance.sendEvent({
-            type: CANCEL_WORKFLOW_EVENT_SELECT_APPOINTMENT,
-            payload: { appointmentId: resolvedAppointmentId },
-          });
-          const state =
-            this.sessionState.conversation ?? initialConversationState();
-          this.sessionState = {
-            ...this.sessionState,
-            conversation: applyIntent(state, {
-              type: "cancel_requested",
-              appointmentId: resolvedAppointmentId,
-            }),
-          };
-          await this.state.storage.put("state", this.sessionState);
-          const replyText = await this.narrateText(
-            input,
-            deps,
-            streamId,
-            "Confirm cancelling this appointment?",
-            "Ask the customer to confirm cancelling the selected appointment.",
-          );
-          return {
-            callSessionId,
-            replyText,
-            actions: [],
-          };
-        }
-      }
-      if (confirmation !== null) {
-        const instance = await deps.workflows.cancel?.get(
-          this.sessionState.cancelWorkflowId,
-        );
-        if (instance) {
-          await instance.sendEvent({
-            type: CANCEL_WORKFLOW_EVENT_CONFIRM,
-            payload: { confirmed: confirmation },
-          });
-          const state =
-            this.sessionState.conversation ?? initialConversationState();
-          this.sessionState = {
-            ...this.sessionState,
-            conversation: applyIntent(state, {
-              type: confirmation ? "cancel_confirmed" : "cancel_declined",
-            }),
-            availableSlots: undefined,
-          };
-          await this.state.storage.put("state", this.sessionState);
-          const replyText = await this.narrateText(
-            input,
-            deps,
-            streamId,
-            confirmation
-              ? "Thanks. I'll cancel that appointment now."
-              : "Okay, I won't cancel that appointment.",
-            "Confirm or acknowledge the cancellation decision.",
-          );
-          return {
-            callSessionId,
-            replyText,
-            actions: [],
-          };
-        }
-      }
-      if (appointments.length) {
-        const replyText = await this.narrateToolResult(
-          {
-            toolName: "crm.listUpcomingAppointments",
-            result: appointments.map((appointment) => ({
-              id: appointment.id,
-              customerId:
-                this.sessionState.conversation?.verification.customerId ?? "",
-              date: appointment.date,
-              timeWindow: appointment.timeWindow,
-              addressSummary: appointment.addressSummary,
-            })),
-          },
-          {
-            input,
-            deps,
-            streamId,
-            fallback: formatAppointmentsResponse(appointments),
-            contextHint: "Ask which appointment to cancel using the list.",
-          },
-        );
-        return {
-          callSessionId,
-          replyText,
-          actions: [],
-        };
-      }
-    }
-
-    if (this.sessionState.rescheduleWorkflowId) {
-      if (resolvedAppointmentId) {
-        const instance = await deps.workflows.reschedule?.get(
-          this.sessionState.rescheduleWorkflowId,
-        );
-        if (instance) {
-          await instance.sendEvent({
-            type: RESCHEDULE_WORKFLOW_EVENT_SELECT_APPOINTMENT,
-            payload: { appointmentId: resolvedAppointmentId },
-          });
-          const customerId =
-            this.sessionState.conversation?.verification.customerId ?? null;
-          const slots = customerId
-            ? await getAvailableSlots(deps.crm, customerId, {
-                daysAhead: 14,
-              })
-            : [];
-          this.sessionState = {
-            ...this.sessionState,
-            availableSlots: slots.map((slot) => ({
-              id: slot.id,
-              date: slot.date,
-              timeWindow: slot.timeWindow,
-            })),
-            conversation: applyIntent(
-              this.sessionState.conversation ?? initialConversationState(),
-              {
-                type: "reschedule_requested",
-                appointmentId: resolvedAppointmentId,
-              },
-            ),
-          };
-          await this.state.storage.put("state", this.sessionState);
-          const replyText = await this.narrateToolResult(
-            {
-              toolName: "crm.getAvailableSlots",
-              result: slots.map((slot) => ({
-                id: slot.id,
-                date: slot.date,
-                timeWindow: slot.timeWindow,
-              })),
-            },
-            {
-              input,
-              deps,
-              streamId,
-              fallback: slots.length
-                ? formatAvailableSlotsResponse(slots, "Which one works best?")
-                : "I couldn't find any available times right now. Would you like me to check again later?",
-              contextHint:
-                "Offer available reschedule slots and ask which one they prefer.",
-            },
-          );
-          return {
-            callSessionId,
-            replyText,
-            actions: [],
-          };
-        }
-      }
-      if (resolvedSlotId) {
-        const instance = await deps.workflows.reschedule?.get(
-          this.sessionState.rescheduleWorkflowId,
-        );
-        if (instance) {
-          await instance.sendEvent({
-            type: RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
-            payload: { slotId: resolvedSlotId },
-          });
-          this.sessionState = {
-            ...this.sessionState,
-            conversation: applyIntent(
-              this.sessionState.conversation ?? initialConversationState(),
-              {
-                type: "reschedule_slot_selected",
-                slotId: resolvedSlotId,
-              },
-            ),
-          };
-          await this.state.storage.put("state", this.sessionState);
-          const replyText = await this.narrateText(
-            input,
-            deps,
-            streamId,
-            "Confirm the new appointment time?",
-            "Ask the customer to confirm the new appointment time.",
-          );
-          return {
-            callSessionId,
-            replyText,
-            actions: [],
-          };
-        }
-      }
-      if (confirmation !== null) {
-        const instance = await deps.workflows.reschedule?.get(
-          this.sessionState.rescheduleWorkflowId,
-        );
-        if (instance) {
-          await instance.sendEvent({
-            type: RESCHEDULE_WORKFLOW_EVENT_CONFIRM,
-            payload: { confirmed: confirmation },
-          });
-          this.sessionState = {
-            ...this.sessionState,
-            availableSlots: undefined,
-            conversation: applyIntent(
-              this.sessionState.conversation ?? initialConversationState(),
-              {
-                type: confirmation
-                  ? "reschedule_confirmed"
-                  : "reschedule_declined",
-              },
-            ),
-          };
-          await this.state.storage.put("state", this.sessionState);
-          const replyText = await this.narrateText(
-            input,
-            deps,
-            streamId,
-            confirmation
-              ? "Thanks. I'll finalize the reschedule now."
-              : "Okay, I won't change the appointment.",
-            "Confirm or acknowledge the reschedule decision.",
-          );
-          return {
-            callSessionId,
-            replyText,
-            actions: [],
-          };
-        }
-      }
-      if (availableSlots.length) {
-        const replyText = await this.narrateToolResult(
-          {
-            toolName: "crm.getAvailableSlots",
-            result: availableSlots.map((slot) => ({
-              date: slot.date,
-              timeWindow: slot.timeWindow,
-            })),
-          },
-          {
-            input,
-            deps,
-            streamId,
-            fallback: formatAvailableSlotsResponse(
-              availableSlots,
-              "Which one works best?",
-            ),
-            contextHint:
-              "Offer available reschedule slots and ask which one they prefer.",
-          },
-        );
-        return {
-          callSessionId,
-          replyText,
-          actions: [],
-        };
-      }
-      if (appointments.length) {
-        const replyText = await this.narrateToolResult(
-          {
-            toolName: "crm.listUpcomingAppointments",
-            result: appointments.map((appointment) => ({
-              id: appointment.id,
-              customerId:
-                this.sessionState.conversation?.verification.customerId ?? "",
-              date: appointment.date,
-              timeWindow: appointment.timeWindow,
-              addressSummary: appointment.addressSummary,
-            })),
-          },
-          {
-            input,
-            deps,
-            streamId,
-            fallback: formatAppointmentsResponse(appointments),
-            contextHint: "Ask which appointment to reschedule using the list.",
-          },
-        );
-        return {
-          callSessionId,
-          replyText,
-          actions: [],
-        };
-      }
-    }
-
-    return null;
+    // Delegate to extracted workflow selection handler
+    const ctx = this.buildWorkflowContext(deps, streamId);
+    const result = await handleWorkflowSelectionFn(ctx, input);
+    return result.handled ? (result.output ?? null) : null;
   }
 
   private async handleToolCallingFlow(
@@ -2437,8 +1932,37 @@ export class ConversationSession {
           }
         }
         const decisionText = decision.text.trim();
-        const replyText = decisionText || INTERPRET_FALLBACK_TEXT;
+        let replyText = decisionText;
+        let debug:
+          | {
+              reason: string;
+              rawText?: string | null;
+              provider?: string;
+              modelId?: string | null;
+              messageCount?: number;
+            }
+          | undefined;
+
         if (!decisionText) {
+          // Build diagnostic fallback with full context
+          const diagnostics: FallbackDiagnostics = {
+            reason: "empty_final_text",
+            userMessage: input.text ?? "",
+            recentMessages: messages,
+            modelContext: context,
+            provider: model.name,
+            modelId: model.modelId ?? null,
+            rawDecisionType: "final",
+            rawText: decision.text ?? null,
+          };
+          replyText = buildFallbackWithDiagnostics(diagnostics);
+          debug = {
+            reason: "empty_final_text",
+            rawText: decision.text ?? null,
+            provider: model.name,
+            modelId: model.modelId ?? null,
+            messageCount: messages.length,
+          };
           this.logger.warn(
             {
               callSessionId,
@@ -2451,15 +1975,6 @@ export class ConversationSession {
             "conversation.session.final.empty_text",
           );
         }
-        const debug = decisionText
-          ? undefined
-          : {
-              reason: "empty_final_text",
-              rawText: decision.text ?? null,
-              provider: model.name,
-              modelId: model.modelId ?? null,
-              messageCount: messages.length,
-            };
         this.logger.info(
           {
             callSessionId,
@@ -2502,14 +2017,26 @@ export class ConversationSession {
       // Handle single tool call (backwards compatible path)
       if (!isSingleToolCall(decision)) {
         // Should not reach here, but fallback for type safety
-        const replyText = INTERPRET_FALLBACK_TEXT;
+        const rawDecisionType =
+          "type" in decision &&
+          typeof (decision as { type?: unknown }).type === "string"
+            ? (decision as { type?: string }).type
+            : null;
+
+        const diagnostics: FallbackDiagnostics = {
+          reason: "invalid_tool_decision",
+          userMessage: input.text ?? "",
+          recentMessages: messages,
+          modelContext: context,
+          provider: model.name,
+          modelId: model.modelId ?? null,
+          rawDecisionType,
+          rawText: JSON.stringify(decision).slice(0, 500),
+        };
+        const replyText = buildFallbackWithDiagnostics(diagnostics);
         const debug = {
           reason: "invalid_tool_decision",
-          rawText:
-            "type" in decision &&
-            typeof (decision as { type?: unknown }).type === "string"
-              ? (decision as { type?: string }).type
-              : null,
+          rawDecisionType,
           provider: model.name,
           modelId: model.modelId ?? null,
           messageCount: messages.length,
@@ -2518,7 +2045,7 @@ export class ConversationSession {
           {
             callSessionId,
             turnId: this.activeTurnId,
-            decisionType: (decision as { type?: string }).type ?? "unknown",
+            decisionType: rawDecisionType ?? "unknown",
           },
           "conversation.session.tool_call.invalid_decision",
         );
@@ -3731,97 +3258,65 @@ export class ConversationSession {
       .trim();
   }
 
-  private parseConfirmation(value: string): boolean | null {
-    if (/^(yes|yep|yeah|sure)\b/i.test(value)) {
-      return true;
-    }
-    if (/^(no|nope|nah)\b/i.test(value)) {
-      return false;
-    }
-    return null;
-  }
-
   /**
-   * Maps conversation status to the expected selection kind.
-   * Returns null if no selection is expected in the current state.
+   * Build a WorkflowContext for use with extracted workflow functions.
+   * This bridges the class instance with the pure function interface.
    */
-  private getExpectedSelectionKind():
-    | "appointment"
-    | "slot"
-    | "confirmation"
-    | null {
-    const status = this.sessionState.conversation?.status;
-    switch (status) {
-      case "PresentingAppointments":
-        return "appointment";
-      case "PresentingSlots":
-        return "slot";
-      case "PendingCancellationConfirmation":
-      case "PendingRescheduleConfirmation":
-        return "confirmation";
-      default:
-        return null;
-    }
-  }
+  private buildWorkflowContext(
+    deps: ReturnType<typeof createDependencies>,
+    streamId: number,
+  ): WorkflowContext {
+    return {
+      logger: this.logger,
+      sessionState: this.sessionState,
+      callSessionId: this.activeCallSessionId,
+      deps,
+      streamId,
 
-  /**
-   * Detects if the user wants to change context or abort the current flow.
-   */
-  private detectContextChange(text: string): boolean {
-    const patterns = [
-      /\bnever ?mind\b/i,
-      /\bcancel (that|this)\b/i,
-      /\bstart over\b/i,
-      /\bforget (it|that)\b/i,
-      /\bactually,? ?(I want|let me|can we)\b/i,
-    ];
-    return patterns.some((p) => p.test(text));
-  }
+      getConversationState: () =>
+        this.sessionState.conversation ?? initialConversationState(),
 
-  /**
-   * Clears the active selection state and persists to storage.
-   */
-  private async clearActiveSelection(): Promise<void> {
-    if (!this.sessionState.activeSelection) {
-      return;
-    }
-    this.sessionState = {
-      ...this.sessionState,
-      activeSelection: undefined,
-    };
-    await this.state.storage.put("state", this.sessionState);
-  }
-
-  /**
-   * Sets the active selection state for tracking which selection we're waiting for.
-   */
-  private async setActiveSelection(
-    kind: "appointment" | "slot" | "confirmation",
-    options: Array<{ id: string; label: string }>,
-    workflowType: "cancel" | "reschedule",
-  ): Promise<void> {
-    this.sessionState = {
-      ...this.sessionState,
-      activeSelection: {
-        kind,
-        options,
-        presentedAt: Date.now(),
-        workflowType,
+      updateState: async (updates) => {
+        this.sessionState = { ...this.sessionState, ...updates };
+        await this.state.storage.put("state", this.sessionState);
       },
-    };
-    await this.state.storage.put("state", this.sessionState);
-  }
 
-  /**
-   * Checks if the active selection is stale (older than 5 minutes).
-   */
-  private isActiveSelectionStale(): boolean {
-    const selection = this.sessionState.activeSelection;
-    if (!selection) {
-      return false;
-    }
-    const STALE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-    return Date.now() - selection.presentedAt > STALE_TIMEOUT_MS;
+      emitEvent: (event) => {
+        this.emitEvent(event as ConversationEvent);
+      },
+
+      ensureCallSession: (callSessionId, phoneNumber) =>
+        this.ensureCallSession(deps, callSessionId, phoneNumber),
+
+      syncConversationState: (callSessionId) =>
+        this.syncConversationState(callSessionId, deps),
+
+      updateAppointmentSummary: (callSessionId, phoneNumber, appointments) =>
+        this.updateAppointmentSummary(
+          deps,
+          callSessionId,
+          phoneNumber,
+          appointments,
+        ),
+
+      narrateText: async (input, fallback, contextHint) =>
+        this.narrateText(input, deps, streamId, fallback, contextHint),
+
+      narrateToolResult: async (toolResult, options) =>
+        this.narrateToolResult(toolResult, {
+          input: options.input,
+          deps,
+          streamId,
+          fallback: options.fallback,
+          contextHint: options.contextHint,
+        }),
+
+      emitNarratorStatus: async (input, fallback, contextHint) =>
+        this.emitNarratorStatus(input, deps, streamId, fallback, contextHint),
+
+      selectOption: async (input, kind, options) =>
+        this.selectOption(input, deps, kind, options),
+    };
   }
 
   private async getModelAdapter(
@@ -4116,67 +3611,6 @@ export class ConversationSession {
       );
       return null;
     }
-  }
-
-  private resolveAppointmentSelection(
-    text: string,
-    appointments: Array<{
-      id: string;
-      date: string;
-      timeWindow: string;
-      addressSummary: string;
-    }>,
-  ): string | null {
-    if (!appointments.length) {
-      return null;
-    }
-    const lowered = text.toLowerCase();
-    const indexMatch = lowered.match(/\b(1|2|3|first|second|third)\b/);
-    if (indexMatch) {
-      const token = indexMatch[1];
-      const index =
-        token === "1" || token === "first"
-          ? 0
-          : token === "2" || token === "second"
-            ? 1
-            : 2;
-      const selected = appointments[index];
-      return selected?.id ?? null;
-    }
-    const dateMatch = lowered.match(
-      /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})\b/,
-    );
-    if (dateMatch) {
-      const monthToken = dateMatch[1];
-      if (!monthToken) {
-        return null;
-      }
-      const day = dateMatch[2]?.padStart(2, "0") ?? "";
-      const monthMap: Record<string, string> = {
-        jan: "01",
-        feb: "02",
-        mar: "03",
-        apr: "04",
-        may: "05",
-        jun: "06",
-        jul: "07",
-        aug: "08",
-        sep: "09",
-        oct: "10",
-        nov: "11",
-        dec: "12",
-      };
-      const month = monthMap[monthToken];
-      if (month && day) {
-        const match = appointments.find(
-          (appointment) => appointment.date.slice(5) === `${month}-${day}`,
-        );
-        if (match) {
-          return match.id;
-        }
-      }
-    }
-    return null;
   }
 
   private emitNarratorTokens(text: string, streamId: number) {

@@ -485,11 +485,10 @@ export const createWorkersAiAdapter = (
           }
         }
         const text = responseToText(response);
+        // Return empty text if no meaningful response - let conversation session add diagnostics
         return {
           type: "final",
-          text:
-            text?.trim() ||
-            "I could not interpret the request. Can you rephrase?",
+          text: text?.trim() || "",
         };
       } catch (error) {
         logger.error(
@@ -518,11 +517,10 @@ export const createWorkersAiAdapter = (
           max_tokens: fallbackPayload.max_tokens,
         });
         const text = responseToText(fallbackResponse);
+        // Return empty text if no meaningful response - let conversation session add diagnostics
         return {
           type: "final",
-          text: text?.trim()
-            ? text
-            : "I could not interpret the request. Can you rephrase?",
+          text: text?.trim() || "",
         };
       }
     },

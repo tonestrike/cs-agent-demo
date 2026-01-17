@@ -11,7 +11,7 @@ import {
   RealtimeLogsPanel,
 } from "./index";
 
-type SidebarTab = "settings" | "logs";
+type SidebarTab = "settings";
 
 type RealtimeChatViewProps = {
   customers: Customer[];
@@ -82,38 +82,12 @@ export function RealtimeChatView({
         `}
       >
         <div className="flex h-full flex-col overflow-hidden">
-          <div className="flex flex-shrink-0 border-b border-ink-200 bg-sand-100">
-            <button
-              type="button"
-              onClick={() => setActiveTab("settings")}
-              className={`flex-1 px-4 py-3 text-sm font-semibold transition-colors ${
-                activeTab === "settings"
-                  ? "border-b-2 border-ink bg-white text-ink"
-                  : "text-ink-500 hover:text-ink-700"
-              }`}
-            >
-              Settings
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("logs")}
-              className={`flex-1 px-4 py-3 text-sm font-semibold transition-colors ${
-                activeTab === "logs"
-                  ? "border-b-2 border-ink bg-white text-ink"
-                  : "text-ink-500 hover:text-ink-700"
-              }`}
-            >
-              Logs
-              {logs.length > 0 && (
-                <span className="ml-2 rounded-full bg-ink-200 px-2 py-0.5 text-xs">
-                  {logs.length}
-                </span>
-              )}
-            </button>
+          <div className="flex flex-shrink-0 items-center justify-between border-b border-ink-200 bg-sand-100 px-4 py-3">
+            <span className="text-sm font-semibold text-ink">Settings</span>
             <button
               type="button"
               onClick={() => setSidebarOpen(false)}
-              className="flex items-center justify-center px-3 text-ink-400 hover:text-ink-600 md:hidden"
+              className="flex items-center justify-center text-ink-400 hover:text-ink-600 md:hidden"
             >
               <svg
                 className="h-5 w-5"

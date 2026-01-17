@@ -33,11 +33,62 @@ Adapters:
 - Turn metadata stored in D1 includes `modelMessages` and `modelContext` so you can inspect exactly what the model saw.
 
 ## Still risky / gaps
-- The tool model is still allowed to return `final` with no tools in other high-intent cases (billing, payments, policy) if we don’t force a tool plan.
-- No raw model output logged when we hit adapter fallback (only the injected fallback text).
+- The tool model is still allowed to return `final` with no tools in other high-intent cases (billing, payments, policy) if we don't force a tool plan.
+- ~~No raw model output logged when we hit adapter fallback (only the injected fallback text).~~ **Fixed**: Diagnostic fallback now embeds full context (see below).
 - Status lines can bias the tool model toward `final`.
 
 ## How to inspect a bad turn
+
+### Diagnostic fallback (inline debugging)
+
+When the tool model returns an empty final or invalid decision, the agent now embeds diagnostic context directly in the fallback message. The response text looks like:
+
+```
+I could not interpret the request. Can you rephrase? I can also connect you with a person.
+
+---DEBUG---
+{
+  "reason": "empty_final_text",
+  "userMessage": "I want to reschedule",
+  "messageHistory": [
+    { "role": "user", "content": "hi" },
+    { "role": "assistant", "content": "Hello! How can I help?" },
+    { "role": "user", "content": "I want to reschedule" }
+  ],
+  "context": "Customer verified. Verification state: {...}",
+  "provider": "openrouter",
+  "modelId": "anthropic/claude-sonnet",
+  "rawDecisionType": "final",
+  "rawText": null
+}
+---/DEBUG---
+```
+
+**Fields in the debug block:**
+- `reason`: Why we fell back (`empty_final_text`, `invalid_tool_decision`, `adapter_parse_error`, `unknown`)
+- `userMessage`: The user's message that triggered the fallback
+- `messageHistory`: Last 5 messages (truncated to 100 chars each)
+- `context`: Model context string (truncated to 500 chars)
+- `provider`: Which adapter (`openrouter`, `workers-ai`)
+- `modelId`: Specific model used
+- `rawDecisionType`: What the model returned (`final`, `tool_calls`, etc.)
+- `rawText`: Raw text from model (truncated to 200 chars)
+
+**Parsing the debug block:**
+```ts
+import { extractDiagnosticsFromFallback } from "./conversation-session/fallback";
+
+const diagnostics = extractDiagnosticsFromFallback(agentResponse);
+if (diagnostics) {
+  console.log("Fallback reason:", diagnostics.reason);
+  console.log("User said:", diagnostics.userMessage);
+}
+```
+
+See [`conversation-session/fallback.ts`](../../apps/worker/src/durable-objects/conversation-session/fallback.ts) for the implementation.
+
+### Traditional inspection methods
+
 1) Query D1 turns:
    ```
    bunx wrangler d1 execute pestcall_local --remote --config apps/worker/wrangler.toml \
@@ -56,9 +107,9 @@ Adapters:
 
 ## Possible fixes (next steps)
 - Enforce tool path for high-intent domains: if verified and intent is reschedule/cancel/schedule/billing/payment, reject `final` with no tools; run a deterministic tool plan or force a tool call. (Partial guard in code for reschedule/cancel/schedule; extend to others.)
-- Trim intra-turn statuses from the tool-model history to avoid “already answered” bias. (Implemented: status/system turns are excluded from `getRecentMessages` for the tool model.)
-- Log raw adapter output when we fall back (store in `debug` with reason and a truncated raw snippet).
-- Add a minimal action-plan state machine so we don’t depend on the model to pick the obvious first tool (e.g., always list appointments before reschedule flow).
+- Trim intra-turn statuses from the tool-model history to avoid "already answered" bias. (Implemented: status/system turns are excluded from `getRecentMessages` for the tool model.)
+- ~~Log raw adapter output when we fall back (store in `debug` with reason and a truncated raw snippet).~~ **Done**: Diagnostic fallback embeds full context including raw model output.
+- Add a minimal action-plan state machine so we don't depend on the model to pick the obvious first tool (e.g., always list appointments before reschedule flow).
 
 ## Message flow (simplified)
 1) Message arrives at `/api/conversations/{id}/message` → DO `runMessage` in [`conversation-session.ts`](../../apps/worker/src/durable-objects/conversation-session.ts).
@@ -82,7 +133,7 @@ Adapters:
 - Deterministic fallbacks only for safety: if the model fails repeatedly in an actionable state, default to a minimal deterministic plan (e.g., list appointments for reschedule) rather than emitting “interpret” fallbacks.
 
 ## Conversation session refactor (deep dive)
-The DO is currently monolithic. Target shape:
+The DO is being refactored from monolithic to modular. Target shape:
 - **Coordinator** (`conversation-session.ts`): routing, socket/message entrypoints, state init, event emission wiring.
 - **Verification module**: ZIP gate, pending intent capture, identity summary updates.
 - **Tool flow module**: model calls + decision handling (single/multi tool calls, acknowledgements, finals), context/messages assembly.
@@ -90,11 +141,54 @@ The DO is currently monolithic. Target shape:
 - **Messaging/state module**: recent message collection, turn persistence, event buffer/resync helpers.
 - **Shared helpers**: intent parsing (temporary), model context, narration wrappers.
 
-Step plan:
-1) Extract workflows into `conversation-session/workflows.ts` using a narrow context interface (read/update state, narrator, deps, emit status).
-2) Extract tool flow into `conversation-session/tool-flow.ts`, consuming context/intent helpers and delegating to workflows when applicable.
-3) Extract messaging/state into `conversation-session/messages.ts` for `getRecentMessages`, `recordTurns`, event buffer/replay.
-4) Leave `conversation-session.ts` as a thin coordinator wiring modules and storage.
+### Progress
+
+**Completed:**
+- ✅ Workflows module extracted to [`conversation-session/workflows/`](../../apps/worker/src/durable-objects/conversation-session/workflows/)
+  - Uses `WorkflowContext` interface for dependency injection
+  - Handlers: `appointment-cancel.ts`, `appointment-reschedule.ts`, `appointment-selection.ts`
+  - Helpers: `appointment-helpers.ts` for shared logic
+  - Model-driven selection (no regex parsing)
+- ✅ Tool flow module extracted to [`conversation-session/tool-flow/`](../../apps/worker/src/durable-objects/conversation-session/tool-flow/)
+  - Uses `ToolFlowContext` interface with explicit context objects
+  - Handlers return raw results (`ToolRawResult`), not narrated text
+  - Aggregation layer merges results for single narration step
+  - Uses Zod schemas from `tool-definitions.ts` for arg validation
+  - Registry pattern for tool dispatch
+
+- ✅ Messaging module extracted to [`conversation-session/messages/`](../../apps/worker/src/durable-objects/conversation-session/messages/)
+  - `ensureCallSession`, `recordTurns`, `getRecentMessages`, `recordStatusTurn`
+  - `updateIdentitySummary`, `updateAppointmentSummary`
+  - Uses `MessagesContext` interface with logger and calls repository
+  - Pure functions with explicit dependencies (no `this` binding)
+
+**Integrated:**
+- ✅ Messages module integrated into coordinator (methods delegate to extracted functions)
+- ✅ Workflows selection integrated via `handleWorkflowSelectionFn`
+
+**Remaining:**
+- 🔲 Wire tool-flow for complex tools (cancel/reschedule/create appointment handlers)
+- 🔲 Delete remaining duplicate code after full tool-flow integration
+
+### Key patterns
+
+**Type-safe tool args:** Handlers use typed args inferred from Zod schemas:
+```ts
+// Handler receives validated, typed args
+export async function handleGetServicePolicy(
+  ctx: ToolFlowContext,
+  { args }: ToolExecutionInput<"crm.getServicePolicy">,
+): Promise<ToolRawResult> {
+  const policyText = await getServicePolicy(ctx.deps.crm, args.topic);
+  // ...
+}
+```
+
+**Aggregate tool results:** Multiple tools execute in parallel, results are merged, single narration step handles all:
+```ts
+const result = await executeAndNarrate(ctx, toolCalls, input);
+// result.replyText is narrated from ALL tool results together
+```
 
 Risks/mitigations:
 - **this-binding/state drift**: use explicit context objects instead of method calls to avoid losing `this`.

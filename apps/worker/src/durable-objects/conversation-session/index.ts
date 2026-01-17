@@ -33,3 +33,14 @@ export {
   getActionPreconditions,
   evaluateActionPlan,
 } from "./tools";
+
+export {
+  type FallbackDiagnostics,
+  type DebugAnalysis,
+  buildFallbackWithDiagnostics,
+  extractDiagnosticsFromFallback,
+  isInterpretFallback,
+  analyzeDebugDiagnostics,
+  formatDebugAnalysis,
+  generateDebugSummary,
+} from "./fallback";

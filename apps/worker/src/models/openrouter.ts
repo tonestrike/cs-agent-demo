@@ -801,11 +801,10 @@ export const createOpenRouterAdapter = (
       }
 
       const text = responseToText(response);
+      // Return empty text if no meaningful response - let conversation session add diagnostics
       return {
         type: "final",
-        text:
-          text?.trim() ||
-          "I could not interpret the request. Can you rephrase?",
+        text: text?.trim() || "",
       };
     },
     async respond(input: AgentResponseInput) {
