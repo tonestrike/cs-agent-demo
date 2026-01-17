@@ -3,8 +3,8 @@ import { Fraunces, Manrope } from "next/font/google";
 import Link from "next/link";
 
 import "./globals.css";
-import { Providers } from "./providers";
 import { NavLinks } from "./nav-links";
+import { Providers } from "./providers";
 
 const displayFont = Fraunces({
   subsets: ["latin"],
