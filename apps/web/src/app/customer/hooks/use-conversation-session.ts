@@ -236,7 +236,13 @@ export function useConversationSession(phoneNumber: string) {
             return;
           }
           if (payload.type === "final") {
-            const data = payload.data;
+            const data = payload.data as
+              | {
+                  callSessionId?: string;
+                  replyText?: string;
+                  debug?: Record<string, unknown>;
+                }
+              | undefined;
             const replyText = data?.replyText ?? "";
             const messageId = payload.messageId ?? responseIdRef.current;
             if (messageId && replyText) {
@@ -254,6 +260,18 @@ export function useConversationSession(phoneNumber: string) {
                     : message,
                 );
               });
+            }
+            if (data?.debug) {
+              logEvent(
+                "ws.final.debug",
+                {
+                  sessionId,
+                  messageId,
+                  replyLength: replyText.length,
+                  ...data.debug,
+                },
+                { level: "warn", source: "ws" },
+              );
             }
             // Ignore server-suggested callSessionId; we own session ids per tab.
             if (typeof payload.turnId === "number") {
@@ -424,20 +442,8 @@ export function useConversationSession(phoneNumber: string) {
     }
     logEvent("chat.start_call", { phoneNumber });
     clearAutoZipTimer();
-    const sessionId = callSessionId ?? crypto.randomUUID();
-    if (!callSessionId) {
-      setCallSessionId(sessionId);
-      setConfirmedSessionId(sessionId);
-    }
-    try {
-      setConnectionStatus("Connecting");
-      await ensureSocket(sessionId);
-      logEvent("ws.ready", { sessionId });
-    } catch {
-      setConnectionStatus("Connection issue. Try again.");
-      logEvent("ws.unavailable", { sessionId });
-    }
-  }, [callSessionId, clearAutoZipTimer, ensureSocket, logEvent, phoneNumber]);
+    await sendMessage("Incoming call started", { skipUserMessage: true });
+  }, [clearAutoZipTimer, logEvent, phoneNumber, sendMessage]);
 
   const recordClientLog = useCallback(
     (

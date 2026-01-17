@@ -30,6 +30,7 @@ export function RealtimeChatView({
   const [activeTab, setActiveTab] = useState<SidebarTab>("settings");
   const [startingCall, setStartingCall] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [debugOpen, setDebugOpen] = useState(false);
   const {
     status,
     logs,
@@ -235,16 +236,71 @@ export function RealtimeChatView({
                 >
                   {startingCall ? "Starting..." : "Start call"}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setDebugOpen((prev) => !prev)}
+                  className={`rounded-lg border px-4 py-2 text-xs font-semibold transition ${
+                    debugOpen
+                      ? "border-ink bg-ink text-white"
+                      : "border-ink-200 bg-white text-ink-700 hover:bg-sand-50"
+                  }`}
+                >
+                  {debugOpen ? "Close debug" : "Open debug"}
+                </button>
               </div>
             </div>
           </div>
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <RealtimeKitChatPanel
-              sessionId={callSessionId}
-              customer={selectedCustomer}
-              enableTts={ttsEnabled}
-              onDebugEvent={recordClientLog}
-            />
+          <div className="relative flex-1 min-h-0 overflow-hidden">
+            {/* Keep chat mounted even when debug drawer overlays it */}
+            <div className="absolute inset-0">
+              <RealtimeKitChatPanel
+                sessionId={callSessionId}
+                customer={selectedCustomer}
+                enableTts={ttsEnabled}
+                onDebugEvent={recordClientLog}
+              />
+            </div>
+
+            {debugOpen && (
+              <>
+                <div
+                  className="absolute inset-0 bg-ink/25"
+                  aria-hidden
+                  onClick={() => setDebugOpen(false)}
+                />
+                <div className="absolute inset-y-0 right-0 z-10 w-full max-w-2xl shadow-2xl md:w-[560px]">
+                  <div className="flex h-full flex-col overflow-hidden rounded-l-2xl border border-ink-200 bg-white">
+                    <div className="flex flex-shrink-0 items-center justify-between border-b border-ink-200 px-4 py-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+                          Realtime debug drawer
+                        </p>
+                        <p className="text-sm text-ink-700">
+                          Expanded view for logs, latency, and summaries
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setDebugOpen(false)}
+                        className="rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-semibold text-ink-700 transition hover:bg-sand-100"
+                      >
+                        Close
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4">
+                      <RealtimeLogsPanel
+                        logs={logs}
+                        turnMetrics={turnMetrics}
+                        callSessionId={callSessionId}
+                        phoneNumber={phoneNumber}
+                        status={status}
+                        onCopyConversation={copyConversation}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </main>

@@ -79,6 +79,9 @@ import {
   toolAcknowledgementSchema,
 } from "./conversation-session/index";
 
+const INTERPRET_FALLBACK_TEXT =
+  "I could not interpret the request. Can you rephrase? I can also connect you with a person.";
+
 export class ConversationSession {
   private connections = new Set<WebSocket>();
   private logger: Logger;
@@ -2381,9 +2384,30 @@ export class ConversationSession {
       };
       if (decision.type === "final") {
         // Model decided not to call any tools - respect its decision
-        const replyText =
-          decision.text.trim() ||
-          "I could not interpret the request. Can you rephrase? I can also connect you with a person.";
+        const decisionText = decision.text.trim();
+        const replyText = decisionText || INTERPRET_FALLBACK_TEXT;
+        if (!decisionText) {
+          this.logger.warn(
+            {
+              callSessionId,
+              turnId: this.activeTurnId,
+              inputLength: input.text?.length ?? 0,
+              messageCount: messages.length,
+              provider: model.name,
+              modelId: model.modelId ?? null,
+            },
+            "conversation.session.final.empty_text",
+          );
+        }
+        const debug = decisionText
+          ? undefined
+          : {
+              reason: "empty_final_text",
+              rawText: decision.text ?? null,
+              provider: model.name,
+              modelId: model.modelId ?? null,
+              messageCount: messages.length,
+            };
         this.logger.info(
           {
             callSessionId,
@@ -2394,7 +2418,7 @@ export class ConversationSession {
           "conversation.session.final.no_tool",
         );
         this.emitNarratorTokens(replyText, streamId);
-        return { callSessionId, replyText, actions: [] };
+        return { callSessionId, replyText, actions: [], debug };
       }
 
       // Handle multiple tool calls in parallel
@@ -2426,8 +2450,18 @@ export class ConversationSession {
       // Handle single tool call (backwards compatible path)
       if (!isSingleToolCall(decision)) {
         // Should not reach here, but fallback for type safety
-        const replyText =
-          "I could not interpret the request. Can you rephrase? I can also connect you with a person.";
+        const replyText = INTERPRET_FALLBACK_TEXT;
+        const debug = {
+          reason: "invalid_tool_decision",
+          rawText:
+            "type" in decision &&
+            typeof (decision as { type?: unknown }).type === "string"
+              ? (decision as { type?: string }).type
+              : null,
+          provider: model.name,
+          modelId: model.modelId ?? null,
+          messageCount: messages.length,
+        };
         this.logger.warn(
           {
             callSessionId,
@@ -2437,7 +2471,7 @@ export class ConversationSession {
           "conversation.session.tool_call.invalid_decision",
         );
         this.emitNarratorTokens(replyText, streamId);
-        return { callSessionId, replyText, actions: [] };
+        return { callSessionId, replyText, actions: [], debug };
       }
 
       const acknowledgementText = decision.acknowledgement?.trim() || "";

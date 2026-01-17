@@ -132,24 +132,7 @@ const sanitizeRealtimeKitPayload = (
   if (!payload) {
     return null;
   }
-  const redactSecrets = (source?: Record<string, unknown>) =>
-    source
-      ? Object.fromEntries(
-          Object.entries(source).map(([key, value]) => {
-            if (
-              key === "token" ||
-              key === "authToken" ||
-              key === "auth_token"
-            ) {
-              return [key, "[redacted]"];
-            }
-            return [key, value];
-          }),
-        )
-      : undefined;
-  const result = redactSecrets(payload.result);
-  const data = redactSecrets(payload.data);
-  return { ...payload, result };
+  return { ...payload, result: payload.result };
 };
 
 const parseRealtimeKitResponse = async (

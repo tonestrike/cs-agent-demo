@@ -6,7 +6,7 @@ import type {
   ServiceAppointment,
   Ticket,
 } from "@pestcall/core";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueries, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
@@ -37,8 +37,6 @@ export default function AgentDashboardPage() {
   const [ticketStatus, setTicketStatus] = useState<
     "open" | "in_progress" | "resolved" | "all"
   >("open");
-  const [callsItems, setCallsItems] = useState<CallSession[]>([]);
-  const [callsCursor, setCallsCursor] = useState<string | null>(null);
   const [appointmentsItems, setAppointmentsItems] = useState<
     ServiceAppointment[]
   >([]);
@@ -46,9 +44,14 @@ export default function AgentDashboardPage() {
     null,
   );
   const [appointmentsRefreshKey, setAppointmentsRefreshKey] = useState(1);
-  const callsQuery = useQuery(
-    orpc.calls.list.queryOptions({
-      input: { limit: 100, cursor: callsCursor ?? undefined },
+  const callsQuery = useInfiniteQuery(
+    orpc.calls.list.infiniteOptions({
+      input: (cursor: string | undefined) => ({
+        limit: 100,
+        cursor: cursor ?? undefined,
+      }),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
       refetchInterval: 4000,
     }),
   );
@@ -120,24 +123,6 @@ export default function AgentDashboardPage() {
   }, [activeTab]);
 
   useEffect(() => {
-    const items = callsQuery.data?.items ?? [];
-    if (items.length === 0) {
-      return;
-    }
-    setCallsItems((prev) => {
-      const seen = new Set(prev.map((item) => item.id));
-      const merged = [...prev];
-      for (const item of items) {
-        if (!seen.has(item.id)) {
-          merged.push(item);
-        }
-      }
-      return merged;
-    });
-    setCallsCursor(callsQuery.data?.nextCursor ?? null);
-  }, [callsQuery.data]);
-
-  useEffect(() => {
     const items = appointmentsQuery.data?.items ?? [];
     if (items.length === 0) {
       return;
@@ -180,6 +165,21 @@ export default function AgentDashboardPage() {
     });
     return new Map(entries);
   }, [ticketCallLookups, ticketsQuery.data?.items]);
+
+  const callsItems = useMemo(() => {
+    const seen = new Set<string>();
+    const merged: CallSession[] = [];
+    for (const page of callsQuery.data?.pages ?? []) {
+      for (const session of page.items) {
+        if (seen.has(session.id)) {
+          continue;
+        }
+        seen.add(session.id);
+        merged.push(session);
+      }
+    }
+    return merged;
+  }, [callsQuery.data?.pages]);
 
   const groupedCalls = useMemo(() => {
     const map = new Map<
@@ -306,22 +306,17 @@ export default function AgentDashboardPage() {
               <div className="flex flex-wrap gap-2">
                 <Button
                   className="bg-moss hover:bg-ink"
-                  onClick={() => {
-                    setCallsItems([]);
-                    setCallsCursor(null);
-                    callsQuery.refetch();
-                  }}
+                  onClick={() => callsQuery.refetch()}
                 >
                   Refresh
                 </Button>
-                {callsQuery.data?.nextCursor ? (
+                {callsQuery.hasNextPage ? (
                   <Button
                     className="bg-white/80 text-ink hover:bg-ink hover:text-sand"
-                    onClick={() =>
-                      setCallsCursor(callsQuery.data?.nextCursor ?? null)
-                    }
+                    disabled={callsQuery.isFetchingNextPage}
+                    onClick={() => callsQuery.fetchNextPage()}
                   >
-                    Load more
+                    {callsQuery.isFetchingNextPage ? "Loading..." : "Load more"}
                   </Button>
                 ) : null}
               </div>
