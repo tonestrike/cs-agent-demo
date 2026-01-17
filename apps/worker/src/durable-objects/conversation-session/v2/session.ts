@@ -448,7 +448,6 @@ export class ConversationSessionV2 {
       sessionState = this.state.get();
     }
 
-    // biome-ignore lint/complexity/useLiteralKeys: index signature access
     const greetingSent = Boolean(
       sessionState.domainState["greetingSent"] as boolean | undefined,
     );

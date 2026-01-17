@@ -20,7 +20,6 @@ export type PromptProviderConfig = {
  * Extract verification state from session.
  */
 function isVerified(state: SessionState): boolean {
-  // biome-ignore lint/complexity/useLiteralKeys: index signature access
   const conversation = state.domainState["conversation"] as
     | { verification?: { verified?: boolean } }
     | undefined;
