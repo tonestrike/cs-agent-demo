@@ -461,6 +461,7 @@ export class ConversationSession {
         const token = await refreshRealtimeKitToken(
           this.env,
           guestParticipantId,
+          this.logger,
         );
         return Response.json({ ok: true, ...token });
       }
@@ -470,10 +471,14 @@ export class ConversationSession {
       const customParticipantId =
         this.sessionState.rtkGuestCustomId ?? `session:${rawCustomId}`;
       const displayName = phoneNumber ? `Caller ${phoneNumber}` : "Caller";
-      const token = await addRealtimeKitGuestParticipant(this.env, {
-        displayName,
-        customParticipantId,
-      });
+      const token = await addRealtimeKitGuestParticipant(
+        this.env,
+        {
+          displayName,
+          customParticipantId,
+        },
+        this.logger,
+      );
       this.sessionState = {
         ...this.sessionState,
         rtkGuestParticipantId: token.participantId,
@@ -508,9 +513,13 @@ export class ConversationSession {
   ): Promise<RealtimeKitTokenPayload> {
     let token: RealtimeKitTokenPayload;
     if (customer.participantId) {
-      token = await refreshRealtimeKitToken(this.env, customer.participantId);
+      token = await refreshRealtimeKitToken(
+        this.env,
+        customer.participantId,
+        this.logger,
+      );
     } else {
-      token = await addRealtimeKitParticipant(this.env, customer);
+      token = await addRealtimeKitParticipant(this.env, customer, this.logger);
     }
     const updatedCustomer: CustomerCache = {
       ...customer,
