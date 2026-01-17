@@ -87,6 +87,56 @@ if (diagnostics) {
 
 See [`conversation-session/fallback.ts`](../../apps/worker/src/durable-objects/conversation-session/fallback.ts) for the implementation.
 
+### AI-powered debug analysis
+
+For richer analysis, you can pass the diagnostics to an AI model that generates actionable insights:
+
+```ts
+import {
+  extractDiagnosticsFromFallback,
+  buildAIDebugPrompt,
+  parseAIDebugResponse,
+  formatAIDebugResult,
+} from "./conversation-session/fallback";
+
+// Extract diagnostics from fallback message
+const diagnostics = extractDiagnosticsFromFallback(agentResponse);
+if (!diagnostics) return;
+
+// Build prompt for AI analysis
+const prompt = buildAIDebugPrompt(diagnostics);
+
+// Call your AI model (example with OpenRouter)
+const aiResponse = await model.generate({ messages: [{ role: "user", content: prompt }] });
+
+// Parse and format the result
+const analysis = parseAIDebugResponse(aiResponse.text);
+console.log(formatAIDebugResult(analysis));
+```
+
+**Output example:**
+```
+🔴 Model returned empty final despite clear "reschedule" intent
+
+📍 Root cause: The model received the user's reschedule request but returned
+   an empty final instead of calling the listAppointments tool.
+
+⚠️  Issues:
+   • Clear reschedule intent detected but model chose final instead of tool
+   • Model may be confused by status messages in history
+
+💡 Suggestions:
+   → Check if reschedule tools are available in tool definitions
+   → Strengthen prompting to require tool calls for high-intent messages
+   → Review if status messages are polluting the conversation history
+```
+
+The AI analyzer is more intelligent than the rule-based fallback - it can:
+- Understand nuanced intent beyond keyword matching
+- Identify patterns in conversation history
+- Suggest specific, contextual fixes
+- Assess severity based on business impact
+
 ### Traditional inspection methods
 
 1) Query D1 turns:
@@ -125,12 +175,281 @@ See [`conversation-session/fallback.ts`](../../apps/worker/src/durable-objects/c
 5) Narration/streaming: narrator model (text-only) phrases tool results (`narrate*` helpers in [`conversation-session.ts`](../../apps/worker/src/durable-objects/conversation-session.ts)).
 6) Persist: turns and metadata (including `modelMessages`/`modelContext`) are stored in D1 via `recordTurns`; DO event buffer updated; `/debug` reflects state.
 
-## Direction and ideal state
+## Architecture issues (why fallbacks keep happening)
+
+The current architecture has **multiple interception points** that prevent the model from seeing the full context. Each intercept makes partial decisions with incomplete information.
+
+### Current flow (fragmented)
+
+```
+Message arrives
+    ↓
+PHASE 4: Verification Gate (deterministic)
+    → Intercepts: ZIP codes, unverified users
+    → Problem: Model never sees user intent (e.g., "I want to reschedule")
+    → Result: Generic "what's your ZIP?" instead of "Happy to help reschedule! What's your ZIP?"
+    ↓
+PHASE 5: handleWorkflowSelection (partial model via selectOption)
+    → Intercepts: appointment/slot/confirmation selections
+    → Problem: Uses simple selectOption() with LIMITED context
+    → Result: Main tool model never sees these messages
+    ↓
+PHASE 6: Tool Calling Flow
+    ├── detectActionIntent PRE-MODEL (regex)
+    │   → Intercepts: "reschedule", "cancel", "schedule" keywords
+    │   → Problem: Regex-based, no nuance
+    │
+    ├── model.generate() ← FINALLY the model sees something
+    │   → Problem: Only returns ONE decision, no loop
+    │   → Problem: Workers AI adapter only takes toolCalls[0], ignores rest
+    │
+    └── detectActionIntent POST-MODEL (regex override)
+        → If model returns final but text has keywords, override it
+        → Problem: More regex hacks layered on top
+```
+
+### Adapter issues
+
+**Workers AI adapter** ([`workers-ai.ts`](../../apps/worker/src/models/workers-ai.ts)):
+```typescript
+const toolCall = toolCalls[0];  // Only first tool, ignores rest!
+if (toolCall?.name) {
+  return validated.data;        // Returns immediately, no loop
+}
+```
+
+**OpenRouter adapter** ([`openrouter.ts`](../../apps/worker/src/models/openrouter.ts)):
+- Slightly better: handles multiple tool calls with `tool_calls` type
+- Still no loop: returns tool calls, expects external code to execute and... then what?
+
+**Neither adapter implements a tool result → model loop.** The pattern is:
+```
+model.generate() → returns tool call
+   ↓
+(external code executes tool)
+   ↓
+model.respond(result) → narrates result as final  ← SEPARATE METHOD, NOT A LOOP
+```
+
+### Missing capabilities
+
+**Workers AI supports but we don't use:**
+- `temperature`, `top_p`, `frequency_penalty`, `presence_penalty` - generation parameters
+- `stream: true` - streaming responses
+- `@cloudflare/ai-utils` with `runWithTools` - **embedded function calling with automatic tool loop**
+
+See [Cloudflare Workers AI docs](https://developers.cloudflare.com/workers-ai/) and [ai-utils on GitHub](https://github.com/cloudflare/ai-utils).
+
+---
+
+## Direction: Model-first architecture
+
+The fix is architectural: **let the model see everything and decide everything**.
+
+### Target flow (unified)
+
+```
+Message arrives
+    ↓
+Build FULL context (no interception):
+    - Verification state: { verified: false, customerId: null }
+    - Workflow state: { cancelWorkflowId: "...", step: "awaiting_confirmation" }
+    - Available options: [appointments], [slots], pending confirmation
+    - Full conversation history
+    ↓
+Filter tools based on state:
+    - Not verified? Only show: verifyZip, getServicePolicy
+    - Verified? Show all CRM tools
+    - Active workflow? Show workflow tools: selectAppointment, selectSlot, confirm
+    ↓
+runWithTools() with tool loop:
+    - Model calls tool(s)
+    - Tools execute, results feed back to model
+    - Model decides: call more tools OR return final response
+    - Loop continues until model produces final text
+    ↓
+Emit final response (single exit point)
+```
+
+### Tool gating
+
+Add metadata to tool definitions for declarative gating:
+
+```typescript
+// In tool-definitions.ts
+type ToolDefinition = {
+  description: string;
+  inputSchema: z.ZodTypeAny;
+  outputSchema: z.ZodTypeAny;
+  missingArgsMessage: string;
+  // NEW:
+  requiresVerification?: boolean;
+  requiresActiveWorkflow?: boolean;
+};
+
+export const toolDefinitions = {
+  // Always available
+  "identity.verifyZip": {
+    requiresVerification: false,
+    // ...
+  },
+  "crm.getServicePolicy": {
+    requiresVerification: false,  // Anyone can ask about policies
+    // ...
+  },
+
+  // Require verification
+  "crm.listUpcomingAppointments": {
+    requiresVerification: true,
+    // ...
+  },
+  "crm.cancelAppointment": {
+    requiresVerification: true,
+    // ...
+  },
+
+  // Require active workflow
+  "workflow.selectAppointment": {
+    requiresVerification: true,
+    requiresActiveWorkflow: true,
+    // ...
+  },
+  "workflow.selectSlot": {
+    requiresVerification: true,
+    requiresActiveWorkflow: true,
+    // ...
+  },
+  "workflow.confirm": {
+    requiresVerification: true,
+    requiresActiveWorkflow: true,
+    // ...
+  },
+};
+```
+
+Filter at runtime:
+```typescript
+function getAvailableTools(state: SessionState): ToolDefinition[] {
+  const verified = state.conversation?.verification.verified ?? false;
+  const hasWorkflow = Boolean(state.cancelWorkflowId || state.rescheduleWorkflowId);
+
+  return Object.entries(toolDefinitions)
+    .filter(([_, def]) => {
+      if (def.requiresVerification && !verified) return false;
+      if (def.requiresActiveWorkflow && !hasWorkflow) return false;
+      return true;
+    })
+    .map(([name, def]) => ({ name, ...def }));
+}
+```
+
+### Using `runWithTools` from `@cloudflare/ai-utils`
+
+This package implements the tool loop we need:
+
+```typescript
+import { runWithTools } from "@cloudflare/ai-utils";
+
+const response = await runWithTools(
+  env.AI,
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  {
+    messages: [...conversationHistory],
+    tools: getAvailableTools(sessionState).map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+      function: async (args) => executeToolHandler(tool.name, args, ctx),
+    })),
+  },
+  {
+    maxRecursiveToolRuns: 5,      // Allow multi-step chains: verify → list → select → confirm
+    streamFinalResponse: true,    // Stream the final text response
+    strictValidation: true,       // Throw on invalid tool args
+    trimFunction: autoTrimTools,  // Reduce tokens by filtering irrelevant tools
+  }
+);
+// response is the FINAL text after all tool chains complete
+```
+
+**Key options:**
+| Option | Purpose |
+|--------|---------|
+| `maxRecursiveToolRuns` | How many tool calls can chain (default: 1) |
+| `streamFinalResponse` | Return `ReadableStream` for real-time streaming |
+| `autoTrimTools` | Filter tools by relevance before sending to model |
+| `strictValidation` | Throw errors on schema mismatches |
+| `verbose` | Detailed logging for debugging |
+
+### Example conversation with new architecture
+
+```
+1. User (unverified): "I want to reschedule"
+2. Model sees:
+   - tools = [verifyZip, getServicePolicy]  ← protected tools hidden
+   - context = "User is NOT verified"
+3. Model responds: "Happy to help you reschedule! What's your ZIP code?"
+
+4. User: "90210"
+5. Model calls: verifyZip({ zip: "90210" })
+6. Tool returns: { verified: true, customerId: "cust_123" }
+7. Model now has access to more tools
+8. Model calls: listAppointments({ customerId: "cust_123" })
+9. Tool returns: [{ id: "apt_1", date: "Tuesday" }, ...]
+10. Model responds: "I see you have an appointment Tuesday. Want to reschedule that one?"
+
+11. User: "yes"
+12. Model calls: workflow.selectAppointment({ appointmentId: "apt_1" })
+13. ... continues through the flow
+```
+
+All in one natural conversation, no phases, no regex, no interception.
+
+---
+
+## Implementation roadmap
+
+### Phase 1: Foundation ✅
+- [x] Add `@cloudflare/ai-utils` as dependency
+- [x] Add gating metadata to [`tool-definitions.ts`](../../apps/worker/src/models/tool-definitions.ts)
+  - `requiresVerification`, `requiresActiveWorkflow` flags
+- [x] Create `getAvailableTools(state)` and `getAvailableToolNames(state)` functions
+
+### Phase 2: Tool loop
+- [ ] Create unified `runAgentLoop()` using `runWithTools`
+- [ ] Define tool handlers that execute CRM/workflow functions and return results
+- [x] Add generation parameters: `temperature`, `top_p`, `frequency_penalty`, `presence_penalty`
+  - See `GenerationParams` type in [`workers-ai.ts`](../../apps/worker/src/models/workers-ai.ts)
+- [ ] Support streaming with `streamFinalResponse: true`
+
+### Phase 3: Workflow tools ✅
+- [x] Add `workflow.selectAppointment` tool
+- [x] Add `workflow.selectSlot` tool
+- [x] Add `workflow.confirm` tool
+- [ ] Include workflow state in model context
+
+### Phase 4: Remove interception
+- [ ] Remove `handleWorkflowSelection` interception (make it a fallback only)
+- [ ] Remove `detectActionIntent` pre-model guard
+- [ ] Remove `detectActionIntent` post-model override
+- [ ] Consolidate response finalization to single exit point
+
+### Phase 5: Cleanup
+- [ ] Remove duplicate boilerplate (emit/update/sync/record pattern)
+- [ ] Delete legacy `handleAgentMessage` path
+- [ ] Update tests for new architecture
+
+---
+
+## Legacy direction (for reference)
+
+The following was the previous direction before the model-first refactor was planned:
+
 - One model for tool decisions: rely on the tool model (OpenRouter or Workers AI) to infer intent and choose tools; no deterministic regex intent detection in the steady state.
 - Richer, clearer prompts: strengthen tool prompts to require tool calls (with acknowledgements) in high-intent contexts, and to emit meaningful finals when truly no tool is needed.
 - Remove deterministic guards: phase out stopgaps like `detectActionIntent` once the model reliably picks tools; use them only as temporary safety nets.
 - Better visibility: log raw adapter output on empty/invalid finals and include decision snapshots in turn metadata so failures are debuggable.
-- Deterministic fallbacks only for safety: if the model fails repeatedly in an actionable state, default to a minimal deterministic plan (e.g., list appointments for reschedule) rather than emitting “interpret” fallbacks.
+- Deterministic fallbacks only for safety: if the model fails repeatedly in an actionable state, default to a minimal deterministic plan (e.g., list appointments for reschedule) rather than emitting "interpret" fallbacks.
 
 ## Conversation session refactor (deep dive)
 The DO is being refactored from monolithic to modular. Target shape:

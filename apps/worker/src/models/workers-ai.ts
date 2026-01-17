@@ -13,7 +13,39 @@ import {
   agentToolCallSchema,
 } from "./types";
 
-const MAX_NEW_TOKENS = 512;
+const DEFAULT_MAX_TOKENS = 512;
+
+/**
+ * Generation parameters for Workers AI model calls.
+ * These control the model's output behavior.
+ */
+export type GenerationParams = {
+  /** Maximum tokens to generate (default: 512) */
+  maxTokens?: number;
+  /** Controls randomness. Higher = more random (0-2, default: 0.7) */
+  temperature?: number;
+  /** Nucleus sampling. Lower = more focused (0-1, default: 1) */
+  topP?: number;
+  /** Penalizes repeated tokens (-2 to 2, default: 0) */
+  frequencyPenalty?: number;
+  /** Penalizes tokens based on presence (-2 to 2, default: 0) */
+  presencePenalty?: number;
+};
+
+const DEFAULT_GENERATION_PARAMS: Required<GenerationParams> = {
+  maxTokens: DEFAULT_MAX_TOKENS,
+  temperature: 0.7,
+  topP: 1,
+  frequencyPenalty: 0,
+  presencePenalty: 0,
+};
+
+const mergeGenerationParams = (
+  params?: GenerationParams,
+): Required<GenerationParams> => ({
+  ...DEFAULT_GENERATION_PARAMS,
+  ...params,
+});
 
 const responseToText = (response: unknown) => {
   if (
@@ -419,10 +451,13 @@ export const createWorkersAiAdapter = (
   model: string,
   config: AgentPromptConfig,
   logger: Logger,
+  generationParams?: GenerationParams,
 ): ModelAdapter => {
   if (!ai) {
     throw new AppError("AI binding not configured", { code: "config_error" });
   }
+
+  const params = mergeGenerationParams(generationParams);
 
   return {
     name: "workers-ai",
@@ -439,14 +474,20 @@ export const createWorkersAiAdapter = (
         const toolPayload = {
           messages: buildMessages(instructions, input.context, input.messages),
           tools: workersAiTools,
-          max_new_tokens: MAX_NEW_TOKENS,
-          max_tokens: MAX_NEW_TOKENS,
+          max_new_tokens: params.maxTokens,
+          max_tokens: params.maxTokens,
+          temperature: params.temperature,
+          top_p: params.topP,
+          frequency_penalty: params.frequencyPenalty,
+          presence_penalty: params.presencePenalty,
         };
         logger.info(
           {
             model,
-            max_new_tokens: MAX_NEW_TOKENS,
-            max_tokens: MAX_NEW_TOKENS,
+            max_new_tokens: params.maxTokens,
+            max_tokens: params.maxTokens,
+            temperature: params.temperature,
+            top_p: params.topP,
             messageCount: toolPayload.messages.length,
             toolCount: toolPayload.tools.length,
           },
@@ -457,6 +498,10 @@ export const createWorkersAiAdapter = (
           tools: toolPayload.tools,
           max_new_tokens: toolPayload.max_new_tokens,
           max_tokens: toolPayload.max_tokens,
+          temperature: toolPayload.temperature,
+          top_p: toolPayload.top_p,
+          frequency_penalty: toolPayload.frequency_penalty,
+          presence_penalty: toolPayload.presence_penalty,
         });
         const responseText = responseToText(response);
         const responseWithTools = response as {
@@ -499,14 +544,14 @@ export const createWorkersAiAdapter = (
         );
         const fallbackPayload = {
           messages: buildMessages(instructions, input.context, input.messages),
-          max_new_tokens: MAX_NEW_TOKENS,
-          max_tokens: MAX_NEW_TOKENS,
+          max_new_tokens: params.maxTokens,
+          max_tokens: params.maxTokens,
         };
         logger.info(
           {
             model,
-            max_new_tokens: MAX_NEW_TOKENS,
-            max_tokens: MAX_NEW_TOKENS,
+            max_new_tokens: params.maxTokens,
+            max_tokens: params.maxTokens,
             messageCount: fallbackPayload.messages.length,
           },
           "workers_ai.tool_call.fallback_payload",
@@ -536,16 +581,16 @@ export const createWorkersAiAdapter = (
       logger.info(
         {
           model,
-          max_new_tokens: MAX_NEW_TOKENS,
-          max_tokens: MAX_NEW_TOKENS,
+          max_new_tokens: params.maxTokens,
+          max_tokens: params.maxTokens,
           messageCount: 1 + (input.messages?.length ?? 0),
         },
         "workers_ai.respond.payload",
       );
       const response = await ai.run(model as keyof AiModels, {
         messages: buildMessages(instructions, input.context, input.messages),
-        max_new_tokens: MAX_NEW_TOKENS,
-        max_tokens: MAX_NEW_TOKENS,
+        max_new_tokens: params.maxTokens,
+        max_tokens: params.maxTokens,
       });
       const text = responseToText(response)?.trim();
       if (text) {
@@ -566,8 +611,8 @@ export const createWorkersAiAdapter = (
       logger.info(
         {
           model,
-          max_new_tokens: MAX_NEW_TOKENS,
-          max_tokens: MAX_NEW_TOKENS,
+          max_new_tokens: params.maxTokens,
+          max_tokens: params.maxTokens,
         },
         "workers_ai.route.payload",
       );
@@ -582,8 +627,8 @@ export const createWorkersAiAdapter = (
           type: "json_schema",
           json_schema: routeJsonSchema,
         },
-        max_new_tokens: MAX_NEW_TOKENS,
-        max_tokens: MAX_NEW_TOKENS,
+        max_new_tokens: params.maxTokens,
+        max_tokens: params.maxTokens,
       });
       const parsed = responseToJsonObject<z.infer<typeof agentRouteSchema>>(
         response,
@@ -608,8 +653,8 @@ export const createWorkersAiAdapter = (
       logger.info(
         {
           model,
-          max_new_tokens: MAX_NEW_TOKENS,
-          max_tokens: MAX_NEW_TOKENS,
+          max_new_tokens: params.maxTokens,
+          max_tokens: params.maxTokens,
           optionCount: input.options.length,
           kind: input.kind,
         },
@@ -633,8 +678,8 @@ export const createWorkersAiAdapter = (
           type: "json_schema",
           json_schema: selectionJsonSchema,
         },
-        max_new_tokens: MAX_NEW_TOKENS,
-        max_tokens: MAX_NEW_TOKENS,
+        max_new_tokens: params.maxTokens,
+        max_tokens: params.maxTokens,
       });
       const parsed = responseToJsonObject<z.infer<typeof selectionSchema>>(
         response,
@@ -667,8 +712,8 @@ export const createWorkersAiAdapter = (
       logger.info(
         {
           model,
-          max_new_tokens: MAX_NEW_TOKENS,
-          max_tokens: MAX_NEW_TOKENS,
+          max_new_tokens: params.maxTokens,
+          max_tokens: params.maxTokens,
           contextHint: input.contextHint ?? null,
         },
         "workers_ai.status.payload",
@@ -698,8 +743,8 @@ export const createWorkersAiAdapter = (
           type: "json_schema",
           json_schema: statusJsonSchema,
         },
-        max_new_tokens: MAX_NEW_TOKENS,
-        max_tokens: MAX_NEW_TOKENS,
+        max_new_tokens: params.maxTokens,
+        max_tokens: params.maxTokens,
       });
       const parsed = responseToJsonObject<z.infer<typeof statusSchema>>(
         response,

@@ -92,6 +92,17 @@ export function isInterpretFallback(text: string): boolean {
   return text.includes("I could not interpret the request");
 }
 
+/** Key facts extracted from diagnostics */
+export type DebugFacts = {
+  trigger: string;
+  provider: string;
+  model: string;
+  userMessage: string;
+  messageCount: string;
+  detectedIntent?: string;
+  rawOutput?: string;
+};
+
 /** Analysis result from debug summary */
 export type DebugAnalysis = {
   /** One-line summary of what went wrong */
@@ -103,7 +114,7 @@ export type DebugAnalysis = {
   /** Suggested actions to investigate */
   suggestions: string[];
   /** Key facts extracted from diagnostics */
-  facts: Record<string, string>;
+  facts: DebugFacts;
 };
 
 /**
@@ -117,14 +128,15 @@ export function analyzeDebugDiagnostics(
 ): DebugAnalysis {
   const issues: string[] = [];
   const suggestions: string[] = [];
-  const facts: Record<string, string> = {};
 
   // Extract key facts
-  facts["Trigger"] = diagnostics.reason.replace(/_/g, " ");
-  facts["Provider"] = diagnostics.provider;
-  facts["Model"] = diagnostics.modelId ?? "unknown";
-  facts["User message"] = diagnostics.userMessage || "(empty)";
-  facts["Message count"] = String(diagnostics.recentMessages.length);
+  const facts: DebugFacts = {
+    trigger: diagnostics.reason.replace(/_/g, " "),
+    provider: diagnostics.provider,
+    model: diagnostics.modelId ?? "unknown",
+    userMessage: diagnostics.userMessage || "(empty)",
+    messageCount: String(diagnostics.recentMessages.length),
+  };
 
   // Analyze the user message for clear intent
   const userMsg = diagnostics.userMessage.toLowerCase();
@@ -157,7 +169,7 @@ export function analyzeDebugDiagnostics(
               : null;
 
   if (detectedIntent) {
-    facts["Detected intent"] = detectedIntent;
+    facts.detectedIntent = detectedIntent;
   }
 
   // Issue detection based on reason
@@ -232,7 +244,7 @@ export function analyzeDebugDiagnostics(
 
   // Check if raw text gives clues
   if (diagnostics.rawText) {
-    facts["Raw output"] = diagnostics.rawText.slice(0, 100);
+    facts.rawOutput = diagnostics.rawText.slice(0, 100);
     if (
       diagnostics.rawText.includes("I cannot") ||
       diagnostics.rawText.includes("I'm unable")
@@ -321,9 +333,9 @@ export function formatDebugAnalysis(analysis: DebugAnalysis): string {
 }
 
 /**
- * Generate a complete debug summary from a fallback message.
+ * Generate a complete debug summary from a fallback message (rule-based).
  *
- * This is the main entry point - extracts diagnostics and generates analysis.
+ * This is a fast, synchronous fallback when AI is not available.
  */
 export function generateDebugSummary(fallbackText: string): string | null {
   const diagnostics = extractDiagnosticsFromFallback(fallbackText);
@@ -332,4 +344,172 @@ export function generateDebugSummary(fallbackText: string): string | null {
   }
   const analysis = analyzeDebugDiagnostics(diagnostics);
   return formatDebugAnalysis(analysis);
+}
+
+/**
+ * Build a prompt for AI-powered debug analysis.
+ *
+ * This generates a structured prompt that an AI model can use to analyze
+ * the conversation failure and provide actionable debugging insights.
+ */
+export function buildAIDebugPrompt(diagnostics: FallbackDiagnostics): string {
+  const messageHistory = diagnostics.recentMessages
+    .map((m) => `[${m.role}]: ${m.content}`)
+    .join("\n");
+
+  return `You are a debugging assistant analyzing why a customer service AI agent failed to understand a user's request.
+
+## Failure Context
+
+**Reason**: ${diagnostics.reason.replace(/_/g, " ")}
+**Provider**: ${diagnostics.provider}
+**Model**: ${diagnostics.modelId ?? "unknown"}
+
+## User's Message
+"${diagnostics.userMessage}"
+
+## Recent Conversation History
+${messageHistory || "(no history)"}
+
+## Model Context Provided
+${diagnostics.modelContext ? diagnostics.modelContext.slice(0, 1000) : "(no context)"}
+
+## Raw Model Output
+${diagnostics.rawText ? diagnostics.rawText.slice(0, 500) : "(empty or null)"}
+
+## Your Task
+
+Analyze this failure and provide a concise debug summary with:
+
+1. **Summary** (1 sentence): What went wrong in plain language
+2. **Severity** (low/medium/high): How bad is this failure?
+   - high = clear user intent was missed (reschedule, cancel, billing, etc.)
+   - medium = ambiguous but should have been handled better
+   - low = edge case or genuinely unclear intent
+3. **Root Cause** (1-2 sentences): Why did the model fail?
+4. **Issues** (bullet list): Specific problems detected
+5. **Suggestions** (bullet list): Actionable fixes to try
+
+Focus on:
+- Was the user's intent clear? What was it?
+- Did the model have enough context?
+- Were there issues with the conversation history (too many messages, status pollution)?
+- Did the model refuse or misunderstand?
+- What specific changes would help?
+
+Be direct and actionable. This is for engineers debugging the system.`;
+}
+
+/** Structured result from AI debug analysis */
+export type AIDebugResult = {
+  summary: string;
+  severity: "low" | "medium" | "high";
+  rootCause: string;
+  issues: string[];
+  suggestions: string[];
+};
+
+/**
+ * Parse AI model response into structured debug result.
+ *
+ * The AI is prompted to output in a specific format; this extracts the key fields.
+ */
+export function parseAIDebugResponse(response: string): AIDebugResult {
+  // Default fallback values
+  const result: AIDebugResult = {
+    summary: "Unable to parse AI analysis",
+    severity: "medium",
+    rootCause: "Analysis failed",
+    issues: [],
+    suggestions: [],
+  };
+
+  // Extract summary (first sentence or line after "Summary")
+  const summaryMatch = response.match(
+    /\*\*Summary\*\*[:\s]*([^\n]+)|^1\.\s*\*\*Summary\*\*[:\s]*([^\n]+)/im,
+  );
+  const summaryText = summaryMatch?.[1] ?? summaryMatch?.[2];
+  if (summaryText) {
+    result.summary = summaryText.trim();
+  }
+
+  // Extract severity
+  const severityMatch = response.match(
+    /\*\*Severity\*\*[:\s]*(low|medium|high)/i,
+  );
+  const severityText = severityMatch?.[1];
+  if (severityText) {
+    result.severity = severityText.toLowerCase() as "low" | "medium" | "high";
+  }
+
+  // Extract root cause
+  const rootCauseMatch = response.match(
+    /\*\*Root Cause\*\*[:\s]*([^\n]+(?:\n(?!\d\.|\*\*)[^\n]+)*)/i,
+  );
+  const rootCauseText = rootCauseMatch?.[1];
+  if (rootCauseText) {
+    result.rootCause = rootCauseText.trim();
+  }
+
+  // Extract issues (bullet points after "Issues")
+  const issuesMatch = response.match(
+    /\*\*Issues\*\*[:\s]*\n((?:[-•*]\s*[^\n]+\n?)+)/i,
+  );
+  const issuesText = issuesMatch?.[1];
+  if (issuesText) {
+    result.issues = issuesText
+      .split("\n")
+      .map((line) => line.replace(/^[-•*]\s*/, "").trim())
+      .filter(Boolean);
+  }
+
+  // Extract suggestions (bullet points after "Suggestions")
+  const suggestionsMatch = response.match(
+    /\*\*Suggestions\*\*[:\s]*\n((?:[-•*]\s*[^\n]+\n?)+)/i,
+  );
+  const suggestionsText = suggestionsMatch?.[1];
+  if (suggestionsText) {
+    result.suggestions = suggestionsText
+      .split("\n")
+      .map((line) => line.replace(/^[-•*]\s*/, "").trim())
+      .filter(Boolean);
+  }
+
+  return result;
+}
+
+/**
+ * Format AI debug result as a human-readable string.
+ */
+export function formatAIDebugResult(result: AIDebugResult): string {
+  const lines: string[] = [];
+
+  const severityEmoji =
+    result.severity === "high"
+      ? "🔴"
+      : result.severity === "medium"
+        ? "🟡"
+        : "🟢";
+
+  lines.push(`${severityEmoji} ${result.summary}`);
+  lines.push("");
+  lines.push(`📍 Root cause: ${result.rootCause}`);
+  lines.push("");
+
+  if (result.issues.length > 0) {
+    lines.push("⚠️  Issues:");
+    for (const issue of result.issues) {
+      lines.push(`   • ${issue}`);
+    }
+    lines.push("");
+  }
+
+  if (result.suggestions.length > 0) {
+    lines.push("💡 Suggestions:");
+    for (const suggestion of result.suggestions) {
+      lines.push(`   → ${suggestion}`);
+    }
+  }
+
+  return lines.join("\n");
 }

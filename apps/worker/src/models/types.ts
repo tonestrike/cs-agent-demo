@@ -17,6 +17,10 @@ export const agentToolNameSchema = z.enum([
   "crm.escalate",
   "agent.escalate",
   "agent.fallback",
+  // Workflow selection tools
+  "workflow.selectAppointment",
+  "workflow.selectSlot",
+  "workflow.confirm",
 ]);
 
 export const agentToolCallSchema = z.object({
@@ -185,6 +189,18 @@ export const crmEscalateResultSchema = z.object({
   ticketId: z.string().optional(),
 });
 
+// Workflow tool result schemas
+export const workflowSelectResultSchema = z.object({
+  ok: z.boolean(),
+  selectedId: z.string().optional(),
+  selectedLabel: z.string().optional(),
+});
+
+export const workflowConfirmResultSchema = z.object({
+  ok: z.boolean(),
+  confirmed: z.boolean(),
+});
+
 const agentMessageResultSchema = z.object({
   kind: z.string().min(1),
   details: z.string().optional(),
@@ -263,6 +279,19 @@ const toolResultSchema = z.discriminatedUnion("toolName", [
   z.object({
     toolName: z.literal("agent.message"),
     result: agentMessageResultSchema,
+  }),
+  // Workflow tools
+  z.object({
+    toolName: z.literal("workflow.selectAppointment"),
+    result: workflowSelectResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("workflow.selectSlot"),
+    result: workflowSelectResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("workflow.confirm"),
+    result: workflowConfirmResultSchema,
   }),
 ]);
 

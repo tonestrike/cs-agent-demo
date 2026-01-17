@@ -51,12 +51,14 @@
       "name": "@pestcall/worker",
       "version": "0.0.0",
       "dependencies": {
+        "@cloudflare/ai-utils": "^1.0.1",
         "@orpc/server": "^1.13.4",
         "@pestcall/core": "workspace:*",
         "agents": "^0.3.5",
         "ai": "^3.4.13",
         "pino": "^9.6.0",
         "zod": "^3.23.8",
+        "zod-to-json-schema": "^3.25.1",
       },
       "devDependencies": {
         "@cloudflare/workers-types": "^4.20250115.0",
@@ -125,6 +127,8 @@
     "@cfworker/json-schema": ["@cfworker/json-schema@4.1.1", "", {}, "sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og=="],
 
     "@cloudflare/ai-chat": ["@cloudflare/ai-chat@0.0.4", "", { "peerDependencies": { "agents": "^0.3.4", "ai": "^6.0.0", "react": "^19.0.0", "zod": "^3.25.0 || ^4.0.0" } }, "sha512-NGQRt34X/UI+mx9fss7LmTTNBDVlFrtu+7JFoaykLUI738w9gjDplsMbOenCRbSr7UW4ngHGnv3YWUmV99eEnQ=="],
+
+    "@cloudflare/ai-utils": ["@cloudflare/ai-utils@1.0.1", "", { "dependencies": { "yaml": "^2.4.5", "zod": "^3.23.8" } }, "sha512-gmn16AvVqtMLcaBYvPkwEWui39E4hlcFPqXuVamKbGleIDO6hVpvAy3KCvbnoPVT7KqRcfdLLpHRIBQDwI9tWQ=="],
 
     "@cloudflare/codemode": ["@cloudflare/codemode@0.0.4", "", { "dependencies": { "zod-to-ts": "^2.0.0" }, "peerDependencies": { "agents": "^0.3.4", "ai": "^6.0.0", "zod": "^3.25.0 || ^4.0.0" } }, "sha512-hsHu9q03yBSi8UaQKbVjpEMLJjr2BJ9BpPrH/up9I6JBrvZiMSymVOGuPSPJGso2HGlOfwLEZq9gyFyRmBsSCA=="],
 
@@ -1081,6 +1085,8 @@
     "ws": ["ws@8.18.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-8VbfWfHLbbwu3+N6OKsOMpBdT4kXPDDB9cJk2bJ6mh9ucxdlnNvH1e+roYkKmN9Nxw2yjz7VzeO9oOz2zJ04Pw=="],
 
     "y18n": ["y18n@5.0.8", "", {}, "sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA=="],
+
+    "yaml": ["yaml@2.8.2", "", { "bin": { "yaml": "bin.mjs" } }, "sha512-mplynKqc1C2hTVYxd0PU2xQAc22TI1vShAYGksCCfxbn/dFwnHTNi1bvYsBTkhdUNtGIf5xNOg938rrSSYvS9A=="],
 
     "yargs": ["yargs@17.7.2", "", { "dependencies": { "cliui": "^8.0.1", "escalade": "^3.1.1", "get-caller-file": "^2.0.5", "require-directory": "^2.1.1", "string-width": "^4.2.3", "y18n": "^5.0.5", "yargs-parser": "^21.1.1" } }, "sha512-7dSzzRQ++CKnNI/krKnYRV7JKKPUXMEh61soaHKg9mrWEhzFWhFnxPxGl+69cD1Ou63C13NUPCnmIcrvqCuM6w=="],
 

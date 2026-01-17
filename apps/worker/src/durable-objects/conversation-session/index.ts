@@ -36,11 +36,16 @@ export {
 
 export {
   type FallbackDiagnostics,
+  type DebugFacts,
   type DebugAnalysis,
+  type AIDebugResult,
   buildFallbackWithDiagnostics,
   extractDiagnosticsFromFallback,
   isInterpretFallback,
   analyzeDebugDiagnostics,
   formatDebugAnalysis,
   generateDebugSummary,
+  buildAIDebugPrompt,
+  parseAIDebugResponse,
+  formatAIDebugResult,
 } from "./fallback";

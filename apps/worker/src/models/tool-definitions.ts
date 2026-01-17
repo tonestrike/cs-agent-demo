@@ -12,6 +12,8 @@ import {
   rescheduleResultSchema,
   servicePolicyResultSchema,
   verifyAccountResultSchema,
+  workflowConfirmResultSchema,
+  workflowSelectResultSchema,
 } from "./types";
 
 export type AgentToolName = z.infer<typeof agentToolNameSchema>;
@@ -21,6 +23,15 @@ type ToolDefinition = {
   inputSchema: z.ZodTypeAny;
   outputSchema: z.ZodTypeAny;
   missingArgsMessage: string;
+  /** Tool only available after customer account is verified */
+  requiresVerification?: boolean;
+  /** Tool only available when a workflow is active (e.g., selecting from a list) */
+  requiresActiveWorkflow?: boolean;
+};
+
+export type ToolGatingState = {
+  isVerified: boolean;
+  hasActiveWorkflow: boolean;
 };
 
 const fiveDigitZip = z.string().regex(/^\d{5}$/);
@@ -64,6 +75,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     inputSchema: z.object({ customerId: z.string().optional() }),
     outputSchema: appointmentResultSchema,
     missingArgsMessage: "Customer ID is required to load appointments.",
+    requiresVerification: true,
   },
   "crm.listUpcomingAppointments": {
     description: "List upcoming appointments for a customer.",
@@ -73,18 +85,21 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     }),
     outputSchema: appointmentListResultSchema,
     missingArgsMessage: "Customer ID is required to list appointments.",
+    requiresVerification: true,
   },
   "crm.getAppointmentById": {
     description: "Fetch a specific appointment by ID.",
     inputSchema: z.object({ appointmentId: z.string().min(1) }),
     outputSchema: appointmentResultSchema,
     missingArgsMessage: "Appointment ID is required to load that appointment.",
+    requiresVerification: true,
   },
   "crm.getOpenInvoices": {
     description: "Fetch open invoices for a customer.",
     inputSchema: z.object({ customerId: z.string().optional() }),
     outputSchema: invoicesSummaryResultSchema,
     missingArgsMessage: "Customer ID is required to look up invoices.",
+    requiresVerification: true,
   },
   "crm.getAvailableSlots": {
     description: "Fetch available appointment slots for a customer.",
@@ -98,6 +113,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     }),
     outputSchema: availableSlotListResultSchema,
     missingArgsMessage: "Customer ID is required to look up available slots.",
+    requiresVerification: true,
   },
   "crm.rescheduleAppointment": {
     description: "Reschedule an appointment to a chosen slot.",
@@ -108,6 +124,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: rescheduleResultSchema,
     missingArgsMessage:
       "Which appointment should I reschedule, and which time works best? If you have multiple appointments, I can list them.",
+    requiresVerification: true,
   },
   "crm.cancelAppointment": {
     description: "Cancel a scheduled appointment.",
@@ -117,6 +134,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: z.object({ ok: z.boolean() }),
     missingArgsMessage:
       "Which appointment should I cancel? If you have multiple appointments, I can list them.",
+    requiresVerification: true,
   },
   "crm.createAppointment": {
     description: "Create a new appointment for a customer.",
@@ -129,6 +147,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: createAppointmentResultSchema,
     missingArgsMessage:
       "Customer ID and preferred window are required to create an appointment.",
+    requiresVerification: true,
   },
   "crm.getServicePolicy": {
     description: "Fetch a service policy by topic.",
@@ -145,6 +164,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     }),
     outputSchema: crmEscalateResultSchema,
     missingArgsMessage: "Escalation details are required.",
+    requiresVerification: true,
   },
   "agent.escalate": {
     description: "Escalate to a human agent.",
@@ -161,6 +181,51 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     inputSchema: z.object({}),
     outputSchema: z.object({}),
     missingArgsMessage: "Missing or invalid tool arguments.",
+  },
+  // Workflow selection tools - available when a workflow is active
+  "workflow.selectAppointment": {
+    description:
+      "Select an appointment from a list of options. Use when customer indicates which appointment they want to reschedule, cancel, or view.",
+    inputSchema: z.object({
+      selectionIndex: z
+        .number()
+        .int()
+        .nonnegative()
+        .describe("Zero-based index of the appointment in the current list"),
+      appointmentId: z.string().optional().describe("Direct ID if known"),
+    }),
+    outputSchema: workflowSelectResultSchema,
+    missingArgsMessage:
+      "Which appointment would you like to select? You can say the number or describe it.",
+    requiresActiveWorkflow: true,
+  },
+  "workflow.selectSlot": {
+    description:
+      "Select a time slot from available options. Use when customer indicates their preferred appointment time.",
+    inputSchema: z.object({
+      selectionIndex: z
+        .number()
+        .int()
+        .nonnegative()
+        .describe("Zero-based index of the slot in the current list"),
+      slotId: z.string().optional().describe("Direct slot ID if known"),
+    }),
+    outputSchema: workflowSelectResultSchema,
+    missingArgsMessage:
+      "Which time slot works best for you? You can say the number or describe the time.",
+    requiresActiveWorkflow: true,
+  },
+  "workflow.confirm": {
+    description:
+      "Confirm or cancel a pending action. Use when customer confirms or declines a proposed action like cancellation or rescheduling.",
+    inputSchema: z.object({
+      confirmed: z
+        .boolean()
+        .describe("True if customer confirms, false if they decline"),
+    }),
+    outputSchema: workflowConfirmResultSchema,
+    missingArgsMessage: "Would you like me to proceed with that?",
+    requiresActiveWorkflow: true,
   },
 };
 
@@ -194,4 +259,42 @@ export const validateToolResult = (
     return { ok: true as const };
   }
   return { ok: false as const };
+};
+
+/**
+ * Filter available tools based on current session state.
+ * Tools with gating requirements are excluded if conditions aren't met.
+ */
+export const getAvailableTools = (
+  state: ToolGatingState,
+): Partial<Record<AgentToolName, ToolDefinition>> => {
+  const available: Partial<Record<AgentToolName, ToolDefinition>> = {};
+
+  for (const [name, definition] of Object.entries(toolDefinitions)) {
+    const toolName = name as AgentToolName;
+
+    // Check verification requirement
+    if (definition.requiresVerification && !state.isVerified) {
+      continue;
+    }
+
+    // Check active workflow requirement
+    if (definition.requiresActiveWorkflow && !state.hasActiveWorkflow) {
+      continue;
+    }
+
+    available[toolName] = definition;
+  }
+
+  return available;
+};
+
+/**
+ * Get tool names available for the current state.
+ * Convenience wrapper for getAvailableTools.
+ */
+export const getAvailableToolNames = (
+  state: ToolGatingState,
+): AgentToolName[] => {
+  return Object.keys(getAvailableTools(state)) as AgentToolName[];
 };

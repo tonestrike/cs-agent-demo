@@ -93,6 +93,13 @@ import {
   type WorkflowContext,
   handleWorkflowSelection as handleWorkflowSelectionFn,
 } from "./conversation-session/workflows";
+import {
+  type AgentLoopConfig,
+  type AgentLoopResult,
+  runAgentLoop,
+} from "./conversation-session/agent-loop";
+import type { ToolFlowContext, ToolRawResult } from "./conversation-session/tool-flow/types";
+import type { ToolGatingState } from "../models/tool-definitions";
 
 export class ConversationSession {
   private connections = new Set<WebSocket>();
@@ -665,21 +672,77 @@ export class ConversationSession {
     return token;
   }
 
+  /**
+   * Main message processing pipeline.
+   *
+   * This is the core entry point for handling user messages. It orchestrates the
+   * entire conversation flow through a series of phases:
+   *
+   * ## Processing Phases (in order)
+   *
+   * 1. **Initialization**: Set up turn state, IDs, metrics, and clear previous turn data
+   * 2. **Early Acknowledgement**: For verified users, fire-and-forget an acknowledgement
+   *    to reduce perceived latency (runs concurrently with other work)
+   * 3. **Filler Timer**: Schedule a backup status message if the response takes too long
+   *    (FILLER_TIMEOUT_MS) - ensures the user knows we're working on their request
+   * 4. **Verification Gate**: Check if the user is verified. If not, prompt for ZIP code.
+   *    If verification is handled here, return early.
+   * 5. **Workflow Selection**: Handle pending multi-step workflows (cancel/reschedule).
+   *    If the user is selecting an appointment or slot, handle it here and return early.
+   * 6. **Tool Calling Flow**: The main AI-powered tool calling logic. The model decides
+   *    whether to call tools (listAppointments, cancelAppointment, etc.) or respond directly.
+   * 7. **Legacy Agent Handler**: Fallback to the original agent handler if tool flow
+   *    doesn't produce a response (shouldn't happen in normal operation).
+   *
+   * ## Turn Lifecycle
+   *
+   * Each turn maintains state in instance variables (turnMetrics, turnTimings, etc.)
+   * that are reset at the start and cleaned up in the finally block. This allows
+   * the debug endpoint to inspect the current turn's progress.
+   *
+   * ## Event Emission
+   *
+   * Throughout the pipeline, events are emitted to connected clients:
+   * - `status`: Acknowledgements and progress updates
+   * - `token`: Streaming response tokens
+   * - `final`: The complete response
+   * - `error`: Error messages
+   *
+   * ## Cancellation
+   *
+   * If a new message arrives while processing, the old streamId is added to
+   * canceledStreamIds. Processing checks this before emitting events or recording turns.
+   *
+   * @param input - The user's message and metadata (phoneNumber, text, callSessionId)
+   * @returns The agent's response including replyText and any actions taken
+   */
   private async runMessage(
     input: AgentMessageInput,
   ): Promise<AgentMessageOutput> {
     const deps = createDependencies(this.env);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PHASE 1: INITIALIZATION
+    // Set up turn state, generate IDs, and clear data from previous turn
+    // ─────────────────────────────────────────────────────────────────────────
+
     const callSessionId = input.callSessionId ?? crypto.randomUUID();
     this.activeCallSessionId = callSessionId;
     const activeInput: AgentMessageInput = {
       ...input,
       callSessionId,
     };
+
+    // Stream ID allows cancellation if a new message arrives mid-processing
     const streamId = ++this.activeStreamId;
+
+    // Turn tracking - these are exposed via /debug endpoint for real-time inspection
     this.activeTurnId = ++this.turnCounter;
     this.activeMessageId = crypto.randomUUID();
     this.statusSequence = 0;
     this.activeStatusText = null;
+
+    // Turn debug data - collected throughout processing for debugging fallbacks
     this.turnModelCalls = [];
     this.turnDecision = null;
     this.turnToolCalls = [];
@@ -687,15 +750,23 @@ export class ConversationSession {
     this.turnTimings = {};
     this.turnModelMessages = null;
     this.turnModelContext = null;
+
+    // Clear any stale cancellation state for this stream
     this.canceledStreamIds.delete(streamId);
+
+    // Mark session as "speaking" (processing a response)
     await this.setSpeaking(true);
     let lastStatus = "";
+
+    // Initialize turn metrics for latency tracking
     this.turnMetrics = {
       callSessionId,
       startedAt: Date.now(),
       firstTokenAt: null,
       firstStatusAt: null,
     };
+    // Log session state snapshot for debugging - helps diagnose issues by showing
+    // what state the session was in when processing started
     this.logger.info(
       {
         callSessionId,
@@ -712,6 +783,8 @@ export class ConversationSession {
       },
       "conversation.session.state.snapshot",
     );
+
+    // Log turn start with the user's message
     this.logger.info(
       {
         callSessionId,
@@ -725,16 +798,32 @@ export class ConversationSession {
       },
       "conversation.session.turn.start",
     );
-    // First-token-fast: emit early acknowledgement for verified users
-    // This runs the acknowledgement model call concurrently with other pre-work (fire-and-forget)
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PHASE 2: EARLY ACKNOWLEDGEMENT (latency optimization)
+    // For verified users, immediately start generating an acknowledgement
+    // while the main processing pipeline runs. This reduces perceived latency.
+    // ─────────────────────────────────────────────────────────────────────────
+
     const conversationState =
       this.sessionState.conversation ?? initialConversationState();
     if (conversationState.verification.verified) {
+      // Fire-and-forget - don't await, let it run concurrently
       void this.emitEarlyAcknowledgement(activeInput, deps, streamId);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PHASE 3: FILLER TIMER (backup latency mitigation)
+    // If we haven't sent any response within FILLER_TIMEOUT_MS, emit a
+    // model-generated acknowledgement so the user knows we're working on it.
+    // This is a safety net - the early acknowledgement usually beats this.
+    // ─────────────────────────────────────────────────────────────────────────
+
     let fillerTimer: ReturnType<typeof setTimeout> | null = null;
     let fillerEmitted = false;
+
     const scheduleFiller = () => {
+      // Don't schedule if we've already sent something
       if (
         this.turnMetrics?.firstTokenAt !== null ||
         fillerEmitted ||
@@ -747,6 +836,7 @@ export class ConversationSession {
       }
       fillerTimer = setTimeout(() => {
         fillerTimer = null;
+        // Double-check before emitting (state may have changed during timeout)
         if (
           this.canceledStreamIds.has(streamId) ||
           this.turnMetrics?.firstTokenAt !== null ||
@@ -756,7 +846,7 @@ export class ConversationSession {
           return;
         }
         fillerEmitted = true;
-        // Use empty fallback - all customer-facing text must be model-generated
+        // Empty fallback text - the narrator model generates the actual message
         void this.emitNarratorStatus(
           activeInput,
           deps,
@@ -767,7 +857,20 @@ export class ConversationSession {
       }, FILLER_TIMEOUT_MS);
     };
     scheduleFiller();
+
     try {
+      // ─────────────────────────────────────────────────────────────────────────
+      // PHASE 4: VERIFICATION GATE
+      // Check if the user is verified. If not, prompt for ZIP code verification.
+      // This is the first gate - unverified users can't proceed to tool calling.
+      //
+      // Returns a response if:
+      // - User is not verified → prompts for ZIP
+      // - User just provided a valid ZIP → confirms verification
+      // - User provided invalid ZIP → asks again
+      // Returns null if user is already verified → continue to next phase
+      // ─────────────────────────────────────────────────────────────────────────
+
       const verificationStart = Date.now();
       const verificationResponse = await this.handleVerificationGate(
         activeInput,
@@ -788,6 +891,7 @@ export class ConversationSession {
         "conversation.session.step.verification",
       );
 
+      // If verification gate handled the message, we're done
       if (verificationResponse) {
         this.emitEvent({ type: "final", data: verificationResponse });
         await this.updateSessionState(activeInput, verificationResponse);
@@ -809,7 +913,19 @@ export class ConversationSession {
         return verificationResponse;
       }
 
-      // Handle workflow selection
+      // ─────────────────────────────────────────────────────────────────────────
+      // PHASE 5: WORKFLOW SELECTION
+      // Handle pending multi-step workflows (cancel/reschedule appointment flows).
+      //
+      // If the user is in the middle of a workflow and this message is a selection
+      // (e.g., "appointment 2" or "the tuesday one"), handle it here.
+      //
+      // Returns a response if:
+      // - User is in cancel workflow and selects an appointment
+      // - User is in reschedule workflow and selects an appointment or slot
+      // Returns null if no pending workflow → continue to next phase
+      // ─────────────────────────────────────────────────────────────────────────
+
       const workflowStart = Date.now();
       const selectionResponse = await this.handleWorkflowSelection(
         activeInput,
@@ -829,6 +945,8 @@ export class ConversationSession {
         },
         "conversation.session.step.workflow_selection",
       );
+
+      // If workflow handled the message, we're done
       if (selectionResponse) {
         this.emitEvent({ type: "final", data: selectionResponse });
         await this.updateSessionState(activeInput, selectionResponse);
@@ -837,6 +955,26 @@ export class ConversationSession {
         await this.recordTurns(deps, activeInput, selectionResponse, meta);
         return selectionResponse;
       }
+
+      // ─────────────────────────────────────────────────────────────────────────
+      // PHASE 6: TOOL CALLING FLOW
+      // The main AI-powered tool calling logic. This is where most messages end up.
+      //
+      // The tool model receives:
+      // - System instructions with persona and policies
+      // - Recent conversation history
+      // - Available tools (listAppointments, cancelAppointment, etc.)
+      // - Context (verification state, cached appointments/slots)
+      //
+      // The model decides to either:
+      // - Call one or more tools → we execute them and narrate the results
+      // - Return a "final" response → we emit it directly
+      //
+      // This phase handles the "I could not interpret" fallback if the model
+      // returns an empty final or invalid decision. See tool-calling-debug.md
+      // for debugging these failures.
+      // ─────────────────────────────────────────────────────────────────────────
+
       const toolFlowStart = Date.now();
       const toolResponse = await this.handleToolCallingFlow(
         activeInput,
@@ -856,6 +994,8 @@ export class ConversationSession {
         },
         "conversation.session.step.tool_flow",
       );
+
+      // If tool flow produced a response, we're done
       if (toolResponse) {
         this.emitEvent({ type: "final", data: toolResponse });
         await this.updateSessionState(activeInput, toolResponse);
@@ -873,14 +1013,27 @@ export class ConversationSession {
         );
         return toolResponse;
       }
+      // ─────────────────────────────────────────────────────────────────────────
+      // PHASE 7: LEGACY AGENT HANDLER (fallback)
+      // If the tool calling flow didn't produce a response, fall back to the
+      // original handleAgentMessage implementation. This is a safety net during
+      // the refactor - once tool flow handles all cases, this can be removed.
+      //
+      // This path should be rare in production. If you see messages hitting this
+      // path frequently, check why tool flow is returning null.
+      // ─────────────────────────────────────────────────────────────────────────
+
       const agentStart = Date.now();
       const response = await handleAgentMessage(deps, input, undefined, {
+        // Status callback - emitted during processing to show the user we're working
         onStatus: (status) => {
           const text = status.text.trim();
+          // Skip empty or duplicate status messages
           if (!text || text === lastStatus) {
             return;
           }
           lastStatus = text;
+          // Narrate the status message (model generates a natural acknowledgement)
           void this.emitNarratorStatus(
             activeInput,
             deps,
@@ -889,7 +1042,9 @@ export class ConversationSession {
             "Acknowledge the request briefly while you check.",
           );
         },
+        // Token callback - streaming tokens as the response is generated
         onToken: (token) => {
+          // Check for cancellation (new message may have arrived)
           if (this.canceledStreamIds.has(streamId)) {
             return;
           }
@@ -909,6 +1064,8 @@ export class ConversationSession {
         },
         "conversation.session.step.agent_message",
       );
+
+      // Final response handling - only emit if not canceled
       if (!this.canceledStreamIds.has(streamId)) {
         this.emitEvent({ type: "final", data: response });
         await this.updateSessionState(input, response);
@@ -917,16 +1074,25 @@ export class ConversationSession {
         await this.recordTurns(deps, activeInput, response, meta);
       }
       return response;
+      // ─────────────────────────────────────────────────────────────────────────
+      // ERROR HANDLING
+      // Catch any uncaught exceptions from the processing pipeline.
+      // Return a user-friendly error message rather than crashing the session.
+      // ─────────────────────────────────────────────────────────────────────────
     } catch (error) {
       this.logger.error(
         { error: error instanceof Error ? error.message : "unknown" },
         "conversation.session.message_failed",
       );
+
+      // Create a safe fallback response - never expose error details to users
       const fallback: AgentMessageOutput = {
         callSessionId: callSessionId,
         replyText: "Something went wrong. Please try again.",
         actions: [],
       };
+
+      // Only emit if this stream wasn't canceled (another message may be processing)
       if (!this.canceledStreamIds.has(streamId)) {
         this.emitEvent({ type: "error", text: fallback.replyText });
         this.emitEvent({ type: "final", data: fallback });
@@ -934,10 +1100,21 @@ export class ConversationSession {
       }
       return fallback;
     } finally {
+      // ─────────────────────────────────────────────────────────────────────────
+      // CLEANUP (always runs)
+      // Log latency metrics and reset turn state regardless of success/failure.
+      // This ensures the session is ready for the next message.
+      // ─────────────────────────────────────────────────────────────────────────
+
+      // Calculate total turn duration
       if (this.turnMetrics && this.turnTimings) {
         this.turnTimings.totalMs =
           Date.now() - (this.turnMetrics.startedAt ?? Date.now());
       }
+      // Calculate latency metrics for observability
+      // - first_token_ms: Time until first streaming token (perceived latency)
+      // - time_to_status_ms: Time until first status message (backup latency metric)
+      // - total_ms: Total turn processing time
       const metrics = this.turnMetrics;
       const firstTokenMs =
         !metrics || metrics.firstTokenAt === null
@@ -947,6 +1124,8 @@ export class ConversationSession {
         !metrics || metrics.firstStatusAt === null
           ? null
           : metrics.firstStatusAt - (metrics.startedAt ?? Date.now());
+
+      // Log latency for monitoring/alerting (these metrics feed dashboards)
       this.logger.info(
         {
           callSessionId,
@@ -956,21 +1135,39 @@ export class ConversationSession {
         },
         "conversation.session.turn.latency",
       );
+
+      // Reset turn state for the next message
+      // These fields are turn-scoped and must be cleared to avoid leaking state
       this.turnMetrics = null;
       this.activeCallSessionId = null;
       this.activeTurnId = null;
       this.activeMessageId = null;
       this.activeStatusText = null;
+
+      // Mark session as no longer "speaking" (ready for new input)
       await this.setSpeaking(false);
     }
   }
 
+  /**
+   * Update local session state after processing a message.
+   *
+   * This persists the session state to durable storage so it survives DO restarts.
+   * It also tracks verification state transitions - if the agent asked for a ZIP code,
+   * we mark the conversation as "awaiting verification".
+   *
+   * @param input - The user's message input (contains phoneNumber)
+   * @param response - The agent's response (contains callSessionId)
+   */
   private async updateSessionState(
     input: AgentMessageInput,
     response: AgentMessageOutput,
   ) {
     const current =
       this.sessionState.conversation ?? initialConversationState();
+
+    // Determine if we need to transition verification state
+    // If not verified and response mentions "zip", we're requesting verification
     const nextState = current.verification.verified
       ? current
       : response.replyText.toLowerCase().includes("zip")
@@ -979,23 +1176,44 @@ export class ConversationSession {
             reason: "missing",
           })
         : current;
+
+    // Update session state with latest info
     this.sessionState = {
       ...this.sessionState,
       lastPhoneNumber: input.phoneNumber,
       lastCallSessionId: response.callSessionId,
       conversation: nextState,
     };
+
+    // Persist to durable storage
     await this.state.storage.put("state", this.sessionState);
   }
 
+  /**
+   * Sync conversation state from the D1 database session summary.
+   *
+   * The session summary in D1 contains the authoritative state for things like:
+   * - Verification status (customerId, verified flag)
+   * - Workflow state (cancel/reschedule in progress)
+   * - Customer identity information
+   *
+   * This method reads that summary and updates the DO's in-memory state to match.
+   * This is called after each turn to ensure consistency between D1 and the DO.
+   *
+   * @param callSessionId - The session ID to fetch summary from
+   * @param deps - Dependencies (calls repository)
+   */
   private async syncConversationState(
     callSessionId: string,
     deps: ReturnType<typeof createDependencies>,
   ): Promise<void> {
+    // Fetch session from D1
     const session = await deps.calls.getSession(callSessionId);
     if (!session?.summary) {
       return;
     }
+
+    // Parse the JSON summary
     let summary: SummarySnapshot | null = null;
     try {
       summary = JSON.parse(session.summary) as SummarySnapshot;
@@ -1010,16 +1228,21 @@ export class ConversationSession {
       return;
     }
 
+    // Derive new conversation state from summary
+    // This handles verification state, identity info, etc.
     const next = deriveConversationStateFromSummary(
       this.sessionState.conversation,
       summary,
     );
+
+    // Track active cancel workflow if one exists in summary
     const cancelWorkflowId =
       summary.workflowState?.kind === "cancel" &&
       summary.workflowState.instanceId
         ? summary.workflowState.instanceId
         : this.sessionState.cancelWorkflowId;
 
+    // Update and persist session state
     this.sessionState = {
       ...this.sessionState,
       conversation: next,
@@ -1250,6 +1473,18 @@ export class ConversationSession {
     await ensureCallSessionFn(deps.calls, callSessionId, phoneNumber);
   }
 
+  /**
+   * Record conversation turns to D1 database.
+   *
+   * This persists the user's message and agent's response to the call_turns table
+   * for conversation history, debugging, and analytics. The meta object contains
+   * debug information like model calls, timings, and decisions.
+   *
+   * @param deps - Dependencies (calls repository)
+   * @param input - User's message input
+   * @param response - Agent's response output
+   * @param meta - Optional metadata for debugging (modelMessages, context, etc.)
+   */
   private async recordTurns(
     deps: ReturnType<typeof createDependencies>,
     input: AgentMessageInput,
@@ -1270,6 +1505,16 @@ export class ConversationSession {
     });
   }
 
+  /**
+   * Get recent conversation messages for the tool model.
+   *
+   * Returns the last N turns of conversation in the format the model expects.
+   * Status/system messages are filtered out to avoid biasing the model.
+   *
+   * @param deps - Dependencies (calls repository)
+   * @param callSessionId - Session to get messages from
+   * @returns Array of {role, content} messages
+   */
   private async getRecentMessages(
     deps: ReturnType<typeof createDependencies>,
     callSessionId: string,
@@ -1277,6 +1522,17 @@ export class ConversationSession {
     return getRecentMessagesFn(this.getMessagesContext(deps), callSessionId);
   }
 
+  /**
+   * Update session summary with verified customer identity.
+   *
+   * Called after successful verification to store the customer ID in the
+   * D1 session summary. This persists the verification across sessions.
+   *
+   * @param deps - Dependencies (calls repository)
+   * @param callSessionId - Session to update
+   * @param phoneNumber - Customer's phone number
+   * @param customerId - Verified customer ID from CRM
+   */
   private async updateIdentitySummary(
     deps: ReturnType<typeof createDependencies>,
     callSessionId: string,
@@ -1291,6 +1547,17 @@ export class ConversationSession {
     );
   }
 
+  /**
+   * Update session summary with appointment list.
+   *
+   * Called after fetching appointments to cache them in the session summary.
+   * This allows the agent to reference appointments without re-fetching.
+   *
+   * @param deps - Dependencies (calls repository)
+   * @param callSessionId - Session to update
+   * @param phoneNumber - Customer's phone number
+   * @param appointments - List of appointments to cache
+   */
   private async updateAppointmentSummary(
     deps: ReturnType<typeof createDependencies>,
     callSessionId: string,
@@ -1343,16 +1610,42 @@ export class ConversationSession {
     return null;
   }
 
+  /**
+   * Handle the verification gate - ensure user is verified before proceeding.
+   *
+   * This is the first gate in the message processing pipeline. Unverified users
+   * cannot access tool calling or workflows until they provide a valid ZIP code.
+   *
+   * ## Flow
+   *
+   * 1. **Already verified**: Return null to continue to next phase
+   * 2. **No ZIP provided**: Ask for ZIP, stash any detected intent for later
+   * 3. **ZIP provided, valid**: Mark verified, update identity, return null to continue
+   * 4. **ZIP provided, invalid**: Ask for correct ZIP with friendly error message
+   *
+   * ## Pending Intent
+   *
+   * If the user says "I want to reschedule" before verifying, we detect that intent
+   * and store it. After verification succeeds, we automatically handle that intent
+   * so the user doesn't have to repeat themselves.
+   *
+   * @param input - User's message (may contain ZIP code)
+   * @param deps - Dependencies (CRM for customer lookup)
+   * @param streamId - Stream ID for cancellation checking
+   * @returns Response if verification needed, null if already verified
+   */
   private async handleVerificationGate(
     input: AgentMessageInput,
     deps: ReturnType<typeof createDependencies>,
     streamId: number,
   ): Promise<AgentMessageOutput | null> {
-    // Verification flow:
-    // 1) If already verified: skip.
-    // 2) Lookup customer by phone; if no single match or no ZIP in input: ask for ZIP and stash pending intent.
-    // 3) If ZIP present and customer found: verify; on success, mark verified, clear pending intent, and continue.
-    //    On failure, ask for ZIP again with an invalid ZIP prompt.
+    // ─────────────────────────────────────────────────────────────────────────
+    // VERIFICATION FLOW
+    // 1) If already verified: skip (return null to continue pipeline)
+    // 2) Lookup customer by phone; if no match or no ZIP: ask for ZIP
+    // 3) If ZIP present and valid: mark verified and continue
+    // 4) If ZIP invalid: ask for correct ZIP
+    // ─────────────────────────────────────────────────────────────────────────
     const state = this.sessionState.conversation ?? initialConversationState();
     if (state.verification.verified) {
       return null;
@@ -1761,29 +2054,96 @@ export class ConversationSession {
     }
   }
 
+  /**
+   * Handle pending workflow selections (cancel/reschedule flows).
+   *
+   * When a user is in the middle of a multi-step workflow (e.g., "which appointment
+   * would you like to cancel?"), their response needs special handling. This phase
+   * checks if there's an active workflow and if this message is a selection.
+   *
+   * ## Workflows handled
+   *
+   * - **Cancel workflow**: User selects which appointment to cancel
+   * - **Reschedule workflow**: User selects appointment to reschedule, then slot
+   *
+   * ## Implementation
+   *
+   * This delegates to the extracted workflow module (`handleWorkflowSelectionFn`)
+   * which uses the model to understand selections like "the first one" or
+   * "appointment 2" or "the Tuesday one".
+   *
+   * @param input - User's message (may be a selection like "the second one")
+   * @param deps - Dependencies (CRM, workflows)
+   * @param streamId - Stream ID for cancellation checking
+   * @returns Response if workflow handled it, null otherwise
+   */
   private async handleWorkflowSelection(
     input: AgentMessageInput,
     deps: ReturnType<typeof createDependencies>,
     streamId: number,
   ): Promise<AgentMessageOutput | null> {
-    // Delegate to extracted workflow selection handler
+    // Build context object for the extracted workflow handler
     const ctx = this.buildWorkflowContext(deps, streamId);
     const result = await handleWorkflowSelectionFn(ctx, input);
+
+    // Return response if workflow handled the message, null to continue pipeline
     return result.handled ? (result.output ?? null) : null;
   }
 
+  /**
+   * Main AI-powered tool calling logic.
+   *
+   * This is the core of the agent's decision-making. It sends the user's message
+   * to the tool model, which decides whether to:
+   * - Call one or more tools (listAppointments, cancelAppointment, etc.)
+   * - Return a direct "final" response
+   *
+   * ## Flow
+   *
+   * 1. **Guards**: Check verification, handle bare ZIP post-verification
+   * 2. **Pre-work**: Parallel fetch of model adapter, customer context, messages
+   * 3. **Quick intent**: Detect obvious intents (reschedule/cancel) deterministically
+   * 4. **Model generate**: Call tool model with context + messages + tools
+   * 5. **Decision handling**:
+   *    - `final` → Emit response (with fallback if empty)
+   *    - `tool_calls` → Execute tools in parallel, narrate results
+   *    - `tool_call` → Execute single tool, narrate result
+   *
+   * ## Fallback Handling
+   *
+   * If the model returns an empty final or invalid decision, we build a diagnostic
+   * fallback message with embedded debug info. See `tool-calling-debug.md` for
+   * how to debug these failures.
+   *
+   * ## Intent Override
+   *
+   * If the model returns `final` but we detect a clear actionable intent
+   * (reschedule/cancel/schedule), we ignore the final and handle the intent
+   * deterministically. This is a safety net for model failures.
+   *
+   * @param input - User's message
+   * @param deps - Dependencies (CRM, model adapters, workflows)
+   * @param streamId - Stream ID for cancellation checking
+   * @returns Response if tool flow handled it, null to continue pipeline
+   */
   private async handleToolCallingFlow(
     input: AgentMessageInput,
     deps: ReturnType<typeof createDependencies>,
     streamId: number,
   ): Promise<AgentMessageOutput | null> {
+    // ─────────────────────────────────────────────────────────────────────────
+    // GUARD: Must be verified to use tool calling
+    // ─────────────────────────────────────────────────────────────────────────
     const state = this.sessionState.conversation ?? initialConversationState();
     if (!state.verification.verified || !state.verification.customerId) {
       return null;
     }
-    // Guard: if the user only sent a ZIP (or nothing) immediately after verification,
-    // bypass the tool model and ask what they want to do next. This avoids empty finals
-    // when there's no intent signal beyond the ZIP.
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GUARD: Bare ZIP post-verification
+    // If user only sent a ZIP immediately after verification, ask what they
+    // want to do next. This avoids empty finals when there's no intent signal.
+    // ─────────────────────────────────────────────────────────────────────────
     const rawText = input.text?.trim() ?? "";
     const isBareZip = /^\d{5}(?:-\d{4})?$/.test(rawText);
     const hasWorkflow =
@@ -1809,23 +2169,51 @@ export class ConversationSession {
       };
     }
     const callSessionId = input.callSessionId ?? crypto.randomUUID();
-    // Parallelize pre-work: model adapter, customer context, and recent messages
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // AGENT LOOP: Use unified agent loop when AI binding is available
+    // This is the new model-first architecture that uses runWithTools.
+    // Enable by setting the AI binding in wrangler.toml.
+    // ─────────────────────────────────────────────────────────────────────────
+    if (this.env.AI) {
+      const agentLoopResult = await this.handleAgentLoopFlow(input, deps, streamId);
+      if (agentLoopResult) {
+        return agentLoopResult;
+      }
+      // If agent loop returned null (e.g., error), fall through to legacy flow
+      this.logger.info(
+        { callSessionId, turnId: this.activeTurnId },
+        "agent_loop.fallback_to_legacy",
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PRE-WORK: Parallel fetch of dependencies
+    // These run concurrently to minimize latency before calling the model
+    // ─────────────────────────────────────────────────────────────────────────
     const preWorkStart = Date.now();
     const [model, customer, messages] = await Promise.all([
-      this.getModelAdapter(deps),
-      this.getCustomerContext(deps, input),
-      this.getRecentMessages(deps, callSessionId),
+      this.getModelAdapter(deps), // Model adapter (OpenRouter or Workers AI)
+      this.getCustomerContext(deps, input), // Customer info from CRM
+      this.getRecentMessages(deps, callSessionId), // Recent conversation turns
     ]);
     const preWorkMs = Date.now() - preWorkStart;
     if (this.turnTimings) {
       this.turnTimings.preWorkMs = preWorkMs;
-      // Keep individual timings as estimates (parallel execution)
+      // Note: Individual timings are estimates since they ran in parallel
       this.turnTimings.modelAdapterMs = preWorkMs;
       this.turnTimings.customerContextMs = preWorkMs;
       this.turnTimings.recentMessagesMs = preWorkMs;
     }
+
+    // Build context string for the model (verification state, cached data)
     const context = buildModelContext(this.sessionState);
-    // If intent is obvious, handle it deterministically before calling the tool model.
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // QUICK INTENT: Deterministic intent detection (safety net)
+    // If intent is obvious (reschedule/cancel/schedule), handle it without
+    // calling the tool model. This bypasses potential model failures.
+    // ─────────────────────────────────────────────────────────────────────────
     const quickIntent = detectActionIntent(input.text);
     if (quickIntent) {
       const intentReply = await this.handlePendingIntent(
@@ -1843,9 +2231,16 @@ export class ConversationSession {
         };
       }
     }
+    // Store for debugging (accessible via /debug endpoint)
     this.turnModelMessages = messages;
     this.turnModelContext = context;
+
     try {
+      // ─────────────────────────────────────────────────────────────────────────
+      // MODEL GENERATE: Call the tool model to decide next action
+      // The model receives: user message, customer info, context, recent messages
+      // It returns either: tool_call(s) or final response
+      // ─────────────────────────────────────────────────────────────────────────
       this.recordModelCall("generate", model);
       this.logger.info(
         {
@@ -1911,8 +2306,17 @@ export class ConversationSession {
             : 0,
         finalLength: decision.type === "final" ? decision.text.length : 0,
       };
+      // ─────────────────────────────────────────────────────────────────────────
+      // DECISION HANDLING: Process the model's decision
+      // ─────────────────────────────────────────────────────────────────────────
+
       if (decision.type === "final") {
-        // If intent is clearly actionable, do not accept a tool-less final.
+        // ─────────────────────────────────────────────────────────────────────
+        // FINAL RESPONSE: Model decided to respond directly (no tools)
+        // Check for empty text and actionable intent override
+        // ─────────────────────────────────────────────────────────────────────
+
+        // Safety net: If intent is clearly actionable, don't accept a tool-less final
         const derivedIntent = detectActionIntent(input.text);
         if (derivedIntent) {
           const intentReply = await this.handlePendingIntent(
@@ -1987,7 +2391,10 @@ export class ConversationSession {
         return { callSessionId, replyText, actions: [], debug };
       }
 
-      // Handle multiple tool calls in parallel
+      // ─────────────────────────────────────────────────────────────────────────
+      // MULTIPLE TOOL CALLS: Execute tools in parallel
+      // Model decided to call multiple tools (e.g., check appointments + balance)
+      // ─────────────────────────────────────────────────────────────────────────
       if (isMultipleToolCalls(decision)) {
         const acknowledgementText = decision.acknowledgement?.trim() || "";
         if (acknowledgementText) {
@@ -2013,9 +2420,12 @@ export class ConversationSession {
         );
       }
 
-      // Handle single tool call (backwards compatible path)
+      // ─────────────────────────────────────────────────────────────────────────
+      // SINGLE TOOL CALL: Execute one tool
+      // Most common path - model calls one tool like listAppointments
+      // ─────────────────────────────────────────────────────────────────────────
       if (!isSingleToolCall(decision)) {
-        // Should not reach here, but fallback for type safety
+        // Type guard failed - invalid decision format, emit fallback with diagnostics
         const rawDecisionType =
           "type" in decision &&
           typeof (decision as { type?: unknown }).type === "string"
@@ -3318,6 +3728,229 @@ export class ConversationSession {
     };
   }
 
+  /**
+   * Narrate multiple tool results into a single response.
+   *
+   * Combines the context hints and results from all tools, then narrates
+   * them as a unified response.
+   */
+  private async narrateToolResults(
+    results: ToolRawResult[],
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+    streamId: number,
+    priorAcknowledgement?: string,
+  ): Promise<string> {
+    if (results.length === 0) {
+      return priorAcknowledgement || "I'm not sure what to do with that.";
+    }
+
+    // If only one result, use the simpler narrateToolResult
+    if (results.length === 1) {
+      const result = results[0];
+      if (!result) {
+        return priorAcknowledgement || "I'm not sure what to do with that.";
+      }
+      return this.narrateToolResult(
+        {
+          toolName: result.toolName,
+          result: result.result,
+        } as ToolResult,
+        {
+          input,
+          deps,
+          streamId,
+          fallback: result.fallback,
+          contextHint: result.contextHint,
+          priorAcknowledgement,
+        },
+      );
+    }
+
+    // For multiple results, combine context hints and use the first as primary
+    const combinedContextHint = results
+      .map((r) => r.contextHint)
+      .filter(Boolean)
+      .join(" ");
+    const primaryResult = results[0];
+    if (!primaryResult) {
+      return priorAcknowledgement || "I'm not sure what to do with that.";
+    }
+    const combinedResult = {
+      toolName: "agent.message" as const,
+      result: results.map((r) => ({
+        tool: r.toolName,
+        result: r.result,
+      })),
+    };
+    const combinedFallback = results
+      .map((r) => r.fallback)
+      .filter(Boolean)
+      .join(" ");
+
+    return this.narrateToolResult(
+      combinedResult as unknown as ToolResult,
+      {
+        input,
+        deps,
+        streamId,
+        fallback: combinedFallback || primaryResult.fallback,
+        contextHint: combinedContextHint || primaryResult.contextHint,
+        priorAcknowledgement,
+      },
+    );
+  }
+
+  /**
+   * Build a ToolFlowContext for use with the agent loop.
+   *
+   * This context provides all the methods needed by tool handlers
+   * in the unified agent loop architecture.
+   */
+  private buildToolFlowContext(
+    deps: ReturnType<typeof createDependencies>,
+    streamId: number,
+  ): ToolFlowContext {
+    return {
+      logger: this.logger,
+      sessionState: this.sessionState,
+      deps,
+      streamId,
+
+      getConversationState: () =>
+        this.sessionState.conversation ?? initialConversationState(),
+
+      updateState: async (updates) => {
+        this.sessionState = { ...this.sessionState, ...updates };
+        await this.state.storage.put("state", this.sessionState);
+      },
+
+      narrateToolResults: async (results, input, priorAcknowledgement) =>
+        this.narrateToolResults(results, input, deps, streamId, priorAcknowledgement),
+
+      narrateToolResult: async (toolResult, options) =>
+        this.narrateToolResult(toolResult, {
+          input: options.input,
+          deps,
+          streamId,
+          fallback: options.fallback,
+          contextHint: options.contextHint,
+          priorAcknowledgement: options.priorAcknowledgement,
+        }),
+
+      narrateText: async (input, fallback, contextHint) =>
+        this.narrateText(input, deps, streamId, fallback, contextHint),
+
+      joinNarration: (first, second) => this.joinNarration(first, second),
+
+      updateAppointmentSummary: async (
+        callSessionId,
+        phoneNumber,
+        appointments,
+      ) =>
+        this.updateAppointmentSummary(
+          deps,
+          callSessionId,
+          phoneNumber,
+          appointments,
+        ),
+    };
+  }
+
+  /**
+   * Run the unified agent loop for tool calling.
+   *
+   * This uses runWithTools from @cloudflare/ai-utils to implement
+   * a model-first architecture where the model decides all actions.
+   */
+  private async handleAgentLoopFlow(
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+    streamId: number,
+  ): Promise<AgentMessageOutput | null> {
+    const state = this.sessionState.conversation ?? initialConversationState();
+    const callSessionId = input.callSessionId ?? crypto.randomUUID();
+
+    // Check for AI binding
+    if (!this.env.AI) {
+      this.logger.warn("agent_loop.no_ai_binding");
+      return null;
+    }
+
+    // Get prompt config and conversation history
+    const [agentConfig, messages] = await Promise.all([
+      deps.agentConfig.get(deps.agentConfigDefaults),
+      this.getRecentMessages(deps, callSessionId),
+    ]);
+
+    // Build the gating state
+    const gatingState: ToolGatingState = {
+      isVerified: state.verification.verified,
+      hasActiveWorkflow:
+        Boolean(this.sessionState.rescheduleWorkflowId) ||
+        Boolean(this.sessionState.cancelWorkflowId),
+    };
+
+    // Build tool flow context
+    const toolFlowCtx = this.buildToolFlowContext(deps, streamId);
+
+    // Build agent loop config
+    const config: AgentLoopConfig = {
+      ai: this.env.AI,
+      model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      promptConfig: agentConfig,
+      logger: this.logger,
+      maxToolRuns: 5,
+      streamFinalResponse: false,
+      verbose: false,
+    };
+
+    // Build workflow context if active
+    let workflowContext: string | undefined;
+    if (this.sessionState.rescheduleWorkflowId) {
+      workflowContext =
+        "Customer is rescheduling an appointment. Help them select a new slot.";
+    } else if (this.sessionState.cancelWorkflowId) {
+      workflowContext =
+        "Customer is cancelling an appointment. Help them confirm the cancellation.";
+    }
+
+    // Run the agent loop
+    const result: AgentLoopResult = await runAgentLoop(
+      config,
+      toolFlowCtx,
+      input,
+      gatingState,
+      messages,
+      workflowContext,
+    );
+
+    this.logger.info(
+      {
+        callSessionId,
+        turnId: this.activeTurnId,
+        toolCallCount: result.toolCallCount,
+        responseLength: result.response.length,
+      },
+      "agent_loop.complete",
+    );
+
+    // Emit the response tokens
+    if (!this.canceledStreamIds.has(streamId)) {
+      this.emitNarratorTokens(result.response, streamId);
+    }
+
+    return {
+      callSessionId,
+      replyText: result.response,
+      actions: [],
+      debug: {
+        reason: "agent_loop",
+        toolName: result.debug?.["model"] as string | undefined,
+      },
+    };
+  }
+
   private async getModelAdapter(
     deps: ReturnType<typeof createDependencies>,
   ): Promise<ReturnType<typeof deps.modelFactory>> {
@@ -3643,6 +4276,15 @@ export class ConversationSession {
     }
   }
 
+  /**
+   * Record a model call for debugging.
+   *
+   * Tracks which models were called during this turn, useful for debugging
+   * when multiple models are involved (tool model, narrator model, etc.).
+   *
+   * @param kind - Type of call (generate for tool decisions, respond for narration, status for ack)
+   * @param model - Model that was called (name and modelId)
+   */
   private recordModelCall(
     kind: "generate" | "respond" | "status",
     model: { name: string; modelId?: string | null },
@@ -3654,6 +4296,20 @@ export class ConversationSession {
     });
   }
 
+  /**
+   * Build metadata object for this turn.
+   *
+   * This metadata is stored with the turn in D1 and exposed via the /debug endpoint.
+   * It contains everything needed to debug a turn:
+   * - Model calls made (which models, what kind)
+   * - Messages sent to the model
+   * - Context string sent to the model
+   * - Tool decisions and calls
+   * - Latency timings
+   *
+   * @param callSessionId - Session ID for this turn
+   * @returns Metadata object for storage/debugging
+   */
   private buildTurnMeta(callSessionId: string): Record<string, unknown> {
     const metrics = this.turnMetrics;
     const startedAt = metrics?.startedAt ?? Date.now();
