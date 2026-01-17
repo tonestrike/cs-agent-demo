@@ -102,7 +102,7 @@ export default {
           accountId: string,
           apiToken: string,
           options?: { phoneNumber?: string; callSessionId?: string },
-        ) => Promise<void>;
+        ) => Promise<{ voiceEnabled: boolean }>;
         deinit: () => Promise<void>;
       };
       try {
@@ -120,7 +120,7 @@ export default {
           }
           const accountId = env.REALTIMEKIT_ACCOUNT_ID ?? "";
           const apiToken = env.REALTIMEKIT_API_TOKEN ?? "";
-          await stub.init(
+          const result = await stub.init(
             agentId,
             body.meetingId,
             body.authToken,
@@ -132,7 +132,7 @@ export default {
               callSessionId: body.callSessionId,
             },
           );
-          return withCors(Response.json({ ok: true }));
+          return withCors(Response.json({ ok: true, voiceEnabled: result.voiceEnabled }));
         }
         if (action === "deinit" && request.method === "POST") {
           await stub.deinit();
