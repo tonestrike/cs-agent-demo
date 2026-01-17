@@ -1,4 +1,4 @@
-import { normalizePhoneE164, type CustomerCache } from "@pestcall/core";
+import { type CustomerCache, normalizePhoneE164 } from "@pestcall/core";
 import { z } from "zod";
 
 import { createDependencies } from "../context";
@@ -26,6 +26,11 @@ import type {
 } from "../models/types";
 import { actionPlanSchema } from "../models/types";
 import {
+  type RealtimeKitTokenPayload,
+  addRealtimeKitParticipant,
+  refreshRealtimeKitToken,
+} from "../realtime-kit";
+import {
   type AgentMessageInput,
   type AgentMessageOutput,
   agentMessageInputSchema,
@@ -46,11 +51,6 @@ import {
   RESCHEDULE_WORKFLOW_EVENT_SELECT_APPOINTMENT,
   RESCHEDULE_WORKFLOW_EVENT_SELECT_SLOT,
 } from "../workflows/constants";
-import {
-  addRealtimeKitParticipant,
-  refreshRealtimeKitToken,
-  type RealtimeKitTokenPayload,
-} from "../realtime-kit";
 
 type ConversationEventType =
   | "token"

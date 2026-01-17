@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type { Customer } from "../types";
 import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
+import type { Customer } from "../types";
 
 type RealtimeKitClient = {
   join: () => Promise<void>;
