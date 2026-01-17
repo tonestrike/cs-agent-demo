@@ -1090,15 +1090,16 @@ export class ConversationSession {
         return { role, content: turn.text };
       })
       .filter((turn) => turn.content.trim().length > 0);
+    const chronological = [...messages].reverse();
     this.logger.info(
       {
         callSessionId,
-        messageCount: messages.length,
-        messages,
+        messageCount: chronological.length,
+        messages: chronological,
       },
       "conversation.session.messages.recent",
     );
-    return messages;
+    return chronological;
   }
 
   private async updateIdentitySummary(
@@ -1969,6 +1970,24 @@ export class ConversationSession {
         context,
         messages,
       });
+      this.logger.info(
+        {
+          callSessionId,
+          turnId: this.activeTurnId,
+          decisionType: decision.type,
+          toolName: "toolName" in decision ? decision.toolName : null,
+          argKeys:
+            decision.type === "tool_call"
+              ? Object.keys(decision.arguments ?? {})
+              : [],
+          acknowledgementLength:
+            "acknowledgement" in decision && decision.acknowledgement
+              ? decision.acknowledgement.length
+              : 0,
+          finalLength: decision.type === "final" ? decision.text.length : 0,
+        },
+        "conversation.session.generate.output",
+      );
       if (decision.type === "final") {
         const replyText =
           decision.text.trim() ||
@@ -3007,8 +3026,20 @@ export class ConversationSession {
         let combined = "";
         let waitingForJson = false;
         let checkedForJson = false;
+        let tokenCount = 0;
         for await (const token of model.respondStream(respondInput)) {
           if (this.canceledStreamIds.has(streamId)) {
+            this.logger.info(
+              {
+                callSessionId,
+                toolName: toolResult.toolName,
+                tokenCount,
+                combinedLength: combined.length,
+                waitingForJson,
+                canceled: true,
+              },
+              "conversation.session.narrate.stream.end",
+            );
             return this.sanitizeNarratorOutput(combined.trim()) || fallback;
           }
           combined += token;
@@ -3021,6 +3052,7 @@ export class ConversationSession {
             }
           }
           if (!waitingForJson) {
+            tokenCount += 1;
             this.emitEvent({ type: "token", text: token });
           }
         }
@@ -3028,6 +3060,17 @@ export class ConversationSession {
         if (waitingForJson && sanitized) {
           this.emitNarratorTokens(sanitized, streamId);
         }
+        this.logger.info(
+          {
+            callSessionId,
+            toolName: toolResult.toolName,
+            tokenCount,
+            combinedLength: combined.length,
+            waitingForJson,
+            sanitizedLength: sanitized.length,
+          },
+          "conversation.session.narrate.stream.end",
+        );
         return sanitized || fallback;
       }
       const text = await model.respond(respondInput);

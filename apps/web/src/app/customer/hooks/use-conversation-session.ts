@@ -384,11 +384,12 @@ export function useConversationSession(phoneNumber: string) {
           },
         ]);
       }
-      pendingTurnsRef.current.push({
+      const pendingEntry = {
         sessionId,
         startedAt: Date.now(),
         userText: options?.userMessageText ?? trimmed,
-      });
+      };
+      pendingTurnsRef.current.push(pendingEntry);
 
       const responseId = crypto.randomUUID();
       responseIdRef.current = responseId;
@@ -442,6 +443,11 @@ export function useConversationSession(phoneNumber: string) {
       } catch {
         setConnectionStatus("Connection issue. Try again.");
         logEvent("rpc.agent.message.failed", { sessionId });
+        const pendingTurns = pendingTurnsRef.current;
+        const entryIndex = pendingTurns.lastIndexOf(pendingEntry);
+        if (entryIndex >= 0) {
+          pendingTurns.splice(entryIndex, 1);
+        }
       }
     },
     [callSessionId, phoneNumber, ensureSocket, logEvent],

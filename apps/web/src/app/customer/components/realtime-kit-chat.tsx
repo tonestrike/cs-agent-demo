@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
+import type { Meeting } from "@cloudflare/realtimekit-ui";
 import type { Customer } from "../types";
 
-type RealtimeKitClient = {
+type RealtimeKitClient = Meeting & {
   join: () => Promise<void>;
   leave: () => Promise<void>;
   self?: { userId?: string };
@@ -95,8 +96,8 @@ export function RealtimeKitChatPanel({
   });
   const [meeting, setMeeting] = useState<RealtimeKitClient | null>(null);
   const meetingRef = useRef<RealtimeKitClient | null>(null);
-  const chatElementRef = useRef<HTMLElement | null>(null);
-  const micToggleRef = useRef<HTMLElement | null>(null);
+  const chatElementRef = useRef<HTMLRtkChatElement | null>(null);
+  const micToggleRef = useRef<HTMLRtkMicToggleElement | null>(null);
   const sentMessageIds = useRef(new Set<string>());
   const retryTimerRef = useRef<number | null>(null);
   const assistantBuffersRef = useRef(new Map<string, string>());
@@ -376,20 +377,18 @@ export function RealtimeKitChatPanel({
 
   useEffect(() => {
     const element = chatElementRef.current;
-    if (!element) {
+    if (!element || !meeting) {
       return;
     }
-    (element as HTMLElement & { meeting?: RealtimeKitClient }).meeting =
-      meeting ?? undefined;
+    element.meeting = meeting;
   }, [meeting]);
 
   useEffect(() => {
     const element = micToggleRef.current;
-    if (!element) {
+    if (!element || !meeting) {
       return;
     }
-    (element as HTMLElement & { meeting?: RealtimeKitClient }).meeting =
-      meeting ?? undefined;
+    element.meeting = meeting;
   }, [meeting]);
 
   return (
@@ -423,7 +422,7 @@ export function RealtimeKitChatPanel({
         {meeting ? (
           <div className="h-full">
             <rtk-chat
-              ref={chatElementRef as unknown as React.Ref<HTMLElement>}
+              ref={chatElementRef}
               style={{ width: "100%", height: "100%" }}
             />
           </div>

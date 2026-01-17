@@ -1,18 +1,14 @@
-import type { CSSProperties, HTMLAttributes, RefAttributes } from "react";
+import type { DetailedHTMLProps, HTMLAttributes } from "react";
+import type { JSX as RtkJSX } from "@cloudflare/realtimekit-ui";
+
+type RtkElement<T> = DetailedHTMLProps<HTMLAttributes<T>, T>;
 
 declare global {
   namespace JSX {
     interface IntrinsicElements {
-      "rtk-chat": HTMLAttributes<HTMLElement> &
-        RefAttributes<HTMLElement> & {
-          meeting?: unknown;
-          style?: CSSProperties;
-        };
-      "rtk-mic-toggle": HTMLAttributes<HTMLElement> &
-        RefAttributes<HTMLElement> & {
-          meeting?: unknown;
-          size?: string;
-        };
+      "rtk-chat": RtkElement<HTMLRtkChatElement> & RtkJSX.RtkChat;
+      "rtk-mic-toggle": RtkElement<HTMLRtkMicToggleElement> &
+        RtkJSX.RtkMicToggle;
     }
   }
 }
