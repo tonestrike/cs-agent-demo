@@ -79,7 +79,7 @@ export class VoiceAgentDO extends RealtimeAgent<Env> {
       phoneNumber?: string;
       callSessionId?: string;
     },
-  ): Promise<void> {
+  ): Promise<{ voiceEnabled: boolean }> {
     // Create dependencies for the conversation session
     const deps = createDependencies(this.env);
 
@@ -115,21 +115,22 @@ export class VoiceAgentDO extends RealtimeAgent<Env> {
     // Create the RealtimeKit transport
     this.transport = new RealtimeKitTransport(meetingId, authToken);
 
-    // Validate required API keys
+    // Check for API keys - gracefully degrade if missing
     const deepgramKey = this.env.DEEPGRAM_API_KEY;
     const elevenLabsKey = this.env.ELEVENLABS_API_KEY;
 
     if (!deepgramKey || !elevenLabsKey) {
-      deps.logger.error(
+      deps.logger.warn(
         {
           hasDeepgram: Boolean(deepgramKey),
           hasElevenLabs: Boolean(elevenLabsKey),
         },
-        "voice_agent.missing_api_keys",
+        "voice_agent.degraded_mode",
       );
-      throw new Error(
-        "Voice agent requires DEEPGRAM_API_KEY and ELEVENLABS_API_KEY",
-      );
+      // Gracefully degrade - voice features disabled but session continues
+      // The text-based conversation will still work via WebSocket
+      // Frontend will fall back to browser TTS
+      return { voiceEnabled: false };
     }
 
     // Initialize the pipeline
@@ -169,6 +170,7 @@ export class VoiceAgentDO extends RealtimeAgent<Env> {
     await meeting.join();
 
     deps.logger.info({ agentId, meetingId }, "voice_agent.initialized");
+    return { voiceEnabled: true };
   }
 
   /**
