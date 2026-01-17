@@ -319,6 +319,12 @@ const streamOpenRouterResponse = async function* (
   const decoder = new TextDecoder();
   let buffer = "";
   let eventData: string[] = [];
+  let lineCount = 0;
+  let eventCount = 0;
+  let deltaCount = 0;
+  let emptyDeltaCount = 0;
+  let firstLine: string | null = null;
+  let lastLine: string | null = null;
 
   const coerceContent = (value: unknown): string | null => {
     if (typeof value === "string") {
@@ -383,6 +389,7 @@ const streamOpenRouterResponse = async function* (
     if (!payload || payload === "[DONE]") {
       return;
     }
+    eventCount += 1;
     logger.debug(
       {
         payload: truncate(payload, 240),
@@ -396,6 +403,7 @@ const streamOpenRouterResponse = async function* (
       const choice = parsed.choices?.[0] ?? null;
       const delta = extractDeltaText(choice);
       if (delta) {
+        deltaCount += 1;
         logger.debug(
           {
             deltaLength: delta.length,
@@ -404,6 +412,7 @@ const streamOpenRouterResponse = async function* (
         );
         yield delta;
       } else if (choice) {
+        emptyDeltaCount += 1;
         logger.debug(
           {
             deltaKeys:
@@ -444,6 +453,13 @@ const streamOpenRouterResponse = async function* (
     buffer = lines.pop() ?? "";
     for (const line of lines) {
       const trimmed = line.replace(/\r$/, "");
+      if (trimmed) {
+        lineCount += 1;
+        if (!firstLine) {
+          firstLine = trimmed;
+        }
+        lastLine = trimmed;
+      }
       if (trimmed === "") {
         yield* flushEvent();
         continue;
@@ -454,6 +470,17 @@ const streamOpenRouterResponse = async function* (
     }
   }
   yield* flushEvent();
+  logger.info(
+    {
+      lineCount,
+      eventCount,
+      deltaCount,
+      emptyDeltaCount,
+      firstLine: firstLine ? truncate(firstLine, 240) : null,
+      lastLine: lastLine ? truncate(lastLine, 240) : null,
+    },
+    "openrouter.respond.stream.summary",
+  );
 };
 
 const responseToJsonObject = <T>(

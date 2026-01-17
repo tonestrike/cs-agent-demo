@@ -671,7 +671,11 @@ export const handleAgentMessage = async (
 
   let callSessionId = input.callSessionId;
   let contextTurns = 0;
-  let recentTurns: Array<{ speaker: string; text: string }> = [];
+  let recentTurns: Array<{
+    speaker: string;
+    text: string;
+    meta?: Record<string, unknown>;
+  }> = [];
   let summary: CallSessionSummary = { identityStatus: "unknown" };
   let session: Awaited<ReturnType<typeof deps.calls.getSession>> | null = null;
   if (!callSessionId) {
@@ -840,10 +844,18 @@ export const handleAgentMessage = async (
   );
 
   const messageHistory: Array<{ role: "user" | "assistant"; content: string }> =
-    recentTurns.map((turn) => ({
-      role: turn.speaker === "agent" ? "assistant" : "user",
-      content: turn.text,
-    }));
+    recentTurns.map((turn) => {
+      if (turn.speaker === "system" || turn.meta?.["kind"] === "status") {
+        return {
+          role: "assistant",
+          content: `(status) ${turn.text}`,
+        };
+      }
+      return {
+        role: turn.speaker === "agent" ? "assistant" : "user",
+        content: turn.text,
+      };
+    });
   messageHistory.push({ role: "user", content: input.text });
   logger.debug(
     {

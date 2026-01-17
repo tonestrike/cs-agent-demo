@@ -1225,6 +1225,12 @@ export class ConversationSession {
     const turns = await deps.calls.getRecentTurns({ callSessionId, limit: 8 });
     const messages = turns
       .map((turn) => {
+        if (turn.speaker === "system" || turn.meta?.["kind"] === "status") {
+          return {
+            role: "assistant" as const,
+            content: `(status) ${turn.text}`,
+          };
+        }
         const role = (turn.speaker === "agent" ? "assistant" : "user") as
           | "assistant"
           | "user";
@@ -1340,7 +1346,7 @@ export class ConversationSession {
         input,
         deps,
         streamId,
-        "Thanks for reaching out. Can you share the 5-digit ZIP code on your account so I can pull up your details?",
+        "Hi! Thanks for reaching out. To get started, can you share the 5-digit ZIP code on your account so I can pull up your details?",
         "Ask for the 5-digit ZIP code to verify the account in a friendly, conversational tone.",
       );
       const response: AgentMessageOutput = {
@@ -1365,7 +1371,7 @@ export class ConversationSession {
         input,
         deps,
         streamId,
-        "Thanks for reaching out. Can you share the 5-digit ZIP code on your account so I can pull up your details?",
+        "Hi! Thanks for reaching out. To get started, can you share the 5-digit ZIP code on your account so I can pull up your details?",
         "Ask for the 5-digit ZIP code to verify the account in a friendly, conversational tone.",
       );
       const response: AgentMessageOutput = {
@@ -1672,7 +1678,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: appointments.length
-              ? this.formatAppointmentsResponse(appointments)
+              ? `${this.formatAppointmentsResponse(appointments)} Which one would you like to reschedule?`
               : "I couldn't find any upcoming appointments to reschedule.",
             contextHint: "Ask which appointment to reschedule using the list.",
           },
@@ -2632,7 +2638,7 @@ export class ConversationSession {
             deps,
             streamId,
             fallback: appointments.length
-              ? this.formatAppointmentsResponse(appointments)
+              ? `${this.formatAppointmentsResponse(appointments)} Which one would you like to reschedule?`
               : "I couldn't find any upcoming appointments to reschedule.",
             contextHint: "Ask which appointment to reschedule using the list.",
           },
@@ -3673,6 +3679,20 @@ export class ConversationSession {
       correlationId,
       role: "system",
     });
+    if (callSessionId && input.phoneNumber) {
+      await this.ensureCallSession(deps, callSessionId, input.phoneNumber);
+      await deps.calls.addTurn({
+        id: crypto.randomUUID(),
+        callSessionId,
+        ts: new Date().toISOString(),
+        speaker: "system",
+        text: trimmed,
+        meta: {
+          kind: "status",
+          correlationId: correlationId ?? null,
+        },
+      });
+    }
     return trimmed;
   }
 
@@ -3810,7 +3830,12 @@ export class ConversationSession {
     lines.push("");
     lines.push("## Turns");
     turns.forEach((turn, index) => {
-      const role = turn.speaker === "agent" ? "Assistant" : "Customer";
+      const role =
+        turn.speaker === "system" || turn.meta?.["kind"] === "status"
+          ? "System"
+          : turn.speaker === "agent"
+            ? "Assistant"
+            : "Customer";
       lines.push("");
       lines.push(`### Turn ${index + 1} (${role})`);
       lines.push(`- Time: ${turn.ts}`);

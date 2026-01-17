@@ -114,6 +114,7 @@ export function RealtimeKitChatPanel({
   const retryTimerRef = useRef<number | null>(null);
   const chatReadyTimerRef = useRef<number | null>(null);
   const uiReadyTimerRef = useRef<number | null>(null);
+  const boundEmittersRef = useRef(new WeakSet<object>());
   const assistantBuffersRef = useRef(new Map<string, string>());
   const ttsEnabledRef = useRef(enableTts);
   const [partialTranscript, setPartialTranscript] = useState<string | null>(
@@ -293,6 +294,29 @@ export function RealtimeKitChatPanel({
       return;
     }
     let cancelled = false;
+    const bindEmitter = (candidate: unknown) => {
+      if (!candidate || typeof candidate !== "object") {
+        return;
+      }
+      if (boundEmittersRef.current.has(candidate)) {
+        return;
+      }
+      const emitter = candidate as {
+        addListener?: (...args: unknown[]) => unknown;
+        removeListener?: (...args: unknown[]) => unknown;
+      };
+      if (typeof emitter.addListener === "function") {
+        try {
+          emitter.addListener = emitter.addListener.bind(candidate);
+        } catch {}
+      }
+      if (typeof emitter.removeListener === "function") {
+        try {
+          emitter.removeListener = emitter.removeListener.bind(candidate);
+        } catch {}
+      }
+      boundEmittersRef.current.add(candidate);
+    };
     const isEmitterReady = (candidate: unknown) => {
       if (!candidate || typeof candidate !== "object") {
         return false;
@@ -306,6 +330,12 @@ export function RealtimeKitChatPanel({
       }
       const chat = meeting.chat;
       const participants = meeting.participants;
+      if (chat) {
+        bindEmitter(chat);
+      }
+      if (participants) {
+        bindEmitter(participants);
+      }
       if (
         chat &&
         participants &&
