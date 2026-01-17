@@ -76,6 +76,7 @@ export function RealtimeKitChatPanel({
   const [meeting, setMeeting] = useState<RealtimeKitClient | null>(null);
   const meetingRef = useRef<RealtimeKitClient | null>(null);
   const sentMessageIds = useRef(new Set<string>());
+  const retryTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,6 +87,10 @@ export function RealtimeKitChatPanel({
         meetingRef.current = null;
       }
       setMeeting(null);
+      if (retryTimerRef.current) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
     };
 
     if (!sessionId || !customer) {
@@ -134,17 +139,44 @@ export function RealtimeKitChatPanel({
       }
       meetingRef.current = client;
       setMeeting(client);
+      if (retryTimerRef.current) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
       setStatus({ status: "RealtimeKit chat ready" });
     };
 
-    loadRealtimeKit().catch((error) => {
+    const handleFailure = (error: unknown) => {
       if (cancelled) {
         return;
       }
       const message =
-        error instanceof Error ? error.message : "RealtimeKit failed to load.";
+        error instanceof Error
+          ? error.message
+          : "RealtimeKit token request failed";
       setStatus({ status: "RealtimeKit unavailable", error: message });
-    });
+      scheduleRetry();
+    };
+
+    const startLoad = () => {
+      void loadRealtimeKit().catch(handleFailure);
+    };
+
+    function scheduleRetry() {
+      if (retryTimerRef.current) {
+        window.clearTimeout(retryTimerRef.current);
+      }
+      const DELAY_MS = 2500;
+      retryTimerRef.current = window.setTimeout(() => {
+        retryTimerRef.current = null;
+        if (cancelled) {
+          return;
+        }
+        startLoad();
+      }, DELAY_MS);
+    }
+
+    startLoad();
 
     return () => {
       cancelled = true;

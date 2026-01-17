@@ -125,8 +125,9 @@ export function ChatMessages({ messages }: ChatMessagesProps) {
             {messages.map((message) => (
               <div key={message.id}>
                 {message.role === "status" ? (
-                  <div className="inline-flex rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-500 shadow-soft">
-                    {message.text}
+                  <div className="flex items-center gap-2 text-xs italic text-ink-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-ink-300" />
+                    <span>{message.text}</span>
                   </div>
                 ) : (
                   <div
