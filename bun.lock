@@ -51,6 +51,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@cloudflare/ai-utils": "^1.0.1",
+        "@cloudflare/realtime-agents": "^0.0.6",
         "@orpc/server": "^1.13.4",
         "@pestcall/core": "workspace:*",
         "ai": "^3.4.13",
@@ -120,6 +121,8 @@
     "@cloudflare/ai-utils": ["@cloudflare/ai-utils@1.0.1", "", { "dependencies": { "yaml": "^2.4.5", "zod": "^3.23.8" } }, "sha512-gmn16AvVqtMLcaBYvPkwEWui39E4hlcFPqXuVamKbGleIDO6hVpvAy3KCvbnoPVT7KqRcfdLLpHRIBQDwI9tWQ=="],
 
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.4.2", "", {}, "sha512-SIOD2DxrRRwQ+jgzlXCqoEFiKOFqaPjhnNTGKXSRLvp1HiOvapLaFG2kEr9dYQTYe8rKrd9uvDUzmAITeNyaHQ=="],
+
+    "@cloudflare/realtime-agents": ["@cloudflare/realtime-agents@0.0.6", "", { "dependencies": { "@cloudflare/realtimekit": "1.1.7-agent.1" } }, "sha512-TGvWtCTEJjyrzDR2o39SOziXLTzkfnxgK+Fy5lGSjL/G0PD5H8oEzaSh4lpZYWQHb2DPER+wTmLBoT2k0LEr9A=="],
 
     "@cloudflare/realtimekit": ["@cloudflare/realtimekit@1.2.3", "", { "dependencies": { "@protobuf-ts/runtime": "^2.7.0", "bowser": "^2.11.0", "sdp-transform": "^2.14.1", "uuid": "^8.3.2", "worker-timers": "7.0.60" } }, "sha512-3lInCdx3AooZQsC73H6SbVw8xZhnTZfYw1zCvBuLG7F6y6TOHg+UPy/O8uug4bqsYi7IIgpKanykSH+SG8xvow=="],
 
@@ -892,6 +895,8 @@
     "zod-to-json-schema": ["zod-to-json-schema@3.25.1", "", { "peerDependencies": { "zod": "^3.25 || ^4" } }, "sha512-pM/SU9d3YAggzi6MtR4h7ruuQlqKtad8e9S0fmxcMi+ueAK5Korys/aWcV9LIIHTVbj01NdzxcnXSN+O74ZIVA=="],
 
     "@ai-sdk/provider-utils/eventsource-parser": ["eventsource-parser@1.1.2", "", {}, "sha512-v0eOBUbiaFojBu2s2NPBfYUoRR9GjcDNvCXVaqEf5vVfpIAh9f8RCo4vXTP8c63QRKCFwoLpMpTdPwwhEKVgzA=="],
+
+    "@cloudflare/realtime-agents/@cloudflare/realtimekit": ["@cloudflare/realtimekit@1.1.7-agent.1", "", { "dependencies": { "@protobuf-ts/runtime": "^2.7.0", "bowser": "^2.11.0", "sdp-transform": "^2.14.1", "uuid": "^8.3.2", "worker-timers": "7.0.60" } }, "sha512-Xwo/Pe2e5+f9oRRFpCd1avO1mtYlMkghB3xa8x94xpTV6xVa8Q36GEFsZDe7i8uVqXirfg+dI1xZ62Vv+7tOcg=="],
 
     "@jridgewell/gen-mapping/@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 

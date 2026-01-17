@@ -817,29 +817,36 @@ export function RealtimeKitChatPanel({
   }, []);
 
   return (
-    <div className="relative w-full h-full">
-      {/* Always render rtk-chat to prevent unmounting and focus loss */}
-      {/* Key forces remount on session change to clear stale messages */}
-      {meeting && (
-        <rtk-chat
-          key={sessionId}
-          ref={handleChatRef}
-          style={{
-            width: "100%",
-            height: "100%",
-            opacity: meetingReady ? 1 : 0,
-            pointerEvents: meetingReady ? "auto" : "none",
-          }}
-        />
-      )}
-      {/* Overlay loading state when not ready */}
-      {!meetingReady && (
-        <div className="absolute inset-0 flex items-center justify-center px-4 text-sm text-ink/70">
-          {sessionId
-            ? status
-            : "Send a message to establish a session before realtime chat loads."}
-        </div>
-      )}
+    <div className="relative h-full w-full overflow-hidden rounded-2xl border border-ink-200 bg-gradient-to-br from-sand-50 via-white to-sand-100 p-3 shadow-soft">
+      <div className="relative h-full overflow-hidden rounded-xl border border-ink-100 bg-white/75 shadow-inner backdrop-blur">
+        {/* Always render rtk-chat to prevent unmounting and focus loss */}
+        {/* Key forces remount on session change to clear stale messages */}
+        {meeting && (
+          <rtk-chat
+            key={sessionId}
+            ref={handleChatRef}
+            style={{
+              width: "100%",
+              height: "100%",
+              opacity: meetingReady ? 1 : 0.05,
+              pointerEvents: meetingReady ? "auto" : "none",
+            }}
+          />
+        )}
+        {/* Overlay loading state when not ready */}
+        {!meetingReady && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-white/80 px-4 text-sm text-ink/80 backdrop-blur">
+            <div className="rounded-full bg-ink-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white shadow-sm">
+              Preparing chat
+            </div>
+            <p className="text-center text-xs text-ink-600">
+              {sessionId
+                ? status
+                : "Send a message to establish a session before realtime chat loads."}
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

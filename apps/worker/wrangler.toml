@@ -34,6 +34,10 @@ class_name = "ConversationHub"
 name = "CONVERSATION_SESSION_V2"
 class_name = "ConversationSessionV2DO"
 
+[[durable_objects.bindings]]
+name = "VOICE_AGENT"
+class_name = "VoiceAgentDO"
+
 [[workflows]]
 name = "pestcall-reschedule"
 binding = "RESCHEDULE_WORKFLOW"
@@ -64,6 +68,10 @@ deleted_classes = ["ConversationSession"]
 [[migrations]]
 tag = "v6"
 deleted_classes = ["PestCallAgent"]
+
+[[migrations]]
+tag = "v7"
+new_classes = ["VoiceAgentDO"]
 
 [observability]
 

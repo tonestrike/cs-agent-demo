@@ -168,45 +168,87 @@ export function RealtimeChatView({
           </span>
         </div>
 
-        <div className="flex flex-1 flex-col min-h-0">
+        <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex-shrink-0 px-4 pt-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 pb-3">
-              <div className="space-y-1">
-                <p className="text-xs text-ink-500">
-                  Start an incoming call session (runs verification before the
-                  customer replies).
-                </p>
-                <p className="text-[11px] text-ink-400">
-                  Mic + live transcripts stream here; bot voice is optional.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTtsEnabled((prev) => !prev)}
-                  className="rounded-lg border border-ink-200 bg-white px-3 py-2 text-xs font-semibold text-ink-600 transition hover:bg-sand-50"
-                >
-                  {ttsEnabled ? "Bot voice on" : "Bot voice off"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleStartCall}
-                  disabled={!selectedCustomer || startingCall}
-                  className="rounded-lg border border-ink-200 bg-white px-4 py-2 text-xs font-semibold text-ink-600 transition hover:bg-sand-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {startingCall ? "Starting..." : "Start call"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDebugOpen((prev) => !prev)}
-                  className={`rounded-lg border px-4 py-2 text-xs font-semibold transition ${
-                    debugOpen
-                      ? "border-ink bg-ink text-white"
-                      : "border-ink-200 bg-white text-ink-700 hover:bg-sand-50"
-                  }`}
-                >
-                  {debugOpen ? "Close debug" : "Open debug"}
-                </button>
+            <div className="mb-4 rounded-2xl border border-ink-100 bg-white/90 px-4 py-3 shadow-soft backdrop-blur">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+                    Live concierge
+                  </p>
+                  <p className="text-[11px] text-ink-500">
+                    Kick off an incoming call; transcripts stream here and bot
+                    voice is optional.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={ttsEnabled}
+                    onClick={() => setTtsEnabled((prev) => !prev)}
+                    className={`group flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-ink/20 ${
+                      ttsEnabled
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700 shadow-[0_8px_24px_rgba(16,185,129,0.18)]"
+                        : "border-ink-200 bg-white text-ink-600 hover:bg-sand-50"
+                    }`}
+                  >
+                    <span
+                      className={`flex h-5 w-10 items-center rounded-full transition ${
+                        ttsEnabled ? "bg-emerald-500" : "bg-ink-200"
+                      }`}
+                    >
+                      <span
+                        className={`h-4 w-4 rounded-full bg-white shadow transition ${
+                          ttsEnabled ? "translate-x-5" : "translate-x-1"
+                        }`}
+                      />
+                    </span>
+                    <span className="whitespace-nowrap">
+                      {ttsEnabled ? "Bot voice on" : "Bot voice off"}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleStartCall}
+                    disabled={!selectedCustomer || startingCall}
+                    className="flex items-center gap-2 rounded-full border border-emerald-600 bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow-soft transition hover:-translate-y-[1px] hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+                    aria-label="Start call"
+                  >
+                    <span className="relative flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/80 shadow-inner">
+                      <svg
+                        className="h-4 w-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={1.8}
+                          d="M5 5a2 2 0 012-2h2l1 4-2 1a10 10 0 005 5l1-2 4 1v2a2 2 0 01-2 2 13 13 0 01-13-13z"
+                        />
+                      </svg>
+                    </span>
+                    <span className="hidden sm:inline">
+                      {startingCall ? "Starting..." : "Start call"}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDebugOpen((prev) => !prev)}
+                    className={`rounded-full border px-4 py-2 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-amber-500/30 ${
+                      debugOpen
+                        ? "border-amber-600 bg-amber-600 text-white shadow-soft hover:bg-amber-700"
+                        : "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                    }`}
+                  >
+                    {debugOpen ? "Close debug" : "Open debug"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

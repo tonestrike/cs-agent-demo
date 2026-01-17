@@ -4,6 +4,7 @@
   "type": "module",
   "dependencies": {
     "@cloudflare/ai-utils": "^1.0.1",
+    "@cloudflare/realtime-agents": "^0.0.6",
     "@orpc/server": "^1.13.4",
     "@pestcall/core": "workspace:*",
     "ai": "^3.4.13",
