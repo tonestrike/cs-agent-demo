@@ -53,7 +53,7 @@ export function RealtimeChatView({
     }
     setStartingCall(true);
     try {
-      await startCall(selectedCustomer.zipCode ?? undefined);
+      await startCall();
     } finally {
       setStartingCall(false);
     }

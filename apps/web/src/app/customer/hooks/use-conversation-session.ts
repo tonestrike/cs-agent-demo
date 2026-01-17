@@ -451,28 +451,14 @@ export function useConversationSession(phoneNumber: string) {
   // Keep ref in sync with latest sendMessage to avoid stale closures in timeouts
   sendMessageRef.current = sendMessage;
 
-  const startCall = useCallback(
-    async (zip?: string) => {
-      if (!phoneNumber) {
-        return;
-      }
-      logEvent("chat.start_call", { phoneNumber });
-      clearAutoZipTimer();
-      await sendMessage("Incoming call started", { skipUserMessage: true });
-      const normalizedZip = zip?.trim();
-      if (!normalizedZip) {
-        return;
-      }
-      const DELAY_MS = 2500;
-      autoZipTimerRef.current = window.setTimeout(() => {
-        autoZipTimerRef.current = null;
-        logEvent("chat.auto_zip", { phoneNumber });
-        // Use ref to access the latest sendMessage with correct callSessionId
-        void sendMessageRef.current?.(normalizedZip);
-      }, DELAY_MS);
-    },
-    [clearAutoZipTimer, logEvent, phoneNumber, sendMessage],
-  );
+  const startCall = useCallback(async () => {
+    if (!phoneNumber) {
+      return;
+    }
+    logEvent("chat.start_call", { phoneNumber });
+    clearAutoZipTimer();
+    await sendMessage("Incoming call started", { skipUserMessage: true });
+  }, [clearAutoZipTimer, logEvent, phoneNumber, sendMessage]);
 
   return {
     messages,
