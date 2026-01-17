@@ -89,7 +89,12 @@ const parseRealtimeKitResponse = async (
       payload?.message ??
       response.statusText ??
       "RealtimeKit error";
-    throw new Error(errorMessage);
+    const extra =
+      payload?.errors && payload.errors.length > 1
+        ? payload.errors.map((entry) => entry.message).filter(Boolean).join("; ")
+        : null;
+    const errorDetail = extra ? `${errorMessage} (${extra})` : errorMessage;
+    throw new Error(errorDetail);
   }
   const result = payload.result ?? {};
   const participantId =

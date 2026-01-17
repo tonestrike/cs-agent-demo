@@ -29,6 +29,7 @@ import {
   type RealtimeKitTokenPayload,
   addRealtimeKitGuestParticipant,
   addRealtimeKitParticipant,
+  getRealtimeKitConfigSummary,
   refreshRealtimeKitToken,
 } from "../realtime-kit";
 import {
@@ -444,6 +445,10 @@ export class ConversationSession {
       return new Response("Method not allowed", { status: 405 });
     }
     const deps = createDependencies(this.env);
+    this.logger.info(
+      { config: getRealtimeKitConfigSummary(this.env) },
+      "conversation.session.rtk_config",
+    );
     const verifiedCustomerId =
       this.sessionState.conversation?.verification.customerId;
     let customer: CustomerCache | null = null;
@@ -464,9 +469,7 @@ export class ConversationSession {
         this.sessionState.lastCallSessionId ?? this.state.id.toString();
       const customParticipantId =
         this.sessionState.rtkGuestCustomId ?? `session:${rawCustomId}`;
-      const displayName = phoneNumber
-        ? `Caller ${phoneNumber}`
-        : "Caller";
+      const displayName = phoneNumber ? `Caller ${phoneNumber}` : "Caller";
       const token = await addRealtimeKitGuestParticipant(this.env, {
         displayName,
         customParticipantId,

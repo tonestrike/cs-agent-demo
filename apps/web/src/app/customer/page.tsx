@@ -57,9 +57,9 @@ export default function CustomerPage() {
   }, [resetSession]);
 
   const copyConversation = useCallback(async () => {
-    const payload = { callSessionId, phoneNumber, messages };
+    const payload = { callSessionId, phoneNumber, status, messages, logs };
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-  }, [callSessionId, phoneNumber, messages]);
+  }, [callSessionId, phoneNumber, status, messages, logs]);
 
   const [chatMode, setChatMode] = useState<ChatMode>("classic");
 

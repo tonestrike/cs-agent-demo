@@ -13,7 +13,7 @@ OPENROUTER_TITLE = "PestCall CS Agent"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 REALTIMEKIT_ACCOUNT_ID = "197ac8ab6d5079d3faab60cea42eaa7e"
 REALTIMEKIT_MEETING_ID = "bbb58ddd-1416-4812-aceb-7e078e61c78b"
-REALTIMEKIT_APP_ID = "197ac8ab6d5079d3faab60cea42eaa7e"
+REALTIMEKIT_APP_ID = "d8e165d3-6d87-483f-bc5a-55ff3a5bcaae"
 REALTIMEKIT_API_TOKEN = "gF1yF_BuVanPdftA0yx-KZzEvdFjKudiN0r3efie"
 
 [ai]

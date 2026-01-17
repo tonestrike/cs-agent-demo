@@ -10,7 +10,7 @@ export function useConversationSession(phoneNumber: string) {
     null,
   );
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [status, setStatus] = useState("New session");
+  const [connectionStatus, setConnectionStatus] = useState("New session");
   const [logs, setLogs] = useState<ClientLog[]>([]);
 
   const socketRef = useRef<WebSocket | null>(null);
@@ -62,6 +62,7 @@ export function useConversationSession(phoneNumber: string) {
       if (socketRef.current && sessionRef.current === sessionId) {
         if (socketRef.current.readyState === WebSocket.OPEN) {
           logEvent("ws.reuse.open", { sessionId });
+          setConnectionStatus("Connected");
           return Promise.resolve(socketRef.current);
         }
         logEvent("ws.reuse.wait", {
@@ -114,7 +115,6 @@ export function useConversationSession(phoneNumber: string) {
           if (payload.type === "status") {
             const text = payload.text ?? "";
             if (text.trim()) {
-              setStatus(text);
               setMessages((prev) => {
                 const statusId = `status-${payload.seq ?? payload.id ?? crypto.randomUUID()}`;
                 return [...prev, { id: statusId, role: "status", text }];
@@ -169,20 +169,20 @@ export function useConversationSession(phoneNumber: string) {
             return;
           }
           if (payload.type === "error") {
-            const text = payload.text ?? "Something went wrong.";
-            setStatus(text);
+            setConnectionStatus("Connection issue. Try again.");
             return;
           }
         } catch {
-          setStatus("Received malformed message.");
+          setConnectionStatus("Connection issue. Try again.");
           logEvent("ws.message.parse_failed", { sessionId });
         }
       };
       socket.onerror = () => {
-        setStatus("Connection issue. Try again.");
+        setConnectionStatus("Connection issue. Try again.");
         logEvent("ws.error", { sessionId });
       };
       socket.onclose = () => {
+        setConnectionStatus("Disconnected");
         if (sessionRef.current === sessionId) {
           socketRef.current = null;
         }
@@ -198,10 +198,12 @@ export function useConversationSession(phoneNumber: string) {
         socket.addEventListener("open", () => {
           window.clearTimeout(timeoutId);
           logEvent("ws.connect.open", { sessionId });
+          setConnectionStatus("Connected");
           resolve(socket);
         });
         socket.addEventListener("error", () => {
           window.clearTimeout(timeoutId);
+          setConnectionStatus("Connection issue. Try again.");
           logEvent("ws.connect.error", { sessionId });
           reject(new Error("Socket error"));
         });
@@ -215,7 +217,7 @@ export function useConversationSession(phoneNumber: string) {
     setConfirmedSessionId(null);
     hasDeltaRef.current = false;
     setMessages([]);
-    setStatus("New session");
+    setConnectionStatus("New session");
     socketRef.current?.close();
     socketRef.current = null;
     sessionRef.current = null;
@@ -253,10 +255,11 @@ export function useConversationSession(phoneNumber: string) {
       hasDeltaRef.current = false;
 
       try {
+        setConnectionStatus("Connecting");
         await ensureSocket(sessionId);
         logEvent("ws.ready", { sessionId });
       } catch {
-        setStatus("Connection issue. Try again.");
+        setConnectionStatus("Connection issue. Try again.");
         logEvent("ws.unavailable", { sessionId });
       }
       const base = apiBaseUrl || window.location.origin;
@@ -297,7 +300,7 @@ export function useConversationSession(phoneNumber: string) {
           usedFallback: false,
         });
       } catch {
-        setStatus("Connection issue. Try again.");
+        setConnectionStatus("Connection issue. Try again.");
         logEvent("rpc.agent.message.failed", { sessionId });
       }
     },
@@ -328,7 +331,7 @@ export function useConversationSession(phoneNumber: string) {
 
   return {
     messages,
-    status,
+    status: connectionStatus,
     logs,
     confirmedSessionId,
     callSessionId,
