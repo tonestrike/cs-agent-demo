@@ -85,7 +85,7 @@ export default function CustomerPage() {
     const base = apiBaseUrl || window.location.origin;
     const url = new URL(base);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.pathname = `/ws/conversations/${sessionId}`;
+    url.pathname = `/api/conversations/${sessionId}/socket`;
     if (demoAuthToken) {
       url.searchParams.set("token", demoAuthToken);
     }
@@ -146,7 +146,7 @@ export default function CustomerPage() {
           }
           return;
         }
-        if (payload.type === "delta") {
+        if (payload.type === "token") {
           const text = payload.text ?? "";
           const responseId = responseIdRef.current;
           if (!responseId || !text) {
@@ -180,6 +180,12 @@ export default function CustomerPage() {
             setConfirmedSessionId(data.callSessionId);
           }
           setStatus(`Session ${sessionId.slice(0, 8)}…`);
+          return;
+        }
+        if (payload.type === "error") {
+          const text = payload.text ?? "Something went wrong.";
+          setStatus(text);
+          return;
         }
       } catch {
         setStatus("Received malformed message.");
@@ -276,21 +282,21 @@ export default function CustomerPage() {
     const base = apiBaseUrl || window.location.origin;
     try {
       logEvent("rpc.agent.message.start", { sessionId });
-      const response = await fetch(new URL("/rpc/agent/message", base), {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(demoAuthToken ? { "x-demo-auth": demoAuthToken } : {}),
-        },
-        body: JSON.stringify({
-          json: {
+      const response = await fetch(
+        new URL(`/api/conversations/${sessionId}/message`, base),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(demoAuthToken ? { "x-demo-auth": demoAuthToken } : {}),
+          },
+          body: JSON.stringify({
             phoneNumber,
             text: trimmed,
             callSessionId: sessionId,
-          },
-          meta: [],
-        }),
-      });
+          }),
+        },
+      );
       logEvent("rpc.agent.message.response", {
         sessionId,
         status: response.status,
@@ -299,9 +305,10 @@ export default function CustomerPage() {
         throw new Error("Request failed");
       }
       const data = (await response.json()) as {
-        json?: { callSessionId?: string; replyText?: string };
+        callSessionId?: string;
+        replyText?: string;
       };
-      const replyText = data.json?.replyText ?? "";
+      const replyText = data.replyText ?? "";
       if (replyText && !hasDeltaRef.current) {
         const responseId = responseIdRef.current;
         if (responseId) {
@@ -314,9 +321,9 @@ export default function CustomerPage() {
           );
         }
       }
-      if (data.json?.callSessionId) {
-        setCallSessionId(data.json.callSessionId);
-        setConfirmedSessionId(data.json.callSessionId);
+      if (data.callSessionId) {
+        setCallSessionId(data.callSessionId);
+        setConfirmedSessionId(data.callSessionId);
       }
       logEvent("rpc.agent.message.done", {
         sessionId,
