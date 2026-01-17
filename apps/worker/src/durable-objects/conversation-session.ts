@@ -481,8 +481,11 @@ export class ConversationSession {
       "conversation.session.rtk_config",
     );
 
-    // Get current call session ID to determine if we need a fresh participant
-    const currentCallSessionId = this.sessionState.lastCallSessionId;
+    // Get current call session ID from query param (passed by worker) or fall back to stored state
+    const url = new URL(request.url);
+    const currentCallSessionId =
+      url.searchParams.get("callSessionId") ??
+      this.sessionState.lastCallSessionId;
     const storedRtkCallSessionId = this.sessionState.rtkCallSessionId;
     const needsFreshParticipant =
       currentCallSessionId !== storedRtkCallSessionId;
@@ -860,13 +863,13 @@ export class ConversationSession {
       }
       const metrics = this.turnMetrics;
       const firstTokenMs =
-        metrics?.firstTokenAt === null
+        !metrics || metrics.firstTokenAt === null
           ? null
-          : metrics.firstTokenAt - (metrics?.startedAt ?? Date.now());
+          : metrics.firstTokenAt - (metrics.startedAt ?? Date.now());
       const firstStatusMs =
-        metrics?.firstStatusAt === null
+        !metrics || metrics.firstStatusAt === null
           ? null
-          : metrics.firstStatusAt - (metrics?.startedAt ?? Date.now());
+          : metrics.firstStatusAt - (metrics.startedAt ?? Date.now());
       this.logger.info(
         {
           callSessionId,
@@ -3623,13 +3626,13 @@ export class ConversationSession {
     const metrics = this.turnMetrics;
     const startedAt = metrics?.startedAt ?? Date.now();
     const firstTokenMs =
-      metrics?.firstTokenAt === null
+      !metrics || metrics.firstTokenAt === null
         ? null
-        : (metrics?.firstTokenAt ?? 0) - startedAt;
+        : metrics.firstTokenAt - startedAt;
     const firstStatusMs =
-      metrics?.firstStatusAt === null
+      !metrics || metrics.firstStatusAt === null
         ? null
-        : (metrics?.firstStatusAt ?? 0) - startedAt;
+        : metrics.firstStatusAt - startedAt;
     return {
       callSessionId,
       turnId: this.activeTurnId,

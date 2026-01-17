@@ -326,10 +326,15 @@ export function RealtimeKitChatPanel({
     };
   }, [meeting]);
 
-  // Clear sent message IDs when session changes to avoid stale deduplication
-  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId triggers clearing stale IDs on session change
+  // Clear all local state when session changes to avoid stale data from previous sessions
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId triggers full state reset on session change
   useEffect(() => {
     sentMessageIds.current.clear();
+    assistantBuffers.current.clear();
+    setFinalTranscripts([]);
+    setPartialTranscript(null);
+    setLastActivity(null);
+    setStatusError(undefined);
   }, [sessionId]);
 
   // Listen for chat messages from the local user
@@ -714,8 +719,10 @@ export function RealtimeKitChatPanel({
       {/* Main chat area */}
       <div className="relative min-h-0 flex-1 bg-sand-50">
         {/* Always render rtk-chat to prevent unmounting and focus loss */}
+        {/* Key forces remount on session/participant change to clear stale messages */}
         {meeting && (
           <rtk-chat
+            key={`${sessionId}-${meeting.self?.userId ?? "unknown"}`}
             ref={handleChatRef}
             style={{
               width: "100%",
