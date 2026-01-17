@@ -81,8 +81,8 @@ Fix:
 - Strip/guard against structured JSON in narrator output.
 
 ## Current state
-- The agent loop lives in [`agent.ts`](../apps/worker/src/use-cases/agent.ts) with a DB-backed call summary.
-- A single model does decision + response + status, which makes control flow brittle when output is ambiguous.
+- Conversation flow runs in the v2 Conversation Session Durable Object with a DB-backed call summary.
+- A single model still does decision + response + status, which makes control flow brittle when output is ambiguous.
 
 ## Target architecture
 ### Edge Worker
@@ -393,7 +393,7 @@ M5: Diagnostics + summaries (B/D) — in progress
   - DO replays last N events + `speaking` state.
 
 ### Phase 2: state machine + tools
-- Extract state machine from [`agent.ts`](../apps/worker/src/use-cases/agent.ts) into DO.
+- Keep state machine fully inside the DO.
   - Create `conversation-state.ts` with pure transition functions.
   - Move verification, appointment selection, and confirmation logic.
 - Define state transitions and confirmation gates.
@@ -669,7 +669,7 @@ All customer-facing text must be model-generated with appropriate context and to
 - [x] Reduce FILLER_TIMEOUT_MS to 400ms
 - [x] Fix status events not being spoken by RealtimeKit (`realtime-kit-chat.tsx`)
 - [x] Remove hardcoded filler text (use empty fallback, rely on model-generated)
-- [x] Fix JSON function calls leaking into responses (`sanitizeModelOutput` in agent.ts, improved `sanitizeNarratorOutput`)
+- [x] Fix JSON function calls leaking into responses (improved `sanitizeNarratorOutput`)
 - [x] Include status messages in model context (`getRecentMessages` now includes status)
 - [x] Cache model adapter for session lifetime (`cachedModelAdapter`)
 - [x] Clean up unused code (removed `routeIntent`, fixed `earlyAckPromise` warning)

@@ -1,68 +1,86 @@
-# AI agent architecture
+# AI agent architecture (source of truth)
 
-This document explains how the PestCall AI agent interprets input, calls tools, and responds while keeping context. It also clarifies what logic lives in prompts vs code.
+Single, canonical view of the PestCall agent: how requests flow, where state lives, what is validated, and what remains to harden.
 
-## Core responsibilities
+## System shape
 
-The agent handles four responsibilities:
-- Interpret the user input and infer intent.
-- Decide which tools to call.
-- Interpret tool outputs.
-- Respond to the customer organically.
+```mermaid
+flowchart LR
+    Client["Web UI / RTK client"] -->|HTTP: /api/conversations/:id/message| Worker
+    Client -->|WS: /api/conversations/:id/socket| Worker
+    Worker -->|proxy| DO["ConversationSession V2 (Durable Object)"]
+    DO -->|tools| Repos["Repositories (tickets, calls, customers, appointments)"]
+    DO -->|CRM| CRM["CRM adapter (mock/http)"]
+    DO -->|logs| D1["D1: call_sessions + call_turns"]
+    DO -->|prompt config| Config["agent_prompt_config (D1)"]
+```
 
-The prompt controls the behavior. Code provides tools and guardrails, not deterministic responses.
+Core loop: DO receives turn → builds model messages with context → `runWithTools` calls a tool → tool result is narrated/streamed → DO buffers events for resync and persists summaries to D1.
 
-## Prompt ownership and storage
+## Transport and endpoints
 
-Prompts and tone live in D1 so you can change behavior without deployments.
-- Source of truth: `agent_prompt_config` table. See migration [`20250201200000_agent_prompt_config.sql`](../apps/worker/migrations/20250201200000_agent_prompt_config.sql) and additions in [`20250201203000_agent_prompt_config_additions.sql`](../apps/worker/migrations/20250201203000_agent_prompt_config_additions.sql).
-- Repository: [`agent-config.ts`](../apps/worker/src/repositories/agent-config.ts).
-- RPC API: [`agent-config.ts`](../apps/worker/src/routes/agent-config.ts).
-- UI editor: Prompt Studio in [`page.tsx`](../apps/web/src/app/agent/page.tsx).
+- Conversation API (v2): `/api/v2/conversations/:id/{socket|message|resync|debug|rtk-token|summary}` proxied to the DO in [`apps/worker/src/index.ts`](../apps/worker/src/index.ts).
+- WebSocket stream events: `token`, `status`, `final`, `error`, `resync`, `speaking`.
+- Resync: POST `/resync` with `lastEventId` replays buffered events plus state snapshot.
+- RealtimeKit: `/rtk-token` issues participant tokens; meeting/config pulled from env (see [`realtime-kit.ts`](../apps/worker/src/realtime-kit.ts)).
 
-Editable prompt fields:
-- `personaSummary`: high-level role and personality.
-- `scopeMessage`: what the agent can help with.
-- `toolGuidance.*`: per-tool behavior guidance.
-- `modelId`: model variant to use.
+## Durable Object responsibilities
 
-## Tool orchestration flow
+- Owns session state (verification, customer id, workflow ids, cached options/slots, greeting flags, event buffer, turn metrics).
+- Routes messages to `runWithTools` with tool definitions from [`tool-definitions.ts`](../apps/worker/src/models/tool-definitions.ts) and handlers from [`tool-flow/registry.ts`](../apps/worker/src/durable-objects/conversation-session/tool-flow/registry.ts).
+- Applies gating: verification (`conversation.verification.verified`) and workflow activity (`rescheduleWorkflowId`, `cancelWorkflowId`, `activeSelection`, `availableSlots`).
+- Streams narrator tokens and aggregates tool acknowledgements into status events.
+- Persists summaries to D1 via repositories; long-term context comes from [`calls.ts`](../apps/worker/src/repositories/calls.ts).
 
-The agent decides tool calls, then uses tool outputs to respond. See [`agent.ts`](../apps/worker/src/use-cases/agent.ts).
+Session modules (v2):
+- Coordinator/routes: [`v2/session.ts`](../apps/worker/src/durable-objects/conversation-session/v2/session.ts)
+- State manager: [`v2/state.ts`](../apps/worker/src/durable-objects/conversation-session/v2/state.ts)
+- Event emitter/buffer: [`v2/events.ts`](../apps/worker/src/durable-objects/conversation-session/v2/events.ts)
+- Connections: [`v2/connection.ts`](../apps/worker/src/durable-objects/conversation-session/v2/connection.ts)
+- Providers: [`v2/providers/tool-provider.ts`](../apps/worker/src/durable-objects/conversation-session/v2/providers/tool-provider.ts), [`v2/providers/prompt-provider.ts`](../apps/worker/src/durable-objects/conversation-session/v2/providers/prompt-provider.ts)
 
-High-level flow:
-- Load the prompt config from D1.
-- Build a model adapter with that config.
-- Send user input + conversation context to the model.
-- If the model selects a tool, call the tool.
-- Send tool result back to the model for a response.
+## Prompts and model selection
 
-## Context handling
+- Prompt config lives in D1 `agent_prompt_config`; migrations [`20250201200000_agent_prompt_config.sql`](../apps/worker/migrations/20250201200000_agent_prompt_config.sql) and [`20250201203000_agent_prompt_config_additions.sql`](../apps/worker/migrations/20250201203000_agent_prompt_config_additions.sql).
+- Repository and RPC: [`repositories/agent-config.ts`](../apps/worker/src/repositories/agent-config.ts), [`routes/agent-config.ts`](../apps/worker/src/routes/agent-config.ts).
+- UI editor: [`apps/web/src/app/agent/page.tsx`](../apps/web/src/app/agent/page.tsx).
+- Fields: `personaSummary`, `scopeMessage`, `toolGuidance.*`, `modelId`, `tone`.
+- Prompt provider builds greeting + system prompt per config; model id read from config/env.
 
-Context is passed into the model as a serialized conversation summary.
-- The worker reads recent turns from D1. See [`calls.ts`](../apps/worker/src/repositories/calls.ts).
-- The model adapter receives the context text. See [`workers-ai.ts`](../apps/worker/src/models/workers-ai.ts).
+## Tools and workflows
 
-If you want full-thread context instead of recent turns, increase the turn window in [`agent.ts`](../apps/worker/src/use-cases/agent.ts) or move the rolling context into a durable object.
+- Tools defined in [`models/tool-definitions.ts`](../apps/worker/src/models/tool-definitions.ts) with Zod schemas and acknowledgements.
+- Handlers in [`tool-flow/registry.ts`](../apps/worker/src/durable-objects/conversation-session/tool-flow/registry.ts) call repositories and CRM adapters.
+- Workflows (cancel/reschedule) use two-step commits (select → confirm) and slot fetching before reschedule confirm. Workflow constants in [`workflows/constants.ts`](../apps/worker/src/workflows/constants.ts).
 
-## Guardrails (code vs prompt)
+## Streaming and resync behavior
 
-The code enforces safety and data rules:
-- Customer verification (ZIP) before billing details.
-- Ticket creation when escalation is required.
+- Greeting sent on WebSocket connect once per call session (tracked in domainState).
+- Tokens emitted via `emitToken()` as SSE is parsed; `final` includes the narrated message and tool outputs.
+- Event buffer retained for resync and sent alongside the latest domain state.
+- Barge-in: `barge_in` message or new message during `speaking` cancels current stream (`canceledStreamIds`).
 
-The prompt controls tone, phrasing, and how the agent explains itself. See [`workers-ai.ts`](../apps/worker/src/models/workers-ai.ts).
+## Debugging and observability
 
-## Model selection
+- Snapshot: `GET /api/conversations/:id/debug` (state, eventBuffer, turnDecision, turnMetrics, persisted session/turns).
+- Summary: `GET /api/conversations/:id/summary`.
+- Logs: `bun run scripts/logs-call-session.ts <callSessionId>` filters worker logs.
+- D1 inspection: `call_sessions`, `call_turns`, `customers_cache` (see repository code for shape).
 
-Model selection is stored in prompt config as `modelId`, and the model adapter reads it. See [`models/index.ts`](../apps/worker/src/models/index.ts).
+## Testing
 
-The current UI exposes a curated list. Expand the list after confirming model IDs from Cloudflare.
+- Integration/e2e live under `apps/worker/src/conversation-session.*.e2e.test.ts` and `conversation-session.websocket.e2e.test.ts` to cover streaming, verification, cancellation, reschedule, and tool correctness.
+- Router integration tests (`apps/worker/src/router.integration.test.ts`) validate RPC flows (tickets, CRM, workflows).
 
-## Cloudflare references
+## Outstanding tests
 
-Use these references when updating agent behavior or transport:
-- Cloudflare Agents: `https://developers.cloudflare.com/agents/`
-- Cloudflare Realtime: `https://developers.cloudflare.com/realtime/`
+- Validate multi-tool chains with `maxRecursiveToolRuns > 1`.
+- End-to-end cancel/reschedule completion through v2 (tool calls + narrator outputs).
+- Voice/RealtimeKit flow end-to-end with token refresh and speaking states.
 
-These are not linked per the docs styleguide. Copy the URLs as needed.
+## Future improvements
+
+- Re-enter intent/workflow selection automatically after verification within the DO (no standalone verification reply).
+- Add off-domain handling with human-offer escalation for repeated unclear turns.
+- Improve DO logging ergonomics (per-turn completion logs, simpler filtering by session id).
+- Implement real appointment CRUD in D1: create/reschedule/cancel appointments and list upcoming appointments from DB.

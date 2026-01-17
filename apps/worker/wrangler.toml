@@ -61,6 +61,10 @@ new_classes = ["ConversationSessionV2DO"]
 tag = "v5"
 deleted_classes = ["ConversationSession"]
 
+[[migrations]]
+tag = "v6"
+deleted_classes = ["PestCallAgent"]
+
 [observability]
 
 [observability.logs]

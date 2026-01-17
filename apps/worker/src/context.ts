@@ -4,7 +4,6 @@ import { getAgentConfig } from "./agents/config";
 import { getCrmAdapter } from "./crm";
 import { type Env, envSchema } from "./env";
 import { type Logger, createLogger } from "./logger";
-import { getModelAdapter } from "./models";
 import {
   createAgentConfigRepository,
   createAppointmentRepository,
@@ -18,9 +17,6 @@ export type Dependencies = {
   tickets: ReturnType<typeof createTicketRepository>;
   calls: ReturnType<typeof createCallRepository>;
   customers: ReturnType<typeof createCustomerRepository>;
-  modelFactory: (
-    config: ReturnType<typeof getAgentConfig>,
-  ) => ReturnType<typeof getModelAdapter>;
   agentConfigDefaults: ReturnType<typeof getAgentConfig>;
   agentConfig: ReturnType<typeof createAgentConfigRepository>;
   appointments: ReturnType<typeof createAppointmentRepository>;
@@ -51,7 +47,6 @@ export const createDependencies = (env: Env): Dependencies => {
       verify: env.VERIFY_WORKFLOW,
       cancel: env.CANCEL_WORKFLOW,
     },
-    modelFactory: (config) => getModelAdapter(env, config, logger),
     agentConfigDefaults: getAgentConfig(env),
     agentConfig: createAgentConfigRepository(env.DB, logger),
     logger,

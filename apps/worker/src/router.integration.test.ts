@@ -4,14 +4,9 @@ import { describe, expect, it } from "vitest";
 import { getPlatformProxy } from "wrangler";
 
 import { RPCHandler } from "@orpc/server/fetch";
-import {
-  ServiceAppointmentStatus,
-  TicketSource,
-  TicketStatus,
-} from "@pestcall/core";
+import { TicketSource, TicketStatus } from "@pestcall/core";
 import { createContext } from "./context";
 import type { Env } from "./env";
-import { createAppointmentRepository } from "./repositories/appointments";
 import { router } from "./router";
 
 type RpcResponse<T> = {

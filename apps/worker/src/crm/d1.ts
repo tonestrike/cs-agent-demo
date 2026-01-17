@@ -97,7 +97,8 @@ export function createD1CrmAdapter(db: D1Database): CrmAdapter {
     async getNextAppointment(
       crmCustomerId: string,
     ): Promise<Appointment | null> {
-      const appointment = await appointments.getLatestForCustomer(crmCustomerId);
+      const appointment =
+        await appointments.getLatestForCustomer(crmCustomerId);
       if (!appointment) return null;
 
       return {

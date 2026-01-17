@@ -860,23 +860,99 @@ export class ConversationSessionV2 {
   }
 
   /**
-   * Emit an acknowledgement from the queued prompts.
-   * Uses the pre-defined acknowledgements directly - no AI generation needed.
+   * Emit an aggregated acknowledgement using the model.
+   * Combines multiple tool acknowledgements into a single warm, natural message.
    */
   private async emitAggregatedAcknowledgement(turn: TurnState): Promise<void> {
     const prompts = [...turn.acknowledgementPrompts];
     if (prompts.length === 0) return;
 
-    // Use the first acknowledgement directly - it's already well-written
-    // If multiple tools are called, just use the first one to avoid confusion
-    const acknowledgement = prompts[0] ?? "One moment please...";
+    // Fallback if only one prompt or no AI
+    const fallbackAck =
+      prompts.length === 1
+        ? prompts[0]
+        : "One moment while I look that up for you...";
 
-    this.logger.debug(
-      { turnId: turn.turnId, acknowledgement, promptCount: prompts.length },
-      "session.acknowledgement_sent",
-    );
+    if (!this.ai) {
+      this.events.emitStatus(fallbackAck ?? "One moment...", {
+        turnId: turn.turnId,
+      });
+      return;
+    }
 
-    this.events.emitStatus(acknowledgement, { turnId: turn.turnId });
+    // Build a clear prompt for acknowledgement generation
+    const systemPromptLines = [
+      "You are a friendly customer service agent. Generate a single, brief acknowledgement message to let the customer know you're working on their request.",
+      "",
+      "## Rules",
+      "- Write exactly ONE short sentence (under 100 characters)",
+      "- Be warm and reassuring",
+      "- Use natural conversational language",
+      "- Do NOT ask any questions",
+      "- Do NOT make promises about specific outcomes",
+      '- Do NOT use filler words like "certainly" or "absolutely"',
+      "",
+      "## Examples",
+      '- "Let me pull that up for you."',
+      '- "One moment while I check on that."',
+      '- "Got it—looking into that now."',
+      '- "Let me check your account and appointments."',
+    ];
+    const systemPrompt = systemPromptLines.join("\n");
+
+    const userPrompt =
+      prompts.length === 1
+        ? `Write an acknowledgement for: ${prompts[0]}`
+        : `Write a single acknowledgement that covers all of these actions:\n${prompts.map((p) => `- ${p}`).join("\n")}`;
+
+    try {
+      // Use non-streaming to get the complete response
+      const response = await runWithTools(
+        this.ai,
+        this.config.model as Parameters<typeof runWithTools>[1],
+        {
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          tools: [],
+        },
+        { streamFinalResponse: false, maxRecursiveToolRuns: 0 },
+      );
+
+      const text = this.extractResponseText(response).replace(
+        /^["']|["']$/g,
+        "",
+      );
+
+      // Validate the response is reasonable
+      if (text && text.length > 5 && text.length < 150) {
+        this.logger.debug(
+          {
+            turnId: turn.turnId,
+            acknowledgement: text,
+            promptCount: prompts.length,
+          },
+          "session.acknowledgement_sent",
+        );
+        this.events.emitStatus(text, { turnId: turn.turnId });
+      } else {
+        this.events.emitStatus(fallbackAck ?? "One moment...", {
+          turnId: turn.turnId,
+        });
+      }
+    } catch (error) {
+      this.logger.warn(
+        {
+          error: error instanceof Error ? error.message : "unknown",
+          prompts: prompts.slice(0, 3),
+        },
+        "session.acknowledgement_generate_failed",
+      );
+      this.events.emitStatus(fallbackAck ?? "One moment...", {
+        turnId: turn.turnId,
+      });
+    }
   }
 
   /**
