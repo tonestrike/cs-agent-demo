@@ -15,6 +15,23 @@ export { RescheduleWorkflow } from "./workflows/reschedule";
 export { VerificationWorkflow } from "./workflows/verification";
 
 const fallbackLogger = createLogger({});
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "content-type, x-demo-auth, authorization",
+};
+
+const withCors = (response: Response) => {
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(corsHeaders)) {
+    headers.set(key, value);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+};
 
 const handler = new RPCHandler(router, {
   plugins: [
@@ -41,10 +58,15 @@ export default {
       /^\/api\/conversations\/([^/]+)\/(socket|message|resync)$/,
     );
     if (conversationMatch) {
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders });
+      }
       if (!env.CONVERSATION_SESSION) {
-        return new Response("Conversation session not configured", {
-          status: 500,
-        });
+        return withCors(
+          new Response("Conversation session not configured", {
+            status: 500,
+          }),
+        );
       }
       const token =
         request.headers.get("x-demo-auth") ??
@@ -52,12 +74,14 @@ export default {
         url.searchParams.get("token") ??
         "";
       if (env.DEMO_AUTH_TOKEN && token !== env.DEMO_AUTH_TOKEN) {
-        return new Response("Unauthorized", { status: 401 });
+        return withCors(new Response("Unauthorized", { status: 401 }));
       }
       const conversationId = conversationMatch[1] ?? "";
       const action = conversationMatch[2] ?? "";
       if (!conversationId) {
-        return new Response("Conversation id required", { status: 400 });
+        return withCors(
+          new Response("Conversation id required", { status: 400 }),
+        );
       }
       const id = env.CONVERSATION_SESSION.idFromName(conversationId);
       const stub = env.CONVERSATION_SESSION.get(id);
@@ -65,7 +89,8 @@ export default {
         return stub.fetch(request);
       }
       const target = `https://conversation-session/${action}`;
-      return stub.fetch(new Request(target, request));
+      const response = await stub.fetch(new Request(target, request));
+      return withCors(response);
     }
     if (url.pathname.startsWith("/ws/conversations/")) {
       if (!env.CONVERSATION_HUB) {
