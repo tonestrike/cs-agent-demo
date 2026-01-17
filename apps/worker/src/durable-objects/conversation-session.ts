@@ -1468,42 +1468,11 @@ export class ConversationSession {
     return response;
   }
 
+  // NOTE: Removed regex-based intent detection. The model will determine
+  // intents through tool calls after verification is complete.
   private inferPendingIntent(
-    text: string,
+    _text: string,
   ): SessionState["pendingIntent"] | null {
-    const lowered = text.toLowerCase();
-    if (
-      this.isScheduleRequest(lowered) ||
-      this.isAvailabilityRequest(lowered)
-    ) {
-      return { kind: "schedule", text };
-    }
-    if (/\bcancel\b/.test(lowered)) {
-      return { kind: "cancel", text };
-    }
-    if (/\breschedul(e|ing)\b/.test(lowered)) {
-      return { kind: "reschedule", text };
-    }
-    if (/\b(change|move)\b.*\bappointment\b/.test(lowered)) {
-      return { kind: "reschedule", text };
-    }
-    if (
-      /\b(appointment|appointments|schedule|scheduled|when)\b/.test(lowered)
-    ) {
-      return { kind: "appointments", text };
-    }
-    if (
-      /\b(bill|billing|invoice|payment|pay|balance|owe|owed)\b/.test(lowered)
-    ) {
-      return { kind: "billing", text };
-    }
-    if (
-      /\b(agent|human|representative|manager|supervisor|complaint|escalate)\b/.test(
-        lowered,
-      )
-    ) {
-      return { kind: "escalate", text };
-    }
     return null;
   }
 
@@ -2219,40 +2188,14 @@ export class ConversationSession {
         finalLength: decision.type === "final" ? decision.text.length : 0,
       };
       if (decision.type === "final") {
-        const inferredTool = this.inferToolFromText(input.text);
-        if (inferredTool) {
-          this.logger.info(
-            {
-              callSessionId,
-              turnId: this.activeTurnId,
-              inferredTool,
-              text: input.text,
-            },
-            "conversation.session.tool_call.fallback",
-          );
-          const acknowledgementText = this.shouldPreAcknowledge(input.text)
-            ? "Got it. Give me a moment while I check."
-            : "";
-          return await this.executeToolCall(
-            inferredTool,
-            {},
-            input,
-            deps,
-            streamId,
-            acknowledgementText,
-          );
-        }
+        // Model decided not to call any tools - respect its decision
         const replyText =
           decision.text.trim() ||
           "I could not interpret the request. Can you rephrase?";
         this.emitNarratorTokens(replyText, streamId);
         return { callSessionId, replyText, actions: [] };
       }
-      const acknowledgementText =
-        decision.acknowledgement?.trim() ||
-        (this.shouldPreAcknowledge(input.text)
-          ? "Got it. Give me a moment while I check."
-          : "");
+      const acknowledgementText = decision.acknowledgement?.trim() || "";
       if (acknowledgementText) {
         this.logger.info(
           {
@@ -2379,52 +2322,6 @@ export class ConversationSession {
         break;
     }
     return next;
-  }
-
-  private isScheduleRequest(text: string): boolean {
-    return /\b(schedule|book|set up|another appointment|new appointment)\b/i.test(
-      text,
-    );
-  }
-
-  private isAvailabilityRequest(text: string): boolean {
-    return /\b(available|availability|openings|times available)\b/i.test(text);
-  }
-
-  private shouldPreAcknowledge(text: string): boolean {
-    return /\b(appointment|appointments|reschedule|cancel|schedule|book|billing|invoice|balance|payment|pay|charge|policy)\b/i.test(
-      text,
-    );
-  }
-
-  private inferToolFromText(text: string): ActionPlan["toolName"] | null {
-    const normalized = text.toLowerCase();
-    if (/\b(reschedule|change|move)\b/.test(normalized)) {
-      return "crm.rescheduleAppointment";
-    }
-    if (/\b(cancel|cancellation)\b/.test(normalized)) {
-      return "crm.cancelAppointment";
-    }
-    if (
-      /\b(schedule|book|available|availability|openings|time slots?)\b/.test(
-        normalized,
-      )
-    ) {
-      return "crm.getAvailableSlots";
-    }
-    if (/\b(next appointment|upcoming appointment)\b/.test(normalized)) {
-      return "crm.getNextAppointment";
-    }
-    if (/\b(appointments|appointment)\b/.test(normalized)) {
-      return "crm.listUpcomingAppointments";
-    }
-    if (/\b(billing|invoice|balance|payment|pay|charge)\b/.test(normalized)) {
-      return "crm.getOpenInvoices";
-    }
-    if (/\b(policy|cancellation policy|reschedule policy)\b/.test(normalized)) {
-      return "crm.getServicePolicy";
-    }
-    return null;
   }
 
   private getActionPreconditions(

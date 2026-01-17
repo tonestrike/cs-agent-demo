@@ -291,7 +291,10 @@ export function RealtimeKitChatPanel({
       cancelled = true;
       cleanup();
     };
-  }, [sessionId, customer, clearTimers]);
+    // Use customer.id instead of customer object to avoid re-running when
+    // React Query returns new object reference with same data
+    // biome-ignore lint/correctness/useExhaustiveDependencies: customer.id is stable identifier
+  }, [sessionId, customer?.id, clearTimers]);
 
   // Wait for meeting emitters to be ready before enabling UI
   useEffect(() => {
