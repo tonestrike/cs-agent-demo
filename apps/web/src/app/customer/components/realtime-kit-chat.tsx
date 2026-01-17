@@ -394,12 +394,32 @@ export function RealtimeKitChatPanel({
     element.meeting = meeting;
   }, [meeting]);
 
+  const handleChatRef = useCallback(
+    (element: HTMLRtkChatElement | null) => {
+      chatElementRef.current = element;
+      if (element && meeting) {
+        element.meeting = meeting;
+      }
+    },
+    [meeting],
+  );
+
+  const handleMicToggleRef = useCallback(
+    (element: HTMLRtkMicToggleElement | null) => {
+      micToggleRef.current = element;
+      if (element && meeting) {
+        element.meeting = meeting;
+      }
+    },
+    [meeting],
+  );
+
   return (
     <div className="rounded-xl border border-ink-200 bg-white shadow-soft">
       <div className="flex items-center justify-between border-b border-ink-100 px-4 py-3">
         <div className="flex items-center gap-3">
           <h3 className="text-sm font-semibold text-ink">RealtimeKit chat</h3>
-          {meeting && <rtk-mic-toggle ref={micToggleRef} size="sm" />}
+          {meeting && <rtk-mic-toggle ref={handleMicToggleRef} size="sm" />}
         </div>
         <span className="text-xs text-ink/70" title={status.error ?? undefined}>
           {status.status}
@@ -425,7 +445,7 @@ export function RealtimeKitChatPanel({
         {meeting ? (
           <div className="h-full">
             <rtk-chat
-              ref={chatElementRef}
+              ref={handleChatRef}
               style={{ width: "100%", height: "100%" }}
             />
           </div>

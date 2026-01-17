@@ -20,6 +20,7 @@ Split conversational streaming from deterministic control work using a Worker + 
 - Latency visibility is limited; cannot filter by `callSessionId` to diagnose slow turns.
 - Action safety ambiguity: model‑selected tools are treated as decisions, not proposals.
 - State machine gaps: scheduling/rescheduling/slot selection are under‑modeled, leading to prompt hacks.
+- Debugging difficulty: no turn‑by‑turn summary tying model calls, tools, and latency together.
 
 ## Example conversations (why they’re bad)
 ### Example 1: Verification feels robotic and loses intent
@@ -193,6 +194,7 @@ The Worker forwards the DO event stream to the client unchanged.
 - Status events are additive and never substitute for narrator text.
 - Narrator streaming must work even when workflow-driven or tool results are pending.
 - Per-turn latency (`first_token_ms`, `time_to_status_ms`) is logged with `callSessionId`.
+- Provide a human-readable markdown summary per conversation including model/tool details and latency.
 
 
 ## API surface
@@ -200,11 +202,13 @@ The Worker forwards the DO event stream to the client unchanged.
 - `GET /api/conversations/:id/socket` → WebSocket stream (authoritative).
 - `GET /api/conversations/:id/stream` → SSE adapter that replays WS events.
 - `POST /api/conversations/:id/message` → oRPC (send user turn).
+- `GET /api/conversations/:id/summary` → markdown summary of conversation (debugging).
 
 ### Durable Object endpoints
 - `GET /socket` → WebSocket stream for session events (authoritative).
 - `GET /stream` → SSE adapter stream.
 - `POST /message` → ingest user turn, enqueue events, run state machine.
+- `GET /summary` → markdown summary for a call session id.
 
 ## Data and storage
 - Session state in DO storage:
@@ -250,6 +254,11 @@ Done:
 - E2E tests updated to match new RPC response shape.
 - ActionPlan schema + policy gates before tool execution.
 - WS event schema with `seq`, `turnId`, `messageId`, `role`, `correlationId` and UI stitching.
+- Chronological message context passed to models for better tool selection.
+- Model call logging (provider/model id per generate/respond/status).
+- Streaming outcome logging for narrator streams (token count, JSON guard).
+- Client turn metrics with first token/status/total latency.
+- Conversation summary endpoint + UI panel with markdown output.
 
 In progress:
 - First-token-fast acknowledgements before tool/model work begins.
@@ -274,6 +283,7 @@ Workstream B: DO streaming loop + latency (backend)
 - Run tool calls concurrently with acknowledgements.
 - Add per-turn timing + AI Gateway trace ids in logs.
 - Ensure RPC response returns only `{ ok, callSessionId }` (no assistant text).
+- Capture tool call latency + tool results in per-turn metadata for summary rendering.
 
 Workstream C: Voice transcripts (frontend + backend)
 - Use RealtimeKit `meeting.ai.on("transcript")`.
@@ -285,11 +295,12 @@ Workstream D: Quality guardrails (backend)
 - Implement ActionPlan schema + policy gates for high‑risk actions. (done)
 - Reduce robotic phrasing; ensure address-on-file confirmation before asking for new.
 - Add fallback clarifications for ambiguous scheduling.
+- Ensure tool-call model always returns tool calls for known intents (no "final" fallbacks).
 
 ### Milestones
 M1: First-token-fast + reduced model round trips (A/B) — in progress
   - Done: remove route model call, WS authoritative output, updated e2e RPC shape.
-  - Remaining: immediate ack before tool/model work, guard against JSON leakage.
+  - Remaining: immediate ack before tool/model work, guard against JSON leakage, ensure tool-call model always returns tool calls for supported intents.
 M2: RealtimeKit text chat wired to DO (A) — in progress
   - Done: register web components, init meeting, mount `<rtk-chat>`.
   - Done: bridge chat events to `/api/conversations/:id/message`.
@@ -298,7 +309,11 @@ M3: Voice transcripts wired to DO (C) — not started
   - Remaining: map `meeting.ai` transcripts to DO events; use final transcript for tool calls.
 M4: Quality and prompt tuning complete (D) — in progress
   - Done: narrator prompts for verification and tool responses.
-  - Remaining: reduce robotic phrasing, fix schedule vs reschedule confusion, enforce slot selection before confirm.
+  - Remaining: fix schedule vs reschedule confusion, enforce slot selection before confirm, ensure reschedule intent triggers tool calls.
+M5: Diagnostics + summaries (B/D) — in progress
+  - Done: per-turn client metrics + server model/tool logging.
+  - Done: markdown conversation summary endpoint and UI panel.
+  - Remaining: include tool latency + results in summary and align with callSessionId/turnId.
 ### Phase 0: decisions (locked)
 - Interpreter latency targets: p50 <= 250ms, p95 <= 600ms.
 - Interpreter placement: Workers AI first; fall back to OpenRouter constrained selection if latency exceeds target.
