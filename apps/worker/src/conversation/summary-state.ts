@@ -1,7 +1,7 @@
 import {
+  type ConversationState,
   applyIntent,
   initialConversationState,
-  type ConversationState,
 } from "./state-machine";
 
 export type SummarySnapshot = {
