@@ -298,6 +298,48 @@ const streamOpenRouterResponse = async function* (
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let eventData: string[] = [];
+
+  const flushEvent = async function* () {
+    if (!eventData.length) {
+      return;
+    }
+    const payload = eventData.join("\n").trim();
+    eventData = [];
+    if (!payload || payload === "[DONE]") {
+      return;
+    }
+    logger.debug(
+      {
+        payload: truncate(payload, 240),
+      },
+      "openrouter.respond.stream.line",
+    );
+    try {
+      const parsed = JSON.parse(payload) as {
+        choices?: Array<{ delta?: { content?: string } }>;
+      };
+      const delta = parsed.choices?.[0]?.delta?.content;
+      if (delta) {
+        logger.debug(
+          {
+            deltaLength: delta.length,
+          },
+          "openrouter.respond.stream.delta",
+        );
+        yield delta;
+      }
+    } catch (error) {
+      logger.error(
+        {
+          error: error instanceof Error ? error.message : "unknown",
+          payload: truncate(payload, 240),
+        },
+        "openrouter.respond.stream.parse_failed",
+      );
+    }
+  };
+
   while (true) {
     const { value, done } = await reader.read();
     if (done) {
@@ -307,48 +349,17 @@ const streamOpenRouterResponse = async function* (
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
     for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data:")) {
+      const trimmed = line.replace(/\r$/, "");
+      if (trimmed === "") {
+        yield* flushEvent();
         continue;
       }
-      let payload = trimmed.slice("data:".length).trim();
-      while (payload.startsWith("data:")) {
-        payload = payload.slice("data:".length).trim();
-      }
-      if (!payload || payload === "[DONE]") {
-        continue;
-      }
-      logger.debug(
-        {
-          payload: truncate(payload, 240),
-        },
-        "openrouter.respond.stream.line",
-      );
-      try {
-        const parsed = JSON.parse(payload) as {
-          choices?: Array<{ delta?: { content?: string } }>;
-        };
-        const delta = parsed.choices?.[0]?.delta?.content;
-        if (delta) {
-          logger.debug(
-            {
-              deltaLength: delta.length,
-            },
-            "openrouter.respond.stream.delta",
-          );
-          yield delta;
-        }
-      } catch (error) {
-        logger.error(
-          {
-            error: error instanceof Error ? error.message : "unknown",
-            payload: truncate(payload, 240),
-          },
-          "openrouter.respond.stream.parse_failed",
-        );
+      if (trimmed.startsWith("data:")) {
+        eventData.push(trimmed.slice("data:".length).trimStart());
       }
     }
   }
+  yield* flushEvent();
 };
 
 const responseToJsonObject = <T>(

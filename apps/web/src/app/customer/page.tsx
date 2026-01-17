@@ -8,8 +8,8 @@ import {
   ClientLogsPanel,
   CustomerBar,
 } from "./components";
-import { useConversationSession, useCustomers } from "./hooks";
 import { AudioChatInterface } from "./components/audio-chat-interface";
+import { useConversationSession, useCustomers } from "./hooks";
 
 type SidebarTab = "settings" | "logs";
 type ChatMode = "text" | "audio";
@@ -42,6 +42,11 @@ export default function CustomerPage() {
   const handleNewSession = useCallback(() => {
     resetSession();
   }, [resetSession]);
+
+  const handleAudioStatusChange = useCallback((audioStatus: string) => {
+    // Could integrate audio status with session status if needed
+    console.log("Audio status changed:", audioStatus);
+  }, []);
 
   const copyConversation = useCallback(async () => {
     const payload = { callSessionId, phoneNumber, messages };

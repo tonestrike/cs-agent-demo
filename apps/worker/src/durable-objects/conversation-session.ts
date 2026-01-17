@@ -14,19 +14,19 @@ import {
 import type { Env } from "../env";
 import type { Logger } from "../logger";
 import { createLogger } from "../logger";
-import {
-  type AgentMessageInput,
-  type AgentMessageOutput,
-  agentMessageInputSchema,
-} from "../schemas/agent";
-import { handleAgentMessage } from "../use-cases/agent";
+import { validateToolArgs } from "../models/tool-definitions";
 import type {
   AgentModelInput,
   AgentResponseInput,
   SelectionOption,
   ToolResult,
 } from "../models/types";
-import { validateToolArgs } from "../models/tool-definitions";
+import {
+  type AgentMessageInput,
+  type AgentMessageOutput,
+  agentMessageInputSchema,
+} from "../schemas/agent";
+import { handleAgentMessage } from "../use-cases/agent";
 import {
   createAppointment,
   getAvailableSlots,
@@ -331,6 +331,11 @@ export class ConversationSession {
     input: AgentMessageInput,
   ): Promise<AgentMessageOutput> {
     const deps = createDependencies(this.env);
+    const callSessionId = input.callSessionId ?? crypto.randomUUID();
+    const activeInput: AgentMessageInput = {
+      ...input,
+      callSessionId,
+    };
     const streamId = ++this.activeStreamId;
     this.canceledStreamIds.delete(streamId);
     await this.setSpeaking(true);
@@ -340,44 +345,45 @@ export class ConversationSession {
     let firstStatusAt: number | null = null;
     try {
       const verificationResponse = await this.handleVerificationGate(
-        input,
+        activeInput,
         deps,
         streamId,
       );
 
-      this.logger.info({ verificationResponse }, "verificationResponse");
-
       if (verificationResponse) {
         this.emitEvent({ type: "final", data: verificationResponse });
-        await this.updateSessionState(input, verificationResponse);
+        await this.updateSessionState(activeInput, verificationResponse);
         await this.syncConversationState(
           verificationResponse.callSessionId,
           deps,
         );
+        await this.recordTurns(deps, activeInput, verificationResponse);
         return verificationResponse;
       }
 
       // Handle workflow selection
       const selectionResponse = await this.handleWorkflowSelection(
-        input,
+        activeInput,
         deps,
         streamId,
       );
       if (selectionResponse) {
         this.emitEvent({ type: "final", data: selectionResponse });
-        await this.updateSessionState(input, selectionResponse);
+        await this.updateSessionState(activeInput, selectionResponse);
         await this.syncConversationState(selectionResponse.callSessionId, deps);
+        await this.recordTurns(deps, activeInput, selectionResponse);
         return selectionResponse;
       }
       const toolResponse = await this.handleToolCallingFlow(
-        input,
+        activeInput,
         deps,
         streamId,
       );
       if (toolResponse) {
         this.emitEvent({ type: "final", data: toolResponse });
-        await this.updateSessionState(input, toolResponse);
+        await this.updateSessionState(activeInput, toolResponse);
         await this.syncConversationState(toolResponse.callSessionId, deps);
+        await this.recordTurns(deps, activeInput, toolResponse);
         return toolResponse;
       }
       const response = await handleAgentMessage(deps, input, undefined, {
@@ -414,7 +420,7 @@ export class ConversationSession {
         "conversation.session.message_failed",
       );
       const fallback: AgentMessageOutput = {
-        callSessionId: input.callSessionId ?? crypto.randomUUID(),
+        callSessionId: callSessionId,
         replyText: "Something went wrong. Please try again.",
         actions: [],
       };
@@ -431,7 +437,7 @@ export class ConversationSession {
         firstStatusAt === null ? null : firstStatusAt - turnStartedAt;
       this.logger.info(
         {
-          callSessionId: input.callSessionId ?? "new",
+          callSessionId,
           first_token_ms: firstTokenMs,
           time_to_status_ms: firstStatusMs,
         },
@@ -735,6 +741,56 @@ export class ConversationSession {
       transport: "web",
       summary: null,
     });
+  }
+
+  private async recordTurns(
+    deps: ReturnType<typeof createDependencies>,
+    input: AgentMessageInput,
+    response: AgentMessageOutput,
+  ): Promise<void> {
+    const callSessionId = input.callSessionId ?? response.callSessionId;
+    if (!callSessionId) {
+      return;
+    }
+    await this.ensureCallSession(deps, callSessionId, input.phoneNumber);
+    const nowIso = new Date().toISOString();
+    const userText = input.text.trim();
+    if (userText) {
+      await deps.calls.addTurn({
+        id: crypto.randomUUID(),
+        callSessionId,
+        ts: nowIso,
+        speaker: "customer",
+        text: userText,
+        meta: {},
+      });
+    }
+    const agentText = response.replyText.trim();
+    if (agentText) {
+      await deps.calls.addTurn({
+        id: crypto.randomUUID(),
+        callSessionId,
+        ts: nowIso,
+        speaker: "agent",
+        text: agentText,
+        meta: {},
+      });
+    }
+  }
+
+  private async getRecentMessages(
+    deps: ReturnType<typeof createDependencies>,
+    callSessionId: string,
+  ): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
+    const turns = await deps.calls.getRecentTurns({ callSessionId, limit: 8 });
+    return turns
+      .map((turn) => {
+        const role = (turn.speaker === "agent" ? "assistant" : "user") as
+          | "assistant"
+          | "user";
+        return { role, content: turn.text };
+      })
+      .filter((turn) => turn.content.trim().length > 0);
   }
 
   private async updateIdentitySummary(
@@ -1145,303 +1201,6 @@ export class ConversationSession {
     }
   }
 
-  private async handleEscalationFlow(
-    input: AgentMessageInput,
-    deps: ReturnType<typeof createDependencies>,
-    intent: string | null,
-    streamId: number,
-  ): Promise<AgentMessageOutput | null> {
-    const state = this.sessionState.conversation ?? initialConversationState();
-    if (!state.verification.verified) {
-      return null;
-    }
-    const wantsEscalation =
-      (intent === "general" || intent === null) &&
-      /\b(agent|human|representative|manager|supervisor|complaint|escalate)\b/i.test(
-        input.text,
-      );
-    if (!wantsEscalation) {
-      return null;
-    }
-
-    this.emitEvent({
-      type: "status",
-      text: "Connecting you to a specialist now.",
-    });
-    const result = await deps.crm.escalate({
-      reason: "customer_request",
-      summary: input.text,
-      customerId: state.verification.customerId ?? undefined,
-    });
-    const callSessionId = input.callSessionId ?? crypto.randomUUID();
-    const replyText = result.ok
-      ? await this.narrateToolResult(
-          {
-            toolName: "crm.escalate",
-            result: { ok: true, ticketId: result.ticketId },
-          },
-          {
-            input,
-            deps,
-            streamId,
-            fallback: `I've asked a specialist to reach out. Your ticket ID is ${result.ticketId ?? "on file"}.`,
-            contextHint:
-              "Confirm that a specialist will follow up and share the ticket id if available.",
-          },
-        )
-      : "I'm sorry, I couldn't start an escalation right now. Please try again in a moment.";
-    return {
-      callSessionId,
-      replyText,
-      actions: [],
-    };
-  }
-
-  private async handleAppointmentsFlow(
-    input: AgentMessageInput,
-    deps: ReturnType<typeof createDependencies>,
-    intent: string | null,
-    streamId: number,
-  ): Promise<AgentMessageOutput | null> {
-    const state = this.sessionState.conversation ?? initialConversationState();
-    if (!state.verification.verified || !state.verification.customerId) {
-      return null;
-    }
-    if (intent !== "appointments") {
-      return null;
-    }
-
-    this.emitEvent({
-      type: "status",
-      text: "Looking up your appointments now.",
-    });
-    const appointments = await listUpcomingAppointments(
-      deps.crm,
-      state.verification.customerId,
-      3,
-    );
-    const callSessionId = input.callSessionId ?? crypto.randomUUID();
-    await this.updateAppointmentSummary(
-      deps,
-      callSessionId,
-      input.phoneNumber,
-      appointments,
-    );
-    const replyText = await this.narrateToolResult(
-      {
-        toolName: "crm.listUpcomingAppointments",
-        result: appointments.map((appointment) => ({
-          id: appointment.id,
-          customerId: state.verification.customerId ?? "",
-          date: appointment.date,
-          timeWindow: appointment.timeWindow,
-          addressSummary: appointment.addressSummary,
-        })),
-      },
-      {
-        input,
-        deps,
-        streamId,
-        fallback: appointments.length
-          ? this.formatAppointmentsResponse(appointments)
-          : "I couldn't find any upcoming appointments. Would you like to schedule one?",
-        contextHint: "The customer wants to know their upcoming appointments.",
-      },
-    );
-    const response: AgentMessageOutput = {
-      callSessionId,
-      replyText,
-      actions: [],
-    };
-    this.sessionState = {
-      ...this.sessionState,
-      conversation: applyIntent(state, {
-        type: "appointments_loaded",
-        appointments: appointments.map((appointment) => ({
-          id: appointment.id,
-          date: appointment.date,
-          timeWindow: appointment.timeWindow,
-          addressSummary: appointment.addressSummary,
-        })),
-      }),
-    };
-    await this.state.storage.put("state", this.sessionState);
-    return response;
-  }
-
-  private async handleBillingFlow(
-    input: AgentMessageInput,
-    deps: ReturnType<typeof createDependencies>,
-    intent: string | null,
-    streamId: number,
-  ): Promise<AgentMessageOutput | null> {
-    const state = this.sessionState.conversation ?? initialConversationState();
-    if (!state.verification.verified || !state.verification.customerId) {
-      return null;
-    }
-    if (intent !== "billing" && intent !== "payment") {
-      return null;
-    }
-
-    this.emitEvent({ type: "status", text: "Checking your balance now." });
-    const invoices = await getOpenInvoices(
-      deps.crm,
-      state.verification.customerId,
-    );
-    const balanceCents = invoices.reduce(
-      (sum, invoice) => sum + (invoice.balanceCents ?? 0),
-      0,
-    );
-    const balance =
-      invoices.find((invoice) => invoice.balance)?.balance ??
-      (balanceCents / 100).toFixed(2);
-    const currency = invoices.find((invoice) => invoice.currency)?.currency;
-    const callSessionId = input.callSessionId ?? crypto.randomUUID();
-    const replyText = await this.narrateToolResult(
-      {
-        toolName: "crm.getOpenInvoices",
-        result: {
-          balanceCents,
-          balance,
-          currency,
-          invoiceCount: invoices.length,
-        },
-      },
-      {
-        input,
-        deps,
-        streamId,
-        fallback: invoices.length
-          ? this.formatInvoicesResponse(invoices)
-          : "You're all set. I don't see any open invoices right now.",
-        contextHint: "The customer wants their billing balance or invoices.",
-      },
-    );
-    return {
-      callSessionId,
-      replyText,
-      actions: [],
-    };
-  }
-
-  private async handleWorkflowIntent(
-    input: AgentMessageInput,
-    deps: ReturnType<typeof createDependencies>,
-    streamId: number,
-    intent: string | null,
-  ): Promise<AgentMessageOutput | null> {
-    const state = this.sessionState.conversation ?? initialConversationState();
-    if (!state.verification.verified || !state.verification.customerId) {
-      return null;
-    }
-    const wantsCancel = intent === "cancel";
-    const wantsReschedule = intent === "reschedule";
-    if (!wantsCancel && !wantsReschedule) {
-      return null;
-    }
-
-    if (wantsCancel) {
-      const introText = await this.narrateText(
-        input,
-        deps,
-        streamId,
-        "Got it. I can help cancel that appointment. I'm pulling your upcoming appointments now.",
-        "The customer wants to cancel an appointment. Acknowledge and transition to listing upcoming appointments.",
-      );
-      const result = await this.handleCancelStart({
-        callSessionId: input.callSessionId,
-        customerId: state.verification.customerId ?? undefined,
-        phoneNumber: input.phoneNumber,
-        message: input.text,
-      });
-      if (!result.ok) {
-        return {
-          callSessionId: input.callSessionId ?? crypto.randomUUID(),
-          replyText:
-            result.message ?? "Cancellation is temporarily unavailable.",
-          actions: [],
-        };
-      }
-      const appointments = result.appointments ?? [];
-      const followupText = await this.narrateToolResult(
-        {
-          toolName: "crm.listUpcomingAppointments",
-          result: appointments.map((appointment) => ({
-            id: appointment.id,
-            customerId: state.verification.customerId ?? "",
-            date: appointment.date,
-            timeWindow: appointment.timeWindow,
-            addressSummary: appointment.addressSummary,
-          })),
-        },
-        {
-          input,
-          deps,
-          streamId,
-          fallback: appointments.length
-            ? this.formatAppointmentsResponse(appointments)
-            : "I couldn't find any upcoming appointments to cancel.",
-          contextHint:
-            "Ask which appointment to cancel using the provided list.",
-        },
-      );
-      return {
-        callSessionId: input.callSessionId ?? crypto.randomUUID(),
-        replyText: `${introText} ${followupText}`.trim(),
-        actions: [],
-      };
-    }
-
-    const introText = await this.narrateText(
-      input,
-      deps,
-      streamId,
-      "Got it. I can help reschedule your appointment. I'm pulling your upcoming appointments now.",
-      "The customer wants to reschedule an appointment. Acknowledge and transition to listing upcoming appointments.",
-    );
-    const result = await this.handleRescheduleStart({
-      callSessionId: input.callSessionId,
-      customerId: state.verification.customerId ?? undefined,
-      phoneNumber: input.phoneNumber,
-      message: input.text,
-    });
-    if (!result.ok) {
-      return {
-        callSessionId: input.callSessionId ?? crypto.randomUUID(),
-        replyText: result.message ?? "Rescheduling is temporarily unavailable.",
-        actions: [],
-      };
-    }
-    const appointments = result.appointments ?? [];
-    const followupText = await this.narrateToolResult(
-      {
-        toolName: "crm.listUpcomingAppointments",
-        result: appointments.map((appointment) => ({
-          id: appointment.id,
-          customerId: state.verification.customerId ?? "",
-          date: appointment.date,
-          timeWindow: appointment.timeWindow,
-          addressSummary: appointment.addressSummary,
-        })),
-      },
-      {
-        input,
-        deps,
-        streamId,
-        fallback: appointments.length
-          ? this.formatAppointmentsResponse(appointments)
-          : "I couldn't find any upcoming appointments to reschedule.",
-        contextHint:
-          "Ask which appointment to reschedule using the provided list.",
-      },
-    );
-    return {
-      callSessionId: input.callSessionId ?? crypto.randomUUID(),
-      replyText: `${introText} ${followupText}`.trim(),
-      actions: [],
-    };
-  }
-
   private async handleWorkflowSelection(
     input: AgentMessageInput,
     deps: ReturnType<typeof createDependencies>,
@@ -1773,12 +1532,40 @@ export class ConversationSession {
     const model = await this.getModelAdapter(deps);
     const customer = await this.getCustomerContext(deps, input);
     const context = this.buildModelContext();
+    const messages = await this.getRecentMessages(deps, callSessionId);
+    let routeDecision: { intent: string; topic?: string } | null = null;
+    try {
+      routeDecision = await model.route({
+        text: input.text,
+        customer,
+        hasContext: Boolean(input.callSessionId),
+        context,
+        messages,
+      });
+    } catch (error) {
+      this.logger.error(
+        { error: error instanceof Error ? error.message : "unknown" },
+        "conversation.session.route.failed",
+      );
+    }
+
+    const routedResponse = await this.handleRoutedIntent(
+      routeDecision?.intent ?? null,
+      routeDecision?.topic,
+      input,
+      deps,
+      streamId,
+    );
+    if (routedResponse) {
+      return routedResponse;
+    }
     try {
       const decision = await model.generate({
         text: input.text,
         customer,
         hasContext: Boolean(input.callSessionId),
         context,
+        messages,
       });
       if (decision.type === "final") {
         const replyText =
@@ -1801,6 +1588,90 @@ export class ConversationSession {
       );
       return null;
     }
+  }
+
+  private async handleRoutedIntent(
+    intent: string | null,
+    topic: string | undefined,
+    input: AgentMessageInput,
+    deps: ReturnType<typeof createDependencies>,
+    streamId: number,
+  ): Promise<AgentMessageOutput | null> {
+    if (!intent || intent === "general") {
+      return null;
+    }
+    const callSessionId = input.callSessionId ?? crypto.randomUUID();
+    const lowered = input.text.toLowerCase();
+    if (intent === "appointments") {
+      const wantsSchedule =
+        /\b(schedule|book|set up|new appointment|appointment for)\b/i.test(
+          lowered,
+        );
+      if (wantsSchedule) {
+        const replyText = await this.narrateText(
+          input,
+          deps,
+          streamId,
+          "What time window works best for the appointment?",
+          "Ask for the preferred time window to schedule a new appointment.",
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+      return this.executeToolCall(
+        "crm.listUpcomingAppointments",
+        { limit: 3 },
+        input,
+        deps,
+        streamId,
+      );
+    }
+    if (intent === "reschedule") {
+      return this.executeToolCall(
+        "crm.rescheduleAppointment",
+        {},
+        input,
+        deps,
+        streamId,
+      );
+    }
+    if (intent === "cancel") {
+      return this.executeToolCall(
+        "crm.cancelAppointment",
+        {},
+        input,
+        deps,
+        streamId,
+      );
+    }
+    if (intent === "billing" || intent === "payment") {
+      return this.executeToolCall(
+        "crm.getOpenInvoices",
+        {},
+        input,
+        deps,
+        streamId,
+      );
+    }
+    if (intent === "policy") {
+      if (!topic) {
+        const replyText = await this.narrateText(
+          input,
+          deps,
+          streamId,
+          "Which policy would you like to know about (pricing, coverage, guarantee, cancellation, or prep)?",
+          "Ask which policy topic the customer wants.",
+        );
+        return { callSessionId, replyText, actions: [] };
+      }
+      return this.executeToolCall(
+        "crm.getServicePolicy",
+        { topic },
+        input,
+        deps,
+        streamId,
+      );
+    }
+    return null;
   }
 
   private buildModelContext(): string {
@@ -1872,6 +1743,13 @@ export class ConversationSession {
       summary?: string;
       customerId?: string;
     };
+    const acknowledgement = this.getToolAcknowledgement(toolName);
+    if (acknowledgement) {
+      this.emitNarratorTokens(acknowledgement.text, streamId);
+      if (acknowledgement.status) {
+        this.emitEvent({ type: "status", text: acknowledgement.status });
+      }
+    }
 
     if (toolName === "crm.cancelAppointment") {
       const appointmentId =
@@ -2394,6 +2272,51 @@ export class ConversationSession {
     }
   }
 
+  private getToolAcknowledgement(
+    toolName: string,
+  ): { text: string; status?: string } | null {
+    switch (toolName) {
+      case "crm.listUpcomingAppointments":
+      case "crm.getNextAppointment":
+        return {
+          text: "Got it. I'm pulling your upcoming appointments now.",
+          status: "Loading appointments",
+        };
+      case "crm.cancelAppointment":
+        return {
+          text: "Got it. I can help cancel an appointment.",
+          status: "Starting cancellation",
+        };
+      case "crm.rescheduleAppointment":
+        return {
+          text: "Got it. I can help reschedule an appointment.",
+          status: "Starting reschedule",
+        };
+      case "crm.getAvailableSlots":
+        return {
+          text: "Thanks. I'm checking the next available times.",
+          status: "Loading available times",
+        };
+      case "crm.createAppointment":
+        return {
+          text: "Got it. I'm checking available times for a new appointment.",
+          status: "Checking availability",
+        };
+      case "crm.getOpenInvoices":
+        return {
+          text: "Sure. Let me check your balance and invoices.",
+          status: "Loading billing details",
+        };
+      case "crm.getServicePolicy":
+        return {
+          text: "Okay. Let me pull the policy details.",
+          status: "Loading policy details",
+        };
+      default:
+        return null;
+    }
+  }
+
   private parseConfirmation(value: string): boolean | null {
     if (/^(yes|yep|yeah|sure)\b/i.test(value)) {
       return true;
@@ -2501,16 +2424,23 @@ export class ConversationSession {
       streamId: number;
       fallback: string;
       contextHint?: string;
+      messages?: Array<{ role: "user" | "assistant"; content: string }>;
     },
   ): Promise<string> {
-    const { input, deps, streamId, fallback, contextHint } = options;
+    const { input, deps, streamId, fallback, contextHint, messages } = options;
     const model = await this.getModelAdapter(deps);
     const customer = await this.getCustomerContext(deps, input);
+    const callSessionId =
+      input.callSessionId ?? this.sessionState.lastCallSessionId ?? null;
+    const recentMessages =
+      messages ??
+      (callSessionId ? await this.getRecentMessages(deps, callSessionId) : []);
     const respondInput: AgentResponseInput = {
       text: input.text,
       customer,
       hasContext: Boolean(input.callSessionId),
       context: contextHint,
+      messages: recentMessages,
       ...toolResult,
     };
     try {

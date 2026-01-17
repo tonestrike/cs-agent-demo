@@ -1,9 +1,31 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-// Note: RealtimeKit SDK is loaded dynamically, not via import
-// import { useRealtimeKit } from "@cloudflare/realtimekit";
-import { Customer } from "@pestcall/core/customers/types";
+import type { Customer } from "../types";
+
+type RealtimeKitMeeting = {
+  on: (event: string, handler: (...args: unknown[]) => void) => void;
+  join: () => Promise<void>;
+  leave: () => void;
+  mute: () => void;
+  unmute: () => void;
+};
+
+type RealtimeKitSDK = {
+  Meeting: new (options: {
+    roomName: string;
+    participantName: string;
+    apiKey?: string;
+    region?: string;
+  }) => RealtimeKitMeeting;
+};
+
+declare global {
+  interface Window {
+    RealtimeKit?: RealtimeKitSDK;
+    __realtimekit_meeting?: RealtimeKitMeeting;
+  }
+}
 
 interface AudioChatInterfaceProps {
   customer: Customer | null;
@@ -20,6 +42,12 @@ export function AudioChatInterface({
   callSessionId,
   onAudioStatusChange,
 }: AudioChatInterfaceProps) {
+  const env = process.env as {
+    NEXT_PUBLIC_REALTIMEKIT_API_KEY?: string;
+    NEXT_PUBLIC_REALTIMEKIT_REGION?: string;
+  };
+  const apiKey = env.NEXT_PUBLIC_REALTIMEKIT_API_KEY;
+  const region = env.NEXT_PUBLIC_REALTIMEKIT_REGION || "us-east-1";
   const [audioStatus, setAudioStatus] = useState<AudioStatus>("disconnected");
   const [isSdkReady, setIsSdkReady] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -27,7 +55,7 @@ export function AudioChatInterface({
   // Check if RealtimeKit SDK is loaded
   useEffect(() => {
     const checkSdk = () => {
-      if (typeof window !== "undefined" && (window as any).RealtimeKit) {
+      if (typeof window !== "undefined" && window.RealtimeKit) {
         setIsSdkReady(true);
       } else {
         setTimeout(checkSdk, 100);
@@ -53,12 +81,16 @@ export function AudioChatInterface({
     handleStatusChange("connecting");
 
     try {
+      if (!window.RealtimeKit) {
+        throw new Error("RealtimeKit SDK unavailable");
+      }
+      const RealtimeKit = window.RealtimeKit;
       // Initialize RealtimeKit meeting
-      const meeting = new (window as any).RealtimeKit.Meeting({
+      const meeting = new RealtimeKit.Meeting({
         roomName: callSessionId || `customer-${phoneNumber}-${Date.now()}`,
-        participantName: customer?.name || "Customer",
-        apiKey: process.env.NEXT_PUBLIC_REALTIMEKIT_API_KEY,
-        region: process.env.NEXT_PUBLIC_REALTIMEKIT_REGION || "us-east-1",
+        participantName: customer?.displayName || "Customer",
+        apiKey,
+        region,
       });
 
       // Set up event listeners
@@ -70,7 +102,7 @@ export function AudioChatInterface({
         handleStatusChange("disconnected");
       });
 
-      meeting.on("error", (error: any) => {
+      meeting.on("error", (error) => {
         console.error("RealtimeKit error:", error);
         handleStatusChange("error");
       });
@@ -79,15 +111,23 @@ export function AudioChatInterface({
       await meeting.join();
 
       // Store meeting instance for cleanup
-      (window as any).__realtimekit_meeting = meeting;
+      window.__realtimekit_meeting = meeting;
     } catch (error) {
       console.error("Failed to start audio chat:", error);
       handleStatusChange("error");
     }
-  }, [isSdkReady, callSessionId, phoneNumber, customer?.name, handleStatusChange]);
+  }, [
+    isSdkReady,
+    callSessionId,
+    phoneNumber,
+    customer?.displayName,
+    handleStatusChange,
+    apiKey,
+    region,
+  ]);
 
   const toggleMute = useCallback(() => {
-    const meeting = (window as any).__realtimekit_meeting;
+    const meeting = window.__realtimekit_meeting;
     if (meeting) {
       if (isMuted) {
         meeting.unmute();
@@ -100,7 +140,7 @@ export function AudioChatInterface({
   }, [isMuted]);
 
   const hangUp = useCallback(() => {
-    const meeting = (window as any).__realtimekit_meeting;
+    const meeting = window.__realtimekit_meeting;
     if (meeting) {
       meeting.leave();
       handleStatusChange("disconnected");
@@ -110,7 +150,7 @@ export function AudioChatInterface({
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      const meeting = (window as any).__realtimekit_meeting;
+      const meeting = window.__realtimekit_meeting;
       if (meeting) {
         meeting.leave();
       }
@@ -147,7 +187,7 @@ export function AudioChatInterface({
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[400px] bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4" />
           <p className="text-gray-600">Loading audio interface...</p>
         </div>
       </div>
@@ -159,13 +199,13 @@ export function AudioChatInterface({
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-200">
         <div className="flex items-center space-x-3">
-          <div className={`w-3 h-3 rounded-full ${getStatusColor()}`}></div>
+          <div className={`w-3 h-3 rounded-full ${getStatusColor()}`} />
           <span className="font-medium text-gray-900">Audio Chat</span>
           <span className="text-sm text-gray-600">{getStatusText()}</span>
         </div>
         {customer && (
           <div className="text-sm text-gray-600">
-            {customer.name} • {phoneNumber}
+            {customer.displayName} • {phoneNumber}
           </div>
         )}
       </div>
@@ -180,7 +220,10 @@ export function AudioChatInterface({
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
               >
+                <title>Microphone icon</title>
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -197,6 +240,7 @@ export function AudioChatInterface({
               is enabled.
             </p>
             <button
+              type="button"
               onClick={startAudioChat}
               className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
             >
@@ -205,7 +249,10 @@ export function AudioChatInterface({
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
               >
+                <title>Start audio chat</title>
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -220,10 +267,8 @@ export function AudioChatInterface({
 
         {audioStatus === "connecting" && (
           <div className="text-center space-y-4">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <h3 className="text-lg font-medium text-gray-900">
-              Connecting...
-            </h3>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto" />
+            <h3 className="text-lg font-medium text-gray-900">Connecting...</h3>
             <p className="text-gray-600">
               Establishing audio connection with the agent.
             </p>
@@ -239,7 +284,10 @@ export function AudioChatInterface({
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  focusable="false"
                 >
+                  <title>Connected microphone icon</title>
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -259,6 +307,7 @@ export function AudioChatInterface({
             {/* Audio Controls */}
             <div className="flex justify-center space-x-4">
               <button
+                type="button"
                 onClick={toggleMute}
                 className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                   isMuted
@@ -273,7 +322,10 @@ export function AudioChatInterface({
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
+                      aria-hidden="true"
+                      focusable="false"
                     >
+                      <title>Unmute</title>
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -296,7 +348,10 @@ export function AudioChatInterface({
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
+                      aria-hidden="true"
+                      focusable="false"
                     >
+                      <title>Mute</title>
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -310,6 +365,7 @@ export function AudioChatInterface({
               </button>
 
               <button
+                type="button"
                 onClick={hangUp}
                 className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
               >
@@ -318,7 +374,10 @@ export function AudioChatInterface({
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  focusable="false"
                 >
+                  <title>Hang up</title>
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -340,7 +399,10 @@ export function AudioChatInterface({
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
               >
+                <title>Error icon</title>
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -357,6 +419,7 @@ export function AudioChatInterface({
               connection and try again.
             </p>
             <button
+              type="button"
               onClick={startAudioChat}
               className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
             >
