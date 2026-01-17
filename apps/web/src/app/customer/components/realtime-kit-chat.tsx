@@ -153,11 +153,13 @@ export function RealtimeKitChatPanel({
       if (client) {
         const chatElement = chatElementRef.current;
         if (chatElement) {
-          chatElement.meeting = undefined as unknown as typeof chatElement.meeting;
+          chatElement.meeting =
+            undefined as unknown as typeof chatElement.meeting;
         }
         const micElement = micToggleRef.current;
         if (micElement) {
-          micElement.meeting = undefined as unknown as typeof micElement.meeting;
+          micElement.meeting =
+            undefined as unknown as typeof micElement.meeting;
         }
         // Allow RTK web components to detach listeners before tearing down.
         window.setTimeout(() => {

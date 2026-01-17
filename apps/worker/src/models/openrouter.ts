@@ -320,6 +320,57 @@ const streamOpenRouterResponse = async function* (
   let buffer = "";
   let eventData: string[] = [];
 
+  const coerceContent = (value: unknown): string | null => {
+    if (typeof value === "string") {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      const parts = value
+        .map((entry) => {
+          if (typeof entry === "string") {
+            return entry;
+          }
+          if (
+            entry &&
+            typeof entry === "object" &&
+            "text" in entry &&
+            typeof entry.text === "string"
+          ) {
+            return entry.text;
+          }
+          return null;
+        })
+        .filter((entry): entry is string => Boolean(entry));
+      return parts.length ? parts.join("") : null;
+    }
+    if (value && typeof value === "object") {
+      if ("text" in value && typeof value.text === "string") {
+        return value.text;
+      }
+    }
+    return null;
+  };
+
+  const extractDeltaText = (choice: unknown): string | null => {
+    if (!choice || typeof choice !== "object") {
+      return null;
+    }
+    const delta =
+      "delta" in choice && typeof choice.delta === "object" ? choice.delta : null;
+    const message =
+      "message" in choice && typeof choice.message === "object"
+        ? choice.message
+        : null;
+    const deltaContent = delta && "content" in delta ? delta.content : null;
+    const deltaText = delta && "text" in delta ? delta.text : null;
+    const messageContent = message && "content" in message ? message.content : null;
+    return (
+      coerceContent(deltaContent) ??
+      coerceContent(deltaText) ??
+      coerceContent(messageContent)
+    );
+  };
+
   const flushEvent = async function* () {
     if (!eventData.length) {
       return;
@@ -337,9 +388,10 @@ const streamOpenRouterResponse = async function* (
     );
     try {
       const parsed = JSON.parse(payload) as {
-        choices?: Array<{ delta?: { content?: string } }>;
+        choices?: Array<unknown>;
       };
-      const delta = parsed.choices?.[0]?.delta?.content;
+      const choice = parsed.choices?.[0] ?? null;
+      const delta = extractDeltaText(choice);
       if (delta) {
         logger.debug(
           {
@@ -348,6 +400,25 @@ const streamOpenRouterResponse = async function* (
           "openrouter.respond.stream.delta",
         );
         yield delta;
+      } else if (choice) {
+        logger.debug(
+          {
+            deltaKeys:
+              choice && typeof choice === "object" && "delta" in choice
+                ? Object.keys(
+                    (choice as { delta?: Record<string, unknown> }).delta ?? {},
+                  )
+                : [],
+            messageKeys:
+              choice && typeof choice === "object" && "message" in choice
+                ? Object.keys(
+                    (choice as { message?: Record<string, unknown> }).message ??
+                      {},
+                  )
+                : [],
+          },
+          "openrouter.respond.stream.empty_delta",
+        );
       }
     } catch (error) {
       logger.error(
