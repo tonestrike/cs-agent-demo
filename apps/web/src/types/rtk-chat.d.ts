@@ -7,6 +7,10 @@ declare global {
         meeting?: unknown;
         style?: CSSProperties;
       };
+      "rtk-mic-toggle": HTMLAttributes<HTMLElement> & {
+        meeting?: unknown;
+        size?: string;
+      };
     }
   }
 }

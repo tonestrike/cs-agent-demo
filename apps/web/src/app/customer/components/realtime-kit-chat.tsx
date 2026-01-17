@@ -75,6 +75,7 @@ export function RealtimeKitChatPanel({
   });
   const [meeting, setMeeting] = useState<RealtimeKitClient | null>(null);
   const meetingRef = useRef<RealtimeKitClient | null>(null);
+  const chatElementRef = useRef<HTMLElement | null>(null);
   const sentMessageIds = useRef(new Set<string>());
   const retryTimerRef = useRef<number | null>(null);
 
@@ -241,6 +242,16 @@ export function RealtimeKitChatPanel({
     };
   }, [meeting, sessionId, customer]);
 
+  useEffect(() => {
+    const element = chatElementRef.current as
+      | (HTMLElement & { meeting?: RealtimeKitClient })
+      | null;
+    if (!element) {
+      return;
+    }
+    element.meeting = meeting ?? undefined;
+  }, [meeting]);
+
   return (
     <div className="rounded-xl border border-ink-200 bg-white shadow-soft">
       <div className="flex items-center justify-between border-b border-ink-100 px-4 py-3">
@@ -253,7 +264,7 @@ export function RealtimeKitChatPanel({
         {meeting ? (
           <div className="h-full">
             <rtk-chat
-              meeting={meeting}
+              ref={chatElementRef}
               style={{ width: "100%", height: "100%" }}
             />
           </div>
