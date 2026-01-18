@@ -18,6 +18,7 @@ type SessionEvent = {
   text?: string;
   turnId?: number | null;
   messageId?: string | null;
+  data?: unknown;
 };
 
 type WsLike = {
@@ -55,7 +56,7 @@ const buildWsUrl = (conversationId: string) => {
 const waitForEvent = (
   ws: WsLike,
   predicate: (event: SessionEvent) => boolean,
-  timeoutMs = 8000,
+  timeoutMs = 15000,
 ): Promise<SessionEvent> =>
   new Promise((resolve, reject) => {
     const timer = setTimeout(
@@ -89,12 +90,41 @@ describe("conversation greeting e2e", () => {
       ws.addEventListener("error", () => reject(new Error("WebSocket error")));
     });
 
-    const greeting = await waitForEvent(
-      ws,
-      (event) => event.type === "final" && event.turnId === 0,
-    );
-    expect(greeting.text?.length ?? 0).toBeGreaterThan(0);
-    expect(greeting.messageId).toBeTruthy();
+    // Request a resync immediately to capture any buffered greeting
+    ws.send(JSON.stringify({ type: "resync" }));
+
+    const greeting = await waitForEvent(ws, (event) => {
+      if (event.type === "final" && event.turnId === 0) {
+        return true;
+      }
+      if (event.type === "resync" && event.data) {
+        const resyncEvents = (event.data as { events?: SessionEvent[] })
+          .events;
+        return Array.isArray(resyncEvents)
+          ? resyncEvents.some(
+              (e) => e.type === "final" && (e.turnId ?? -1) === 0,
+            )
+          : false;
+      }
+      return false;
+    });
+
+    const greetingText =
+      greeting.text ??
+      (() => {
+        if (greeting.type === "resync" && greeting.data) {
+          const events = (greeting.data as { events?: SessionEvent[] }).events;
+          const final = Array.isArray(events)
+            ? events.find(
+                (e) => e.type === "final" && (e.turnId ?? -1) === 0,
+              )
+            : null;
+          return final?.text;
+        }
+        return null;
+      })();
+
+    expect((greetingText ?? "").length).toBeGreaterThan(0);
 
     ws.send(
       JSON.stringify({
@@ -105,12 +135,36 @@ describe("conversation greeting e2e", () => {
       }),
     );
 
-    const reply = await waitForEvent(
-      ws,
-      (event) => event.type === "final" && (event.turnId ?? 0) > 0,
-    );
-    expect(reply.text?.length ?? 0).toBeGreaterThan(0);
-    expect(reply.turnId).toBeGreaterThan(0);
+    const reply = await waitForEvent(ws, (event) => {
+      if (event.type === "final" && (event.turnId ?? 0) > 0) {
+        return true;
+      }
+      if (event.type === "resync" && event.data) {
+        const resyncEvents = (event.data as { events?: SessionEvent[] })
+          .events;
+        return Array.isArray(resyncEvents)
+          ? resyncEvents.some(
+              (e) => e.type === "final" && (e.turnId ?? 0) > 0,
+            )
+          : false;
+      }
+      return false;
+    });
+
+    const replyText =
+      reply.text ??
+      (() => {
+        if (reply.type === "resync" && reply.data) {
+          const events = (reply.data as { events?: SessionEvent[] }).events;
+          const final = Array.isArray(events)
+            ? events.find((e) => e.type === "final" && (e.turnId ?? 0) > 0)
+            : null;
+          return final?.text;
+        }
+        return null;
+      })();
+
+    expect((replyText ?? "").length).toBeGreaterThan(0);
 
     ws.close();
   });

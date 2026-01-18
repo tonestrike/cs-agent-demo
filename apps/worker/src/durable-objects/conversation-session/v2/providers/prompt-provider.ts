@@ -182,6 +182,12 @@ export function createPromptProvider(
         "- You can call multiple tools if needed",
         "- After getting tool results, formulate a natural response",
         "- Do NOT call tools for social pleasantries (greetings, confirmations, goodbyes)",
+        "",
+        "## Response Format (CRITICAL)",
+        "- Your response MUST be natural conversational language only",
+        "- NEVER output JSON, code, or structured data in your response",
+        '- NEVER write tool calls as text like {"type": "function"...}',
+        "- If unsure whether to call a tool, respond conversationally instead",
       );
 
       return lines.join("\n");

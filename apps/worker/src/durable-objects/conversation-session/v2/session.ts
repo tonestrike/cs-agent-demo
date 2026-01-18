@@ -715,6 +715,10 @@ export class ConversationSessionV2 {
     streamId: number,
   ): Promise<string> {
     let fullResponse = "";
+    // Track raw output separately to detect function call JSON across chunks
+    let rawBuffer = "";
+    // Track if we've detected we're in the middle of filtering a function call
+    let filteringFunctionCall = false;
 
     try {
       // Pipe through TextDecoder and EventSourceParser
@@ -753,11 +757,37 @@ export class ConversationSessionV2 {
             };
 
             if (parsed.response) {
-              fullResponse += parsed.response;
+              const responseText = parsed.response;
+              rawBuffer += responseText;
+
+              // Filter out malformed function call text that the model sometimes outputs
+              // instead of using the proper tool call mechanism
+              if (
+                filteringFunctionCall ||
+                this.looksLikeFunctionCallJson(responseText, rawBuffer)
+              ) {
+                filteringFunctionCall = true;
+                this.logger.debug(
+                  { text: responseText.slice(0, 100) },
+                  "session.streaming_filtered_function_call_text",
+                );
+
+                // Check if the function call JSON is complete (balanced braces)
+                const openBraces = (rawBuffer.match(/{/g) || []).length;
+                const closeBraces = (rawBuffer.match(/}/g) || []).length;
+                if (openBraces > 0 && openBraces === closeBraces) {
+                  // Function call JSON is complete, reset filtering
+                  filteringFunctionCall = false;
+                  rawBuffer = "";
+                }
+                continue;
+              }
+
+              fullResponse += responseText;
 
               // Emit token if not canceled
               if (!this.isStreamCanceled(streamId)) {
-                this.events.emitToken(parsed.response, {
+                this.events.emitToken(responseText, {
                   turnId: turn.turnId,
                   messageId: turn.messageId,
                 });
@@ -779,7 +809,18 @@ export class ConversationSessionV2 {
         "session.streaming_complete",
       );
 
-      return fullResponse.trim();
+      // If everything was filtered (model only output function call JSON),
+      // provide a fallback response
+      const trimmedResponse = fullResponse.trim();
+      if (!trimmedResponse) {
+        this.logger.warn(
+          { turnId: turn.turnId },
+          "session.streaming_empty_after_filter",
+        );
+        return "Is there anything else I can help you with?";
+      }
+
+      return trimmedResponse;
     } catch (error) {
       this.logger.error(
         {
@@ -1052,6 +1093,45 @@ export class ConversationSessionV2 {
    */
   private isStreamCanceled(streamId: number): boolean {
     return this.canceledStreamIds.has(streamId);
+  }
+
+  /**
+   * Detect if text looks like the start of a malformed function call JSON.
+   * The model sometimes outputs function calls as text instead of using
+   * the proper tool call mechanism. We need to filter these out.
+   *
+   * Patterns detected:
+   * - `{"type": "function", "name": ...`
+   * - `{"name": "tool.name", "arguments": ...`
+   */
+  private looksLikeFunctionCallJson(
+    _newText: string,
+    rawBuffer: string,
+  ): boolean {
+    // Check the accumulated buffer for function call patterns
+    const combined = rawBuffer.trimStart();
+
+    // Pattern 1: Direct function call JSON object with "type": "function"
+    if (combined.startsWith('{"type"')) {
+      if (combined.includes('"function"') || combined.includes('"name"')) {
+        return true;
+      }
+    }
+
+    // Pattern 2: Function call patterns via regex
+    const functionCallPatterns = [
+      /^\s*\{\s*"type"\s*:\s*"function"/,
+      /^\s*\{\s*"name"\s*:\s*"[a-zA-Z_][a-zA-Z0-9_.]*"\s*,\s*"arg/,
+      /^\s*\{\s*"type"\s*:\s*"function"\s*,\s*"name"/,
+    ];
+
+    for (const pattern of functionCallPatterns) {
+      if (pattern.test(combined)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 }
 
