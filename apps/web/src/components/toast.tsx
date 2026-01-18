@@ -148,6 +148,7 @@ const typeIcons: Record<ToastType, React.ReactNode> = {
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
+      aria-hidden="true"
     >
       <path
         strokeLinecap="round"
@@ -163,6 +164,7 @@ const typeIcons: Record<ToastType, React.ReactNode> = {
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
+      aria-hidden="true"
     >
       <path
         strokeLinecap="round"
@@ -178,6 +180,7 @@ const typeIcons: Record<ToastType, React.ReactNode> = {
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
+      aria-hidden="true"
     >
       <path
         strokeLinecap="round"
@@ -222,6 +225,7 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
+          aria-hidden="true"
         >
           <path
             strokeLinecap="round"

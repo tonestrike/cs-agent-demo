@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { RTKClientOptions } from "@cloudflare/realtimekit";
 import type { Meeting } from "@cloudflare/realtimekit-ui";
-import { useToast, type ToastType } from "../../../components/toast";
+import { type ToastType, useToast } from "../../../components/toast";
 import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
 import { logger } from "../../../lib/logger";
 import type { Customer } from "../types";

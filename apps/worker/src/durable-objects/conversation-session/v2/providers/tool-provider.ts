@@ -73,7 +73,7 @@ function extractGatingState(state: SessionState): ToolGatingState {
   const domainState = state.domainState;
   // Check verification in conversation state (where handleVerifyAccount stores it)
   const conversation = domainState["conversation"] as
-    | { verification?: { verified?: boolean } }
+    | { verification?: { verified?: boolean; zipAttempts?: number } }
     | undefined;
   const isVerified = Boolean(conversation?.verification?.verified);
   const zipAttempts = conversation?.verification?.zipAttempts ?? 0;
