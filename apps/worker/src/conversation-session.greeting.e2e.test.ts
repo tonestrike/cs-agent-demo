@@ -98,8 +98,7 @@ describe("conversation greeting e2e", () => {
         return true;
       }
       if (event.type === "resync" && event.data) {
-        const resyncEvents = (event.data as { events?: SessionEvent[] })
-          .events;
+        const resyncEvents = (event.data as { events?: SessionEvent[] }).events;
         return Array.isArray(resyncEvents)
           ? resyncEvents.some(
               (e) => e.type === "final" && (e.turnId ?? -1) === 0,
@@ -115,9 +114,7 @@ describe("conversation greeting e2e", () => {
         if (greeting.type === "resync" && greeting.data) {
           const events = (greeting.data as { events?: SessionEvent[] }).events;
           const final = Array.isArray(events)
-            ? events.find(
-                (e) => e.type === "final" && (e.turnId ?? -1) === 0,
-              )
+            ? events.find((e) => e.type === "final" && (e.turnId ?? -1) === 0)
             : null;
           return final?.text;
         }
@@ -140,12 +137,9 @@ describe("conversation greeting e2e", () => {
         return true;
       }
       if (event.type === "resync" && event.data) {
-        const resyncEvents = (event.data as { events?: SessionEvent[] })
-          .events;
+        const resyncEvents = (event.data as { events?: SessionEvent[] }).events;
         return Array.isArray(resyncEvents)
-          ? resyncEvents.some(
-              (e) => e.type === "final" && (e.turnId ?? 0) > 0,
-            )
+          ? resyncEvents.some((e) => e.type === "final" && (e.turnId ?? 0) > 0)
           : false;
       }
       return false;

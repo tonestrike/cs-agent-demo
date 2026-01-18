@@ -299,22 +299,31 @@ export function useConversationSession(phoneNumber: string) {
           }
           if (payload.type === "tool_call") {
             // Log tool call for visibility in event timeline
-            const toolData = payload.data as {
-              toolName?: string;
-              args?: Record<string, unknown>;
-              result?: unknown;
-              durationMs?: number;
-              success?: boolean;
-            } | undefined;
-            logEvent("tool_call", {
-              sessionId,
-              turnId: payload.turnId,
-              toolName: toolData?.toolName ?? payload.text ?? "unknown",
-              durationMs: toolData?.durationMs,
-              success: toolData?.success ?? true,
-              args: toolData?.args,
-              result: toolData?.result,
-            }, { level: toolData?.success === false ? "warn" : "info", source: "tool" });
+            const toolData = payload.data as
+              | {
+                  toolName?: string;
+                  args?: Record<string, unknown>;
+                  result?: unknown;
+                  durationMs?: number;
+                  success?: boolean;
+                }
+              | undefined;
+            logEvent(
+              "tool_call",
+              {
+                sessionId,
+                turnId: payload.turnId,
+                toolName: toolData?.toolName ?? payload.text ?? "unknown",
+                durationMs: toolData?.durationMs,
+                success: toolData?.success ?? true,
+                args: toolData?.args,
+                result: toolData?.result,
+              },
+              {
+                level: toolData?.success === false ? "warn" : "info",
+                source: "tool",
+              },
+            );
             return;
           }
         } catch {

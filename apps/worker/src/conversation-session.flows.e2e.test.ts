@@ -219,129 +219,117 @@ const seedAppointmentCache = async (input: {
 };
 
 describe.concurrent("conversation flows e2e", () => {
-  it(
-    "verifies a customer by ZIP and persists verification state",
-    async () => {
-      const conversationId = `verify-${crypto.randomUUID()}`;
+  it("verifies a customer by ZIP and persists verification state", async () => {
+    const conversationId = `verify-${crypto.randomUUID()}`;
 
-      const state = await verifyConversation(
-        conversationId,
-        fixtures.verify.phone,
-        fixtures.verify.zip,
-        fixtures.verify.customerId,
-      );
+    const state = await verifyConversation(
+      conversationId,
+      fixtures.verify.phone,
+      fixtures.verify.zip,
+      fixtures.verify.customerId,
+    );
 
-      const conversation = state["conversation"] as {
-        verification?: { customerId?: string };
-      } | null;
-      expect(conversation?.verification?.customerId).toBe(
-        fixtures.verify.customerId,
-      );
-    },
-    30000,
-  );
+    const conversation = state["conversation"] as {
+      verification?: { customerId?: string };
+    } | null;
+    expect(conversation?.verification?.customerId).toBe(
+      fixtures.verify.customerId,
+    );
+  }, 30000);
 
-  it(
-    "reschedules an appointment after verification",
-    async () => {
-      const conversationId = `resched-${crypto.randomUUID()}`;
+  it("reschedules an appointment after verification", async () => {
+    const conversationId = `resched-${crypto.randomUUID()}`;
 
-      await seedAppointmentCache({
+    await seedAppointmentCache({
+      customerId: fixtures.reschedule.customerId,
+      appointmentId: fixtures.reschedule.appointmentId,
+      phone: fixtures.reschedule.phone,
+      zip: fixtures.reschedule.zip,
+    });
+
+    await verifyConversation(
+      conversationId,
+      fixtures.reschedule.phone,
+      fixtures.reschedule.zip,
+      fixtures.reschedule.customerId,
+    );
+
+    // Drive reschedule via workflow RPC for determinism
+    const start = await callRpc<{ instanceId: string }>(
+      "workflows/reschedule/start",
+      {
+        callSessionId: conversationId,
         customerId: fixtures.reschedule.customerId,
-        appointmentId: fixtures.reschedule.appointmentId,
-        phone: fixtures.reschedule.phone,
-        zip: fixtures.reschedule.zip,
-      });
+        intent: "reschedule",
+        message: "Please reschedule my appointment.",
+      },
+    );
 
-      await verifyConversation(
-        conversationId,
-        fixtures.reschedule.phone,
-        fixtures.reschedule.zip,
-        fixtures.reschedule.customerId,
-      );
+    await callRpc("workflows/reschedule/selectAppointment", {
+      instanceId: start.instanceId,
+      payload: { appointmentId: fixtures.reschedule.appointmentId },
+    });
 
-      // Drive reschedule via workflow RPC for determinism
-      const start = await callRpc<{ instanceId: string }>(
-        "workflows/reschedule/start",
-        {
-          callSessionId: conversationId,
-          customerId: fixtures.reschedule.customerId,
-          intent: "reschedule",
-          message: "Please reschedule my appointment.",
-        },
-      );
+    await callRpc("workflows/reschedule/selectSlot", {
+      instanceId: start.instanceId,
+      payload: { slotId: fixtures.reschedule.slotId },
+    });
 
-      await callRpc("workflows/reschedule/selectAppointment", {
-        instanceId: start.instanceId,
-        payload: { appointmentId: fixtures.reschedule.appointmentId },
-      });
+    await callRpc("workflows/reschedule/confirm", {
+      instanceId: start.instanceId,
+      payload: { confirmed: true },
+    });
 
-      await callRpc("workflows/reschedule/selectSlot", {
-        instanceId: start.instanceId,
-        payload: { slotId: fixtures.reschedule.slotId },
-      });
+    await assertAppointmentStatus(
+      fixtures.reschedule.appointmentId,
+      ServiceAppointmentStatus.Cancelled,
+      "reschedule.original",
+    );
+  }, 120000);
 
-      await callRpc("workflows/reschedule/confirm", {
-        instanceId: start.instanceId,
-        payload: { confirmed: true },
-      });
+  it("cancels an appointment after verification", async () => {
+    const conversationId = `cancel-${crypto.randomUUID()}`;
 
-      await assertAppointmentStatus(
-        fixtures.reschedule.appointmentId,
-        ServiceAppointmentStatus.Cancelled,
-        "reschedule.original",
-      );
-    },
-    120000,
-  );
+    await seedAppointmentCache({
+      customerId: fixtures.cancel.customerId,
+      appointmentId: fixtures.cancel.appointmentId,
+      phone: fixtures.cancel.phone,
+      zip: fixtures.cancel.zip,
+    });
 
-  it(
-    "cancels an appointment after verification",
-    async () => {
-      const conversationId = `cancel-${crypto.randomUUID()}`;
+    await verifyConversation(
+      conversationId,
+      fixtures.cancel.phone,
+      fixtures.cancel.zip,
+      fixtures.cancel.customerId,
+    );
 
-      await seedAppointmentCache({
+    const start = await callRpc<{ instanceId: string }>(
+      "workflows/cancel/start",
+      {
+        callSessionId: conversationId,
         customerId: fixtures.cancel.customerId,
-        appointmentId: fixtures.cancel.appointmentId,
-        phone: fixtures.cancel.phone,
-        zip: fixtures.cancel.zip,
-      });
+        intent: "cancel",
+        message: "Please cancel my appointment.",
+      },
+    );
 
-      await verifyConversation(
-        conversationId,
-        fixtures.cancel.phone,
-        fixtures.cancel.zip,
-        fixtures.cancel.customerId,
-      );
+    await callRpc("workflows/cancel/selectAppointment", {
+      instanceId: start.instanceId,
+      payload: { appointmentId: fixtures.cancel.appointmentId },
+    });
 
-      const start = await callRpc<{ instanceId: string }>(
-        "workflows/cancel/start",
-        {
-          callSessionId: conversationId,
-          customerId: fixtures.cancel.customerId,
-          intent: "cancel",
-          message: "Please cancel my appointment.",
-        },
-      );
+    await callRpc("workflows/cancel/confirm", {
+      instanceId: start.instanceId,
+      payload: { confirmed: true },
+    });
 
-      await callRpc("workflows/cancel/selectAppointment", {
-        instanceId: start.instanceId,
-        payload: { appointmentId: fixtures.cancel.appointmentId },
-      });
-
-      await callRpc("workflows/cancel/confirm", {
-        instanceId: start.instanceId,
-        payload: { confirmed: true },
-      });
-
-      await assertAppointmentStatus(
-        fixtures.cancel.appointmentId,
-        ServiceAppointmentStatus.Cancelled,
-        "cancel",
-      );
-    },
-    90000,
-  );
+    await assertAppointmentStatus(
+      fixtures.cancel.appointmentId,
+      ServiceAppointmentStatus.Cancelled,
+      "cancel",
+    );
+  }, 90000);
 });
 
 const assertAppointmentStatus = async (
@@ -396,5 +384,7 @@ const assertAppointmentStatus = async (
   } catch (error) {
     console.log(`DEBUG appointment fetch failed (${label}):`, String(error));
   }
-  throw new Error(`Timed out waiting for appointment status change (${label}).`);
+  throw new Error(
+    `Timed out waiting for appointment status change (${label}).`,
+  );
 };

@@ -677,7 +677,9 @@ export class ConversationSessionV2 {
           this.events.emitToolCall(tool.definition.name, {
             turnId: turn.turnId,
             args,
-            result: { error: error instanceof Error ? error.message : "unknown" },
+            result: {
+              error: error instanceof Error ? error.message : "unknown",
+            },
             durationMs,
             success: false,
           });
