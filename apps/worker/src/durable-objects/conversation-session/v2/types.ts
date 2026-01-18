@@ -47,7 +47,8 @@ export type EventType =
   | "final" // Final response complete
   | "error" // Error occurred
   | "resync" // Full state resync requested
-  | "speaking"; // Speaking state change
+  | "speaking" // Speaking state change
+  | "tool_call"; // Tool was invoked
 
 /**
  * Event emitted to connected WebSocket clients.

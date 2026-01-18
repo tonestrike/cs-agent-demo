@@ -655,10 +655,33 @@ export class ConversationSessionV2 {
           "session.tool_call",
         );
 
+        const startTime = Date.now();
         try {
           const result = await tool.execute(args, toolContext);
+          const durationMs = Date.now() - startTime;
+
+          // Emit tool_call event for visibility in event timeline
+          this.events.emitToolCall(tool.definition.name, {
+            turnId: turn.turnId,
+            args,
+            result,
+            durationMs,
+            success: true,
+          });
+
           return JSON.stringify(result);
         } catch (error) {
+          const durationMs = Date.now() - startTime;
+
+          // Emit tool_call event even on failure for visibility
+          this.events.emitToolCall(tool.definition.name, {
+            turnId: turn.turnId,
+            args,
+            result: { error: error instanceof Error ? error.message : "unknown" },
+            durationMs,
+            success: false,
+          });
+
           this.logger.error(
             {
               toolName: tool.definition.name,

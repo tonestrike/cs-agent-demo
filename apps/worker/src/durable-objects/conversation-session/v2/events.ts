@@ -189,6 +189,35 @@ export class EventEmitter {
   }
 
   /**
+   * Emit tool call event for visibility in event timeline.
+   */
+  emitToolCall(
+    toolName: string,
+    options: {
+      turnId?: number;
+      correlationId?: string;
+      args?: Record<string, unknown>;
+      result?: unknown;
+      durationMs?: number;
+      success?: boolean;
+    } = {},
+  ): SessionEvent {
+    return this.emit("tool_call", {
+      text: toolName,
+      role: "system",
+      turnId: options.turnId,
+      correlationId: options.correlationId,
+      data: {
+        toolName,
+        args: options.args,
+        result: options.result,
+        durationMs: options.durationMs,
+        success: options.success ?? true,
+      },
+    });
+  }
+
+  /**
    * Get events since a given ID for resync.
    */
   getEventsSince(lastEventId: number): SessionEvent[] {
