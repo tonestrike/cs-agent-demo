@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { RTKClientOptions } from "@cloudflare/realtimekit";
 import type { Meeting } from "@cloudflare/realtimekit-ui";
+import { useToast, type ToastType } from "../../../components/toast";
 import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
 import { logger } from "../../../lib/logger";
 import type { Customer } from "../types";
@@ -162,6 +163,9 @@ export function RealtimeKitChatPanel({
     text: string;
     time: number;
   } | null>(null);
+
+  // Toast notifications for events
+  const { addToast } = useToast();
 
   const meetingRef = useRef<RealtimeKitClient | null>(null);
   const chatElementRef = useRef<HTMLRtkChatElement | null>(null);
@@ -788,6 +792,36 @@ export function RealtimeKitChatPanel({
       log("rtk.tts.ws.error", { sessionId }, "error");
     };
 
+    // Helper to show event as toast notification
+    const showEventToast = (
+      eventType: string,
+      text: string | undefined,
+      isResync = false,
+    ) => {
+      if (!text?.trim()) return;
+      const preview = text.length > 80 ? `${text.slice(0, 80)}...` : text;
+      const typeMap: Record<string, ToastType> = {
+        final: "success",
+        status: "info",
+        token: "info",
+        error: "error",
+        resync: "info",
+      };
+      const titleMap: Record<string, string> = {
+        final: isResync ? "Buffered Response" : "Agent Response",
+        status: "Status Update",
+        token: "Streaming",
+        error: "Error",
+        resync: "Resync",
+      };
+      addToast({
+        type: typeMap[eventType] ?? "info",
+        title: titleMap[eventType] ?? eventType,
+        message: preview,
+        duration: eventType === "token" ? 2000 : 5000,
+      });
+    };
+
     socket.onmessage = (event) => {
       try {
         const payload = JSON.parse(String(event.data)) as {
@@ -819,6 +853,7 @@ export function RealtimeKitChatPanel({
                   textLength: text.length,
                 });
                 appendAssistantChatMessage(bufferedEvent.messageId, text);
+                showEventToast("final", text, true);
                 // Speak the greeting/message via browser TTS if server voice disabled
                 if (ttsEnabled.current && !serverVoiceEnabled.current) {
                   speakWithBrowserTTS(text);
@@ -843,6 +878,7 @@ export function RealtimeKitChatPanel({
           });
           if (text) {
             appendAssistantChatMessage(payload.messageId, text);
+            showEventToast("status", text);
             // Fallback to browser TTS if server voice is disabled
             if (ttsEnabled.current && !serverVoiceEnabled.current) {
               speakWithBrowserTTS(text);
@@ -871,6 +907,7 @@ export function RealtimeKitChatPanel({
               time: Date.now(),
             });
           }
+          // Don't show toast for every token - too noisy
         } else if (payload.type === "final") {
           const buffer = assistantBuffers.current.get(messageId) ?? "";
           assistantBuffers.current.delete(messageId);
@@ -885,10 +922,13 @@ export function RealtimeKitChatPanel({
             messageId,
           });
           appendAssistantChatMessage(messageId, text);
+          showEventToast("final", text);
           // Fallback to browser TTS if server voice is disabled
           if (ttsEnabled.current && !serverVoiceEnabled.current) {
             speakWithBrowserTTS(text);
           }
+        } else if (payload.type === "error") {
+          showEventToast("error", payload.text);
         }
       } catch {
         // Ignore malformed messages
@@ -899,7 +939,7 @@ export function RealtimeKitChatPanel({
       socket.close();
       setWsConnected(false);
     };
-  }, [sessionId, customer?.id, appendAssistantChatMessage, log]);
+  }, [sessionId, customer?.id, appendAssistantChatMessage, log, addToast]);
 
   // Assign meeting to RTK web components with retry logic
   useEffect(() => {

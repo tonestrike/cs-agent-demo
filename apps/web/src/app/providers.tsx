@@ -2,6 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { ToastProvider } from "../components/toast";
 
 const preloadRealtimeKit = async () => {
   try {
@@ -53,7 +54,9 @@ export const Providers = ({ children }: { children: React.ReactNode }) => {
   return (
     <>
       <RealtimeKitLoader />
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      <QueryClientProvider client={client}>
+        <ToastProvider>{children}</ToastProvider>
+      </QueryClientProvider>
     </>
   );
 };
