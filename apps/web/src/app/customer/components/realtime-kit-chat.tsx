@@ -747,6 +747,18 @@ export function RealtimeKitChatPanel({
         time: Date.now(),
       });
       log("rtk.tts.ws.open", { sessionId });
+      // Request buffered events (including greeting) that may have been sent
+      // before this WebSocket connected
+      try {
+        socket.send(JSON.stringify({ type: "resync" }));
+        log("rtk.tts.ws.resync_sent", { sessionId });
+      } catch (err) {
+        log(
+          "rtk.tts.ws.resync_failed",
+          { error: err instanceof Error ? err.message : "unknown" },
+          "warn",
+        );
+      }
     };
 
     socket.onclose = (event) => {
@@ -783,8 +795,39 @@ export function RealtimeKitChatPanel({
           messageId?: string | null;
           role?: "assistant" | "system";
           text?: string;
-          data?: { replyText?: string };
+          data?: {
+            replyText?: string;
+            events?: Array<{
+              type?: string;
+              messageId?: string | null;
+              text?: string;
+              data?: { replyText?: string };
+            }>;
+          };
         };
+
+        // Handle resync response - process buffered events (e.g., greeting)
+        if (payload.type === "resync" && payload.data?.events) {
+          log("rtk.tts.resync", { eventCount: payload.data.events.length });
+          for (const bufferedEvent of payload.data.events) {
+            // Only process final events (including greeting with turnId=0)
+            if (bufferedEvent.type === "final") {
+              const text = bufferedEvent.data?.replyText ?? bufferedEvent.text;
+              if (text) {
+                log("rtk.tts.resync.final", {
+                  messageId: bufferedEvent.messageId ?? null,
+                  textLength: text.length,
+                });
+                appendAssistantChatMessage(bufferedEvent.messageId, text);
+                // Speak the greeting/message via browser TTS if server voice disabled
+                if (ttsEnabled.current && !serverVoiceEnabled.current) {
+                  speakWithBrowserTTS(text);
+                }
+              }
+            }
+          }
+          return;
+        }
 
         // Handle status events for TTS - speak them immediately
         if (payload.type === "status") {
