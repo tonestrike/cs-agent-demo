@@ -223,11 +223,9 @@ Not fully productionized due to complexity in managing two model calls.
 
 ### Why Not Just Use Better Models?
 
-**Cost:** GPT-4 and Claude are expensive at scale for phone calls.
-**Latency:** External API calls add 200-500ms minimum. For real-time voice, this is too slow.
-**Availability:** External APIs have rate limits and downtime.
+We could have used OpenAI's Realtime API, Claude, or other more capable models. In the short time available, we were committed to Cloudflare's stack and didn't want to start over from scratch.
 
-Workers AI runs on Cloudflare's edge network with consistent low latency, which matters more for voice than raw quality.
+For a production system, we'd want to evaluate Claude, OpenAI, and other providers that offer better function calling accuracy and more natural conversation.
 
 ---
 
