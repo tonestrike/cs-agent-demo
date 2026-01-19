@@ -456,7 +456,7 @@ bun run scripts/run-analyzer.ts --category cancel --with-analysis
    See: [`getAvailableTools` in tool-definitions.ts](../apps/worker/src/models/tool-definitions.ts)
 
 3. **Domain Logic in Tools, Not Session**
-   The session is generic. All business rules live in [tool handlers](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers/).
+   The session is generic. All business rules live in [tool handlers](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers).
 
 4. **Streaming First**
    Tokens stream via WebSocket for real-time UI updates.
@@ -464,7 +464,7 @@ bun run scripts/run-analyzer.ts --category cancel --with-analysis
 
 5. **Evaluation-Driven**
    Scenarios define expected behavior. AI scoring catches quality issues.
-   See: [Scenarios](../apps/worker/src/analyzer/scenarios/)
+   See: [Scenarios](../apps/worker/src/analyzer/scenarios)
 
 ---
 
@@ -476,7 +476,7 @@ bun run scripts/run-analyzer.ts --category cancel --with-analysis
 | Worker entry/routing | [`index.ts`](../apps/worker/src/index.ts) |
 | Conversation session DO | [`session.ts`](../apps/worker/src/durable-objects/conversation-session/v2/session.ts) |
 | Tool definitions | [`tool-definitions.ts`](../apps/worker/src/models/tool-definitions.ts) |
-| Tool handlers | [`handlers/`](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers/) |
-| Scenario definitions | [`scenarios/`](../apps/worker/src/analyzer/scenarios/) |
+| Tool handlers | [handlers](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers) |
+| Scenario definitions | [scenarios](../apps/worker/src/analyzer/scenarios) |
 | Scenario runner | [`runner.ts`](../apps/worker/src/analyzer/runner.ts) |
 | AI evaluator | [`evaluator.ts`](../apps/worker/src/analyzer/evaluator.ts) |
