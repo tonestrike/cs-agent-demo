@@ -224,7 +224,11 @@ export function RealtimeKitChatPanel({
   // Keep refs in sync with props/state for stable logging
   useEffect(() => {
     ttsEnabled.current = enableTts;
-  }, [enableTts]);
+    log("rtk.tts.config_changed", {
+      ttsEnabled: enableTts,
+      serverVoiceEnabled: serverVoiceEnabled.current,
+    });
+  }, [enableTts, log]);
 
   useEffect(() => {
     meetingReadyRef.current = meetingReady;
@@ -842,20 +846,28 @@ export function RealtimeKitChatPanel({
 
         // Handle resync response - process buffered events (e.g., greeting)
         if (payload.type === "resync" && payload.data?.events) {
-          log("rtk.tts.resync", { eventCount: payload.data.events.length });
+          log("rtk.tts.resync", {
+            eventCount: payload.data.events.length,
+            ttsEnabled: ttsEnabled.current,
+            serverVoiceEnabled: serverVoiceEnabled.current,
+          });
           for (const bufferedEvent of payload.data.events) {
             // Only process final events (including greeting with turnId=0)
             if (bufferedEvent.type === "final") {
               const text = bufferedEvent.data?.replyText ?? bufferedEvent.text;
               if (text) {
+                const willSpeak =
+                  ttsEnabled.current && !serverVoiceEnabled.current;
                 log("rtk.tts.resync.final", {
                   messageId: bufferedEvent.messageId ?? null,
                   textLength: text.length,
+                  willSpeak,
                 });
                 appendAssistantChatMessage(bufferedEvent.messageId, text);
                 showEventToast("final", text, true);
                 // Speak the greeting/message via browser TTS if server voice disabled
-                if (ttsEnabled.current && !serverVoiceEnabled.current) {
+                if (willSpeak) {
+                  log("rtk.tts.speak_resync", { textLength: text.length });
                   speakWithBrowserTTS(text);
                 }
               }
@@ -867,6 +879,8 @@ export function RealtimeKitChatPanel({
         // Handle status events for TTS - speak them immediately
         if (payload.type === "status") {
           const text = payload.text?.trim();
+          const willSpeak =
+            Boolean(text) && ttsEnabled.current && !serverVoiceEnabled.current;
           setLastActivity({
             type: "status",
             text: `Status: ${text?.slice(0, 40) ?? ""}`,
@@ -875,12 +889,16 @@ export function RealtimeKitChatPanel({
           log("rtk.tts.status", {
             textPreview: text?.slice(0, 80) ?? "",
             messageId: payload.messageId ?? null,
+            ttsEnabled: ttsEnabled.current,
+            serverVoiceEnabled: serverVoiceEnabled.current,
+            willSpeak,
           });
           if (text) {
             appendAssistantChatMessage(payload.messageId, text);
             showEventToast("status", text);
             // Fallback to browser TTS if server voice is disabled
-            if (ttsEnabled.current && !serverVoiceEnabled.current) {
+            if (willSpeak) {
+              log("rtk.tts.speak_status", { textLength: text.length });
               speakWithBrowserTTS(text);
             }
           }
@@ -893,12 +911,19 @@ export function RealtimeKitChatPanel({
         const messageId = payload.messageId ?? "default";
         if (payload.type === "token") {
           const current = assistantBuffers.current.get(messageId) ?? "";
-          assistantBuffers.current.set(
-            messageId,
-            current + (payload.text ?? ""),
-          );
+          const tokenText = payload.text ?? "";
+          assistantBuffers.current.set(messageId, current + tokenText);
           // Show streaming indicator
           const buffer = assistantBuffers.current.get(messageId) ?? "";
+          // Log first token and every 100 chars to track streaming progress
+          if (current.length === 0 || buffer.length % 100 === 0) {
+            log("rtk.token.stream", {
+              messageId,
+              bufferLength: buffer.length,
+              tokenLength: tokenText.length,
+              isFirst: current.length === 0,
+            });
+          }
           if (buffer.length % 20 === 0) {
             // Update every ~20 chars to reduce overhead
             setLastActivity({
@@ -917,14 +942,20 @@ export function RealtimeKitChatPanel({
             text: `Reply: ${text.slice(0, 40)}...`,
             time: Date.now(),
           });
+          const willSpeak = ttsEnabled.current && !serverVoiceEnabled.current;
           log("rtk.tts.final", {
             textLength: text.length,
             messageId,
+            ttsEnabled: ttsEnabled.current,
+            serverVoiceEnabled: serverVoiceEnabled.current,
+            willSpeak,
+            textPreview: text.slice(0, 60),
           });
           appendAssistantChatMessage(messageId, text);
           showEventToast("final", text);
           // Fallback to browser TTS if server voice is disabled
-          if (ttsEnabled.current && !serverVoiceEnabled.current) {
+          if (willSpeak) {
+            log("rtk.tts.speak_start", { textLength: text.length });
             speakWithBrowserTTS(text);
           }
         } else if (payload.type === "error") {
