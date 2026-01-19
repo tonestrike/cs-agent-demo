@@ -140,8 +140,12 @@ export type ToolDefinition = {
     properties: Record<string, { type: string; description?: string }>;
     required: string[];
   };
-  /** Optional acknowledgement to stream while the tool runs */
-  acknowledgement?: string;
+  /**
+   * Optional acknowledgement to stream while the tool runs.
+   * Can be a string (always show) or a function that returns string | null
+   * based on current state (return null to skip acknowledgement if data is cached).
+   */
+  acknowledgement?: string | ((state: SessionState) => string | null);
 };
 
 /**

@@ -20,6 +20,9 @@ export function useConversationSession(phoneNumber: string) {
   const sessionRef = useRef<string | null>(null);
   const hasDeltaRef = useRef(false);
   const autoZipTimerRef = useRef<number | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const maxReconnectAttempts = 5;
   const pendingTurnsRef = useRef<
     Array<{ sessionId: string; startedAt: number; userText: string }>
   >([]);
@@ -29,6 +32,13 @@ export function useConversationSession(phoneNumber: string) {
     if (autoZipTimerRef.current !== null) {
       window.clearTimeout(autoZipTimerRef.current);
       autoZipTimerRef.current = null;
+    }
+  }, []);
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
     }
   }, []);
 
@@ -42,9 +52,10 @@ export function useConversationSession(phoneNumber: string) {
   useEffect(() => {
     return () => {
       clearAutoZipTimer();
+      clearReconnectTimer();
       socketRef.current?.close();
     };
-  }, [clearAutoZipTimer]);
+  }, [clearAutoZipTimer, clearReconnectTimer]);
 
   const logEvent = useCallback(
     (
@@ -335,12 +346,52 @@ export function useConversationSession(phoneNumber: string) {
         setConnectionStatus("Connection issue. Try again.");
         logEvent("ws.error", { sessionId });
       };
-      socket.onclose = () => {
-        setConnectionStatus("Disconnected");
+      socket.onclose = (event) => {
+        const wasClean = event.wasClean;
+        logEvent("ws.close", { sessionId, wasClean, code: event.code });
+
         if (sessionRef.current === sessionId) {
           socketRef.current = null;
         }
-        logEvent("ws.close", { sessionId });
+
+        // Don't reconnect if it was a clean close (intentional disconnect)
+        // or if we've exceeded max attempts
+        if (
+          wasClean ||
+          reconnectAttemptsRef.current >= maxReconnectAttempts ||
+          sessionRef.current !== sessionId
+        ) {
+          setConnectionStatus("Disconnected");
+          reconnectAttemptsRef.current = 0;
+          return;
+        }
+
+        // Calculate backoff delay: 1s, 2s, 4s, 8s, 16s
+        const attempt = reconnectAttemptsRef.current;
+        const delay = Math.min(1000 * 2 ** attempt, 16000);
+        reconnectAttemptsRef.current += 1;
+
+        setConnectionStatus(
+          `Reconnecting (${reconnectAttemptsRef.current}/${maxReconnectAttempts})...`,
+        );
+        logEvent("ws.reconnect.scheduled", {
+          sessionId,
+          attempt: reconnectAttemptsRef.current,
+          delayMs: delay,
+        });
+
+        clearReconnectTimer();
+        reconnectTimerRef.current = window.setTimeout(() => {
+          if (sessionRef.current === sessionId) {
+            logEvent("ws.reconnect.attempt", {
+              sessionId,
+              attempt: reconnectAttemptsRef.current,
+            });
+            ensureSocket(sessionId).catch(() => {
+              // Error handling is done in ensureSocket
+            });
+          }
+        }, delay);
       };
       socketRef.current = socket;
       sessionRef.current = sessionId;
@@ -351,6 +402,7 @@ export function useConversationSession(phoneNumber: string) {
         }, 3000);
         socket.addEventListener("open", () => {
           window.clearTimeout(timeoutId);
+          reconnectAttemptsRef.current = 0; // Reset reconnect counter on success
           logEvent("ws.connect.open", { sessionId });
           setConnectionStatus("Connected");
           resolve(socket);
@@ -363,7 +415,7 @@ export function useConversationSession(phoneNumber: string) {
         });
       });
     },
-    [buildWsUrl, logEvent, updateTurnMetric],
+    [buildWsUrl, clearReconnectTimer, logEvent, updateTurnMetric],
   );
 
   const resetSessionState = useCallback(
@@ -375,13 +427,15 @@ export function useConversationSession(phoneNumber: string) {
       pendingTurnsRef.current = [];
       turnMetricsRef.current.clear();
       setTurnMetrics([]);
+      clearReconnectTimer();
+      reconnectAttemptsRef.current = 0;
       socketRef.current?.close();
       socketRef.current = null;
       sessionRef.current = null;
       clearAutoZipTimer();
       logEvent("session.reset", { phoneNumber, reason });
     },
-    [clearAutoZipTimer, logEvent, phoneNumber],
+    [clearAutoZipTimer, clearReconnectTimer, logEvent, phoneNumber],
   );
 
   const resetSession = useCallback(() => {

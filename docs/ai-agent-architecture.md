@@ -17,6 +17,77 @@ flowchart LR
 
 Core loop: DO receives turn → builds model messages with context → `runWithTools` calls a tool → tool result is narrated/streamed → DO buffers events for resync and persists summaries to D1.
 
+## Generic agent vs. domain configuration
+
+The agent architecture separates generic orchestration from domain-specific logic:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Generic Agent Layer                         │
+│  (WebSocket, state coordination, model calls, event streaming)  │
+│                                                                 │
+│  - No domain concepts (appointments, customers, verification)   │
+│  - Stores domainState as opaque Record<string, unknown>        │
+│  - Calls tools without knowing what they do                    │
+│  - Emits events without understanding their meaning            │
+└─────────────────────────────────────────────────────────────────┘
+                              ▲
+                              │ Providers inject behavior
+                              │
+┌─────────────────────────────────────────────────────────────────┐
+│                   Configuration Layer                           │
+│    (Tool definitions, prompt templates, domain logic)           │
+│                                                                 │
+│  - ToolProvider: defines tools, gating rules, acknowledgements │
+│  - PromptProvider: builds prompts based on domain state        │
+│  - All business logic (appointments, workflows) lives here     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Constraint**: The agent layer must never contain domain-specific types or logic. If you find yourself adding properties like `hasAppointments` or `isVerified` to the agent's types, that logic belongs in the configuration layer instead.
+
+### How this works in practice
+
+| Concern | Generic Agent | Configuration Layer |
+|---------|---------------|---------------------|
+| State storage | `domainState: Record<string, unknown>` | Knows structure: `conversation.appointments`, `verification.verified` |
+| Tool gating | Calls `toolProvider.getTools(state)` | Checks `domainState["conversation"]?.verification?.verified` |
+| Acknowledgements | Calls `ack(sessionState)` if function | Function inspects `domainState` to decide if cached |
+| Prompts | Calls `promptProvider.buildSystemPrompt(state)` | Reads domain state to build context-aware prompts |
+
+### Key files
+
+- **Generic agent**: [`v2/session.ts`](../apps/worker/src/durable-objects/conversation-session/v2/session.ts), [`v2/types.ts`](../apps/worker/src/durable-objects/conversation-session/v2/types.ts)
+- **Configuration**: [`models/tool-definitions.ts`](../apps/worker/src/models/tool-definitions.ts), [`v2/providers/tool-provider.ts`](../apps/worker/src/durable-objects/conversation-session/v2/providers/tool-provider.ts), [`v2/providers/prompt-provider.ts`](../apps/worker/src/durable-objects/conversation-session/v2/providers/prompt-provider.ts)
+
+### Example: conditional acknowledgements
+
+Acknowledgements may be skipped when data is already cached. This logic belongs entirely in the configuration layer:
+
+```typescript
+// tool-definitions.ts (CONFIGURATION - has domain knowledge)
+"crm.getAppointmentById": {
+  acknowledgement: (domainState) => {
+    // Domain-specific: knows about conversation.appointments
+    const conversation = domainState["conversation"] as
+      | { appointments?: unknown[] }
+      | undefined;
+    const hasAppointments = Boolean(conversation?.appointments?.length);
+    return hasAppointments ? null : "Checking that appointment now.";
+  },
+}
+
+// session.ts (AGENT - generic, no domain knowledge)
+if (tool.definition.acknowledgement) {
+  const ack = tool.definition.acknowledgement;
+  // Just calls the function - doesn't know what it checks
+  const ackText = typeof ack === "function" ? ack(sessionState) : ack;
+  if (ackText) {
+    turn.acknowledgementPrompts.push(ackText);
+  }
+}
+```
+
 ## Transport and endpoints
 
 - Conversation API (v2): `/api/v2/conversations/:id/{socket|message|resync|debug|rtk-token|summary}` proxied to the DO in [`apps/worker/src/index.ts`](../apps/worker/src/index.ts).

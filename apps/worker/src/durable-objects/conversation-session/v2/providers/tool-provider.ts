@@ -264,12 +264,26 @@ export function createToolProvider(config: ToolProviderConfig): ToolProvider {
           continue;
         }
 
+        // Transform acknowledgement from tool-definitions format to v2 session format
+        // Both use the same pattern: function receives state and returns string | null
+        // tool-definitions receives DomainState (Record<string, unknown>)
+        // v2 session receives SessionState which has domainState: Record<string, unknown>
+        // We just need to extract domainState and pass it through
+        let v2Acknowledgement: ToolDefinition["acknowledgement"];
+        if (typeof definition.acknowledgement === "function") {
+          const originalFn = definition.acknowledgement;
+          v2Acknowledgement = (sessionState: SessionState) =>
+            originalFn(sessionState.domainState);
+        } else {
+          v2Acknowledgement = definition.acknowledgement;
+        }
+
         tools.push({
           definition: {
             name: toolName,
             description: definition.description,
             parameters: schemaToParameters(definition.inputSchema),
-            acknowledgement: definition.acknowledgement,
+            acknowledgement: v2Acknowledgement,
           },
           execute: createExecutor(toolName, config),
         });

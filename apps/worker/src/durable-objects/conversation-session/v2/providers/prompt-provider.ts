@@ -119,7 +119,28 @@ export function createPromptProvider(
         "",
       ];
 
-      if (!verified) {
+      if (verified) {
+        lines.push(
+          "## Verified Customer (IMPORTANT)",
+          "The customer is ALREADY VERIFIED. You have full access to their account.",
+          "",
+          "DO NOT ask for:",
+          "- Address confirmation",
+          "- Phone number",
+          "- ZIP code",
+          "- Name confirmation",
+          "- Any other account verification details",
+          "",
+          "When the customer asks about appointments, reschedule, cancel, or account info:",
+          "- Use your tools DIRECTLY to look up the information",
+          "- Do NOT ask clarifying questions unless truly needed (e.g., they have multiple appointments and you need to know which one)",
+          "- Present the information from tool results naturally",
+          "",
+          'BAD: "Can you please confirm your address so I can look that up?"',
+          'GOOD: "Let me pull up your appointments." *calls tool* "I see you have..."',
+          "",
+        );
+      } else {
         lines.push(
           "## Verification Required",
           "The customer is NOT verified. You can only:",

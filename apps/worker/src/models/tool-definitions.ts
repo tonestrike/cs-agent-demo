@@ -23,8 +23,15 @@ type ToolDefinition = {
   inputSchema: z.ZodTypeAny;
   outputSchema: z.ZodTypeAny;
   missingArgsMessage: string;
-  /** Brief message to show while tool is executing (e.g., "Looking up your appointments...") */
-  acknowledgement?: string;
+  /**
+   * Brief message to show while tool is executing.
+   * Can be a string (always show) or a function that receives the domain state
+   * and returns string | null (return null to skip acknowledgement if data is cached).
+   *
+   * Domain-specific logic (e.g., checking for cached appointments) belongs here
+   * in the tool definition, not in the agent layer.
+   */
+  acknowledgement?: string | ((domainState: DomainState) => string | null);
   /** Tool only available after customer account is verified */
   requiresVerification?: boolean;
   /** Tool only available when a workflow is active (e.g., selecting from a list) */
@@ -36,6 +43,16 @@ export type ToolGatingState = {
   hasActiveWorkflow: boolean;
   allowUnverifiedEscalation?: boolean;
 };
+
+/**
+ * Domain state passed to conditional acknowledgements.
+ * This is the raw domainState from the session - a generic record
+ * that tool definitions can inspect to make domain-specific decisions.
+ *
+ * Note: All domain knowledge lives in tool-definitions.ts (configuration layer),
+ * not in the agent itself. The agent passes domainState opaquely.
+ */
+export type DomainState = Record<string, unknown>;
 
 const fiveDigitZip = z.string().regex(/^\d{5}$/);
 
@@ -82,7 +99,13 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: appointmentResultSchema,
     missingArgsMessage: "Customer ID is required to load appointments.",
     requiresVerification: true,
-    acknowledgement: "Pulling up your next appointment...",
+    acknowledgement: (domainState) => {
+      const conversation = domainState["conversation"] as
+        | { appointments?: unknown[] }
+        | undefined;
+      const hasAppointments = Boolean(conversation?.appointments?.length);
+      return hasAppointments ? null : "Pulling up your next appointment...";
+    },
   },
   "crm.listUpcomingAppointments": {
     description: "List upcoming appointments for a customer.",
@@ -93,7 +116,13 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: appointmentListResultSchema,
     missingArgsMessage: "Customer ID is required to list appointments.",
     requiresVerification: true,
-    acknowledgement: "Let me list your upcoming appointments.",
+    acknowledgement: (domainState) => {
+      const conversation = domainState["conversation"] as
+        | { appointments?: unknown[] }
+        | undefined;
+      const hasAppointments = Boolean(conversation?.appointments?.length);
+      return hasAppointments ? null : "Let me list your upcoming appointments.";
+    },
   },
   "crm.getAppointmentById": {
     description: "Fetch a specific appointment by ID.",
@@ -101,7 +130,13 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: appointmentResultSchema,
     missingArgsMessage: "Appointment ID is required to load that appointment.",
     requiresVerification: true,
-    acknowledgement: "Checking that appointment now.",
+    acknowledgement: (domainState) => {
+      const conversation = domainState["conversation"] as
+        | { appointments?: unknown[] }
+        | undefined;
+      const hasAppointments = Boolean(conversation?.appointments?.length);
+      return hasAppointments ? null : "Checking that appointment now.";
+    },
   },
   "crm.getOpenInvoices": {
     description: "Fetch open invoices for a customer.",
@@ -124,7 +159,13 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     outputSchema: availableSlotListResultSchema,
     missingArgsMessage: "Customer ID is required to look up available slots.",
     requiresVerification: true,
-    acknowledgement: "Looking up available time windows for you.",
+    acknowledgement: (domainState) => {
+      const availableSlots = domainState["availableSlots"] as
+        | unknown[]
+        | undefined;
+      const hasSlots = Boolean(availableSlots?.length);
+      return hasSlots ? null : "Looking up available time windows for you.";
+    },
   },
   "crm.rescheduleAppointment": {
     description: "Reschedule an appointment to a chosen slot.",

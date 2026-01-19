@@ -667,7 +667,12 @@ export class ConversationSessionV2 {
         // will naturally include the request for ZIP code
         // Also skip if tool has no acknowledgement defined
         if (tool.definition.acknowledgement && turn.isVerified) {
-          turn.acknowledgementPrompts.push(tool.definition.acknowledgement);
+          // Support conditional acknowledgements - function returns null to skip
+          const ack = tool.definition.acknowledgement;
+          const ackText = typeof ack === "function" ? ack(sessionState) : ack;
+          if (ackText) {
+            turn.acknowledgementPrompts.push(ackText);
+          }
         }
 
         // Emit aggregated acknowledgement once per turn (only if verified and has prompts)
