@@ -1,0 +1,115 @@
+/**
+ * Factory functions for ConversationSession v2
+ *
+ * Provides convenient factory functions to create fully-wired
+ * session instances with all dependencies configured.
+ */
+
+import type { Ai, DurableObjectState } from "@cloudflare/workers-types";
+import type { AgentPromptConfig } from "@pestcall/core";
+import type { createDependencies } from "../../../context";
+import type { Logger } from "../../../logger";
+import type { KnowledgeRetriever } from "../../../rag";
+import { createPromptProvider } from "./providers/prompt-provider";
+import { createToolProvider } from "./providers/tool-provider";
+import { type ConversationSessionV2, SessionBuilder } from "./session";
+
+/**
+ * Configuration for creating a v2 session.
+ */
+export type SessionFactoryConfig = {
+  /** Durable object state */
+  durableState: DurableObjectState;
+  /** Workers AI binding */
+  ai?: Ai;
+  /** Logger instance */
+  logger: Logger;
+  /** Dependencies from createDependencies() */
+  deps: ReturnType<typeof createDependencies>;
+  /** Agent configuration */
+  agentConfig: AgentPromptConfig;
+  /** Stream ID for cancellation */
+  streamId?: number;
+  /** Environment bindings */
+  env?: Record<string, unknown>;
+  /** Knowledge retriever for RAG (optional) */
+  knowledgeRetriever?: KnowledgeRetriever;
+};
+
+/**
+ * Create a fully-configured ConversationSession v2.
+ *
+ * This is the main factory function that wires up:
+ * - Tool provider with existing tool handlers
+ * - Prompt provider with agent configuration
+ * - Session with all dependencies
+ *
+ * Usage:
+ * ```ts
+ * const session = createSession({
+ *   durableState: this.state,
+ *   ai: env.AI,
+ *   logger: this.logger,
+ *   deps: createDependencies(env, ctx),
+ *   agentConfig: await deps.agentConfig.get(defaults),
+ * });
+ *
+ * const response = await session.fetch(request);
+ * ```
+ */
+export function createSession(
+  config: SessionFactoryConfig,
+): ConversationSessionV2 {
+  const {
+    durableState,
+    ai,
+    logger,
+    deps,
+    agentConfig,
+    streamId = 1,
+    env = {},
+    knowledgeRetriever,
+  } = config;
+
+  // Create providers
+  const toolProvider = createToolProvider({
+    deps,
+    streamId,
+  });
+
+  const promptProvider = createPromptProvider({
+    agentConfig,
+    knowledgeRetriever,
+  });
+
+  // Build session
+  return SessionBuilder.create(durableState)
+    .withLogger(logger)
+    .withAI(ai)
+    .withToolProvider(toolProvider)
+    .withPromptProvider(promptProvider)
+    .withEnv(env)
+    .build();
+}
+
+/**
+ * Create a minimal session for testing.
+ *
+ * This creates a session with empty providers - useful for
+ * testing the session mechanics without domain logic.
+ */
+export function createTestSession(
+  durableState: DurableObjectState,
+  logger: Logger,
+): ConversationSessionV2 {
+  const { createEmptyToolProvider } = require("./providers/tool-provider");
+  const {
+    createMinimalPromptProvider,
+  } = require("./providers/prompt-provider");
+
+  return SessionBuilder.create(durableState)
+    .withLogger(logger)
+    .withToolProvider(createEmptyToolProvider())
+    .withPromptProvider(createMinimalPromptProvider())
+    .build();
+}

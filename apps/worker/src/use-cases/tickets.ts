@@ -1,28 +1,32 @@
 import {
+  type TicketCategory,
   TicketEventType,
   type TicketEventTypeValue,
+  type TicketPriority,
+  TicketSource,
+  type TicketStatus,
   applyStatusTransition,
   createTicket,
 } from "@pestcall/core";
 
 import type { createTicketRepository } from "../repositories";
 
-export type CreateTicketInput = {
+type CreateTicketInput = {
   subject: string;
   description: string;
-  priority?: "low" | "normal" | "high" | "urgent";
-  category?: "appointment" | "billing" | "service" | "general" | "unknown";
+  priority?: TicketPriority;
+  category?: TicketCategory;
   customerCacheId?: string;
   phoneE164?: string;
   assignee?: string;
-  source?: "agent" | "phone" | "web" | "internal";
+  source?: TicketSource;
   externalRef?: string;
 };
 
 export const listTickets = (
   repo: ReturnType<typeof createTicketRepository>,
   params: {
-    status?: "open" | "in_progress" | "resolved";
+    status?: TicketStatus;
     q?: string;
     customerCacheId?: string;
     phoneE164?: string;
@@ -53,7 +57,7 @@ export const createTicketUseCase = async (
     customerCacheId: input.customerCacheId,
     phoneE164: input.phoneE164,
     assignee: input.assignee,
-    source: input.source ?? "agent",
+    source: input.source ?? TicketSource.Agent,
     externalRef: input.externalRef,
   });
 
@@ -89,7 +93,7 @@ export const setTicketStatus = async (
   repo: ReturnType<typeof createTicketRepository>,
   input: {
     ticketId: string;
-    status: "open" | "in_progress" | "resolved";
+    status: TicketStatus;
   },
   nowIso = new Date().toISOString(),
 ) => {

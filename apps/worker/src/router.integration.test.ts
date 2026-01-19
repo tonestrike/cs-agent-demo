@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 import { getPlatformProxy } from "wrangler";
 
 import { RPCHandler } from "@orpc/server/fetch";
+import { TicketSource, TicketStatus } from "@pestcall/core";
 import { createContext } from "./context";
 import type { Env } from "./env";
-import { createAppointmentRepository } from "./repositories/appointments";
 import { router } from "./router";
 
 type RpcResponse<T> = {
@@ -104,11 +104,11 @@ describe("tickets RPC", () => {
       }>(platform, "tickets/create", {
         subject: "Ants in the kitchen",
         description: "Customer reports ants near the sink.",
-        source: "internal",
+        source: TicketSource.Internal,
       });
 
       expect(created.subject).toBe("Ants in the kitchen");
-      expect(created.status).toBe("open");
+      expect(created.status).toBe(TicketStatus.Open);
 
       const fetched = await callRpc<{ id: string; status: string }>(
         platform,
@@ -135,14 +135,129 @@ describe("tickets RPC", () => {
         "tickets/setStatus",
         {
           ticketId: created.id,
-          status: "resolved",
+          status: TicketStatus.Resolved,
         },
       );
 
-      expect(updated.status).toBe("resolved");
+      expect(updated.status).toBe(TicketStatus.Resolved);
     } finally {
       await platform.dispose();
     }
+  });
+});
+
+describe("workflow RPC", () => {
+  it("starts a verification workflow and accepts zip events", async () => {
+    const platform = await createTestEnv();
+    if (!platform.env.VERIFY_WORKFLOW) {
+      return;
+    }
+
+    const start = await callRpc<{ instanceId: string }>(
+      platform,
+      "workflows/verify/start",
+      {
+        callSessionId: "call_test_verify",
+        phoneE164: "+14155552671",
+        intent: "verify",
+      },
+    );
+
+    expect(start.instanceId).toBeTypeOf("string");
+
+    await callRpc<{ ok: boolean; instanceId: string }>(
+      platform,
+      "workflows/verify/sendZip",
+      {
+        instanceId: start.instanceId,
+        payload: { zipCode: "94105" },
+      },
+    );
+  });
+
+  it("starts a reschedule workflow and accepts events", async () => {
+    const platform = await createTestEnv();
+    if (!platform.env.RESCHEDULE_WORKFLOW) {
+      return;
+    }
+
+    const start = await callRpc<{ instanceId: string }>(
+      platform,
+      "workflows/reschedule/start",
+      {
+        callSessionId: "call_test_reschedule",
+        customerId: "cust_001",
+        intent: "reschedule",
+        message: "Please move my appointment.",
+      },
+    );
+
+    expect(start.instanceId).toBeTypeOf("string");
+
+    await callRpc<{ ok: boolean; instanceId: string }>(
+      platform,
+      "workflows/reschedule/selectAppointment",
+      {
+        instanceId: start.instanceId,
+        payload: { appointmentId: "appt_001" },
+      },
+    );
+
+    await callRpc<{ ok: boolean; instanceId: string }>(
+      platform,
+      "workflows/reschedule/selectSlot",
+      {
+        instanceId: start.instanceId,
+        payload: { slotId: "slot_001" },
+      },
+    );
+
+    await callRpc<{ ok: boolean; instanceId: string }>(
+      platform,
+      "workflows/reschedule/confirm",
+      {
+        instanceId: start.instanceId,
+        payload: { confirmed: true },
+      },
+    );
+  });
+
+  it("starts a cancel workflow and accepts events", async () => {
+    const platform = await createTestEnv();
+    if (!platform.env.CANCEL_WORKFLOW) {
+      return;
+    }
+
+    const start = await callRpc<{ instanceId: string }>(
+      platform,
+      "workflows/cancel/start",
+      {
+        callSessionId: "call_test_cancel",
+        customerId: "cust_001",
+        intent: "cancel",
+        message: "Cancel my appointment.",
+      },
+    );
+
+    expect(start.instanceId).toBeTypeOf("string");
+
+    await callRpc<{ ok: boolean; instanceId: string }>(
+      platform,
+      "workflows/cancel/selectAppointment",
+      {
+        instanceId: start.instanceId,
+        payload: { appointmentId: "appt_001" },
+      },
+    );
+
+    await callRpc<{ ok: boolean; instanceId: string }>(
+      platform,
+      "workflows/cancel/confirm",
+      {
+        instanceId: start.instanceId,
+        payload: { confirmed: true },
+      },
+    );
   });
 });
 
@@ -200,62 +315,6 @@ describe("crm RPC", () => {
       });
 
       expect(slots.length).toBeGreaterThan(0);
-    } finally {
-      await platform.dispose();
-    }
-  });
-});
-
-describe("agent RPC", () => {
-  it("creates a call session and replies with appointment info", async () => {
-    const platform = await createTestEnv();
-    try {
-      const appointments = createAppointmentRepository(platform.env.DB);
-      const now = new Date().toISOString();
-      await appointments.insert({
-        id: "appt_001",
-        customerId: "cust_001",
-        phoneE164: "+14155552671",
-        addressSummary: "742 Evergreen Terrace",
-        date: "2025-02-10",
-        timeWindow: "10:00-12:00",
-        status: "scheduled",
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      const response = await callRpc<{
-        callSessionId: string;
-        replyText: string;
-      }>(platform, "agent/message", {
-        phoneNumber: "+14155552671",
-        text: "When is my next appointment?",
-      });
-
-      expect(response.callSessionId.length).toBeGreaterThan(0);
-      expect(response.replyText.toLowerCase()).toContain("zip");
-
-      const verified = await callRpc<{
-        callSessionId: string;
-        replyText: string;
-      }>(platform, "agent/message", {
-        callSessionId: response.callSessionId,
-        phoneNumber: "+14155552671",
-        text: "94107",
-      });
-
-      expect(verified.replyText.length).toBeGreaterThan(0);
-
-      const followUp = await callRpc<{
-        callSessionId: string;
-        replyText: string;
-      }>(platform, "agent/message", {
-        callSessionId: response.callSessionId,
-        phoneNumber: "+14155552671",
-        text: "When is my next appointment?",
-      });
-
-      expect(followUp.replyText).toContain("Your next appointment is");
     } finally {
       await platform.dispose();
     }

@@ -32,7 +32,11 @@ export const callProcedures = {
     .input(callIdInputSchema)
     .output(callContextOutputSchema)
     .handler(async ({ input, context }) => {
-      return getCallContext(context.deps.calls, input.callSessionId);
+      return getCallContext(
+        context.deps.calls,
+        context.deps.logger,
+        input.callSessionId,
+      );
     }),
   findByTicketId: authedProcedure
     .input(callTicketLookupInputSchema)

@@ -21,6 +21,9 @@
       },
       "style": {
         "noUnusedTemplateLiteral": "error"
+      },
+      "complexity": {
+        "useLiteralKeys": "off"
       }
     }
   },

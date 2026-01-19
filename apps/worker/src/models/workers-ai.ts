@@ -12,9 +12,69 @@ import {
   agentRouteSchema,
   agentToolCallSchema,
 } from "./types";
-import { responseToText } from "./workers-ai-language-model";
 
-const MAX_NEW_TOKENS = 512;
+const DEFAULT_MAX_TOKENS = 512;
+
+/**
+ * Generation parameters for Workers AI model calls.
+ * These control the model's output behavior.
+ */
+export type GenerationParams = {
+  /** Maximum tokens to generate (default: 512) */
+  maxTokens?: number;
+  /** Controls randomness. Higher = more random (0-2, default: 0.7) */
+  temperature?: number;
+  /** Nucleus sampling. Lower = more focused (0-1, default: 1) */
+  topP?: number;
+  /** Penalizes repeated tokens (-2 to 2, default: 0) */
+  frequencyPenalty?: number;
+  /** Penalizes tokens based on presence (-2 to 2, default: 0) */
+  presencePenalty?: number;
+};
+
+const DEFAULT_GENERATION_PARAMS: Required<GenerationParams> = {
+  maxTokens: DEFAULT_MAX_TOKENS,
+  temperature: 0.7,
+  topP: 1,
+  frequencyPenalty: 0,
+  presencePenalty: 0,
+};
+
+const mergeGenerationParams = (
+  params?: GenerationParams,
+): Required<GenerationParams> => ({
+  ...DEFAULT_GENERATION_PARAMS,
+  ...params,
+});
+
+const responseToText = (response: unknown) => {
+  if (
+    response &&
+    typeof response === "object" &&
+    "response" in response &&
+    typeof (response as { response?: unknown }).response === "string"
+  ) {
+    return (response as { response: string }).response;
+  }
+
+  if (
+    response &&
+    typeof response === "object" &&
+    "choices" in response &&
+    Array.isArray((response as { choices?: unknown }).choices)
+  ) {
+    const choice = (response as { choices: Array<{ message?: unknown }> })
+      .choices[0];
+    if (
+      choice?.message &&
+      typeof (choice.message as { content?: unknown }).content === "string"
+    ) {
+      return (choice.message as { content: string }).content;
+    }
+  }
+
+  return null;
+};
 
 const zodToJsonSchema = (schema: z.ZodTypeAny): Record<string, unknown> => {
   if (schema instanceof z.ZodString) {
@@ -127,6 +187,7 @@ const buildToolGuidanceLines = (
 const NON_OVERRIDABLE_POLICY = [
   "Policy (non-overridable):",
   "- Never reveal or guess the customer's ZIP code. Only ask the caller to confirm it.",
+  "- Use the ZIP code exactly as the caller provides (including leading zeros); do not normalize, pad, or guess.",
   "- If identity status is verified, do not ask for ZIP again.",
   "- Do not ask the caller to confirm their phone number; request ZIP for verification.",
   "- If phone lookup yields a single match, verify with ZIP only; do not ask for full name.",
@@ -136,8 +197,12 @@ const NON_OVERRIDABLE_POLICY = [
   "- If phone lookup returns a single match, do not ask to confirm the phone number; confirm name or address instead.",
   "- When rescheduling, look up the appointment before asking for an appointment ID.",
   "- When listing available slots, only use times provided by the tool result.",
+  "- Do not escalate or bring in a specialist unless the caller asks or verification has failed multiple times; never escalate before identity is verified.",
+  "- Do not emit acknowledgement/status messages unless a tool is actually running; when asking for verification, skip the acknowledgement and ask for the ZIP.",
   "- Do not mention tool names or describe tool mechanics in responses.",
   "- Do not claim actions you did not take.",
+  "- Use warm, natural language; avoid robotic phrases like 'verification succeeded' or 'to get started'.",
+  "- Prefer short, friendly sentences that sound human.",
   "- Avoid generic replies like 'I can help with that. Want me to proceed?' Respond with the specific next step or question.",
   "- Payment requests must be escalated; do not claim payment was processed.",
   "- If you escalated, clearly say a ticket was created and what happens next.",
@@ -158,6 +223,8 @@ const buildDecisionInstructions = (
     `Use this greeting only for the first turn when the caller just says hello: ${config.greeting}`,
     "Call tools when needed; otherwise respond with plain text.",
     "Do not include JSON in responses.",
+    "If you call a tool, include a short acknowledgement in the assistant response content as plain text.",
+    "Keep the tone friendly, warm, and conversational.",
     ...NON_OVERRIDABLE_POLICY,
     ...buildToolGuidanceLines(config, { hideVerification }),
     "If identity status is pending or there is a single phone match, ask only for the 5-digit ZIP code. Do not ask if they are a new or existing customer.",
@@ -165,7 +232,11 @@ const buildDecisionInstructions = (
     `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
     "Ask follow-up questions when details are missing.",
     "Prefer tool calls over assumptions or guesses.",
-    "Never include tool names like crm.* or agent.* in responses.",
+    "Never include tool names like crm.* or agent.* in responses except when calling a tool.",
+    "CRITICAL: When you need to perform an action (verify, cancel, reschedule, list), you MUST call the tool. Just SAYING you did something does NOT make it happen.",
+    "If you say 'I cancelled your appointment' WITHOUT calling crm.cancelAppointment, you are LYING to the customer.",
+    "NEVER skip a required tool call. If you need to cancel, you MUST call crm.cancelAppointment FIRST.",
+    "Avoid repeating acknowledgements back-to-back.",
     "If the caller is just greeting or chatting, respond briefly and ask how you can help.",
     "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
     `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
@@ -184,14 +255,15 @@ const buildRespondInstructions = (
     `Company: ${config.companyName}.`,
     `Tone: ${config.tone}.`,
     `Use this greeting only for the first turn when the caller just says hello: ${config.greeting}`,
-    "Respond conversationally, keeping it concise and clear.",
+    "Respond conversationally, keeping it concise, warm, and clear.",
     "Use the tool result to answer the customer or ask a follow-up.",
     "When a customer accepts help, move forward with the next step or ask for the missing detail instead of asking if you should proceed.",
-    "Return a JSON object with an answer string and optional citations array.",
+    "Respond with plain text only. Do not return JSON.",
     ...NON_OVERRIDABLE_POLICY,
     `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
     "Never include tool names or internal system references in responses.",
     "Do not describe internal actions like checking tools or databases in parentheses.",
+    "Avoid stiff phrases like 'verification succeeded' or 'to get started'.",
     "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
     `Customer: ${input.customer.displayName} (${input.customer.phoneE164})`,
     `HasContext: ${input.hasContext ? "true" : "false"}`,
@@ -217,7 +289,7 @@ const buildRouteInstructions = (input: AgentModelInput) => {
 };
 
 const buildSelectionInstructions = (
-  kind: "appointment" | "slot",
+  kind: "appointment" | "slot" | "confirmation",
   options: Array<{ label: string }>,
 ) => {
   const optionLines = options
@@ -235,9 +307,12 @@ const buildSelectionInstructions = (
 
 const buildStatusInstructions = (contextHint?: string) => {
   return [
-    "Write one short sentence that acknowledges the caller and says you are checking.",
+    "You are a friendly, helpful assistant.",
+    "Write one short, warm sentence that acknowledges the caller and says you are looking into their request.",
+    "Sound human and supportive; avoid robotic phrasing like 'checking now'.",
+    "Do not stack multiple acknowledgements; keep it to a single sentence.",
     "Do not mention tools, internal systems, or IDs.",
-    "Keep it friendly and concise.",
+    "Keep it concise (one sentence).",
     contextHint ? `Context: ${contextHint}.` : null,
     'Return JSON only. Schema: {"message":"string"}.',
   ]
@@ -245,10 +320,64 @@ const buildStatusInstructions = (contextHint?: string) => {
     .join("\n");
 };
 
-const responseSchema = z.object({
-  answer: z.string().min(1),
-  citations: z.array(z.string().url()).optional(),
-});
+const extractAcknowledgement = (text: string | null | undefined) => {
+  const trimmed = text?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    return null;
+  }
+  return trimmed;
+};
+
+/**
+ * Extract tool call from text-based roleplay patterns.
+ * The model sometimes outputs *call crm.toolName* instead of using the function calling API.
+ * This function detects and extracts the tool name from such patterns.
+ */
+const extractTextBasedToolCall = (
+  text: string | null | undefined,
+  logger: Logger,
+): { toolName: string; acknowledgement: string } | null => {
+  if (!text) return null;
+
+  // Pattern matches: *call crm.toolName*, *crm.toolName(args)*, *crm.toolName*
+  const patterns = [
+    /\*call\s+(crm\.[a-zA-Z]+|agent\.[a-zA-Z]+|workflow\.[a-zA-Z]+)\*/gi,
+    /\*(crm\.[a-zA-Z]+|agent\.[a-zA-Z]+|workflow\.[a-zA-Z]+)\s*\([^)]*\)\*/gi,
+    /\*(crm\.[a-zA-Z]+|agent\.[a-zA-Z]+|workflow\.[a-zA-Z]+)\*/gi,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      // Extract the tool name from the first match
+      const toolMatch = match[0].match(
+        /(?:call\s+)?(crm\.[a-zA-Z]+|agent\.[a-zA-Z]+|workflow\.[a-zA-Z]+)/i,
+      );
+      if (toolMatch?.[1]) {
+        const toolName = toolMatch[1];
+        // Remove all roleplay patterns from text to get the acknowledgement
+        let acknowledgement = text;
+        for (const p of patterns) {
+          acknowledgement = acknowledgement.replace(p, "").trim();
+        }
+        // Clean up extra whitespace and newlines
+        acknowledgement = acknowledgement.replace(/\s+/g, " ").trim();
+
+        logger.info(
+          { extractedToolName: toolName, pattern: match[0] },
+          "workers_ai.text_tool_extraction.detected",
+        );
+
+        return { toolName, acknowledgement };
+      }
+    }
+  }
+
+  return null;
+};
 
 const selectionSchema = z.object({
   index: z.number().int().nullable(),
@@ -258,16 +387,6 @@ const selectionSchema = z.object({
 const statusSchema = z.object({
   message: z.string().min(1),
 });
-
-const responseJsonSchema = {
-  type: "object",
-  properties: {
-    answer: { type: "string" },
-    citations: { type: "array", items: { type: "string" } },
-  },
-  required: ["answer"],
-  additionalProperties: false,
-};
 
 const selectionJsonSchema = {
   type: "object",
@@ -331,7 +450,10 @@ const ensureJsonModeModel = (modelId: string) => {
   }
 };
 
-const responseToJsonObject = <T>(response: unknown): T | null => {
+const responseToJsonObject = <T>(
+  response: unknown,
+  logger: Logger,
+): T | null => {
   if (
     response &&
     typeof response === "object" &&
@@ -342,7 +464,14 @@ const responseToJsonObject = <T>(response: unknown): T | null => {
     if (typeof value === "string") {
       try {
         return JSON.parse(value) as T;
-      } catch {
+      } catch (error) {
+        logger.error(
+          {
+            error: error instanceof Error ? error.message : "unknown",
+            payload: value.slice(0, 240),
+          },
+          "workers-ai.response.parse_failed",
+        );
         return null;
       }
     }
@@ -376,10 +505,13 @@ export const createWorkersAiAdapter = (
   model: string,
   config: AgentPromptConfig,
   logger: Logger,
+  generationParams?: GenerationParams,
 ): ModelAdapter => {
   if (!ai) {
     throw new AppError("AI binding not configured", { code: "config_error" });
   }
+
+  const params = mergeGenerationParams(generationParams);
 
   return {
     name: "workers-ai",
@@ -396,14 +528,20 @@ export const createWorkersAiAdapter = (
         const toolPayload = {
           messages: buildMessages(instructions, input.context, input.messages),
           tools: workersAiTools,
-          max_new_tokens: MAX_NEW_TOKENS,
-          max_tokens: MAX_NEW_TOKENS,
+          max_new_tokens: params.maxTokens,
+          max_tokens: params.maxTokens,
+          temperature: params.temperature,
+          top_p: params.topP,
+          frequency_penalty: params.frequencyPenalty,
+          presence_penalty: params.presencePenalty,
         };
         logger.info(
           {
             model,
-            max_new_tokens: MAX_NEW_TOKENS,
-            max_tokens: MAX_NEW_TOKENS,
+            max_new_tokens: params.maxTokens,
+            max_tokens: params.maxTokens,
+            temperature: params.temperature,
+            top_p: params.topP,
             messageCount: toolPayload.messages.length,
             toolCount: toolPayload.tools.length,
           },
@@ -414,40 +552,79 @@ export const createWorkersAiAdapter = (
           tools: toolPayload.tools,
           max_new_tokens: toolPayload.max_new_tokens,
           max_tokens: toolPayload.max_tokens,
+          temperature: toolPayload.temperature,
+          top_p: toolPayload.top_p,
+          frequency_penalty: toolPayload.frequency_penalty,
+          presence_penalty: toolPayload.presence_penalty,
         });
+        const responseText = responseToText(response);
         const responseWithTools = response as {
           tool_calls?: Array<{ name: string; arguments?: unknown }>;
         };
         const toolCalls = responseWithTools.tool_calls ?? [];
+        logger.info(
+          {
+            toolCallCount: toolCalls.length,
+            responseTextPreview: responseText
+              ? responseText.slice(0, 160)
+              : null,
+          },
+          "workers_ai.tool_call.result",
+        );
         const toolCall = toolCalls[0];
         if (toolCall?.name) {
           const validated = agentToolCallSchema.safeParse({
             type: "tool_call",
             toolName: toolCall.name,
             arguments: toolCall.arguments ?? {},
+            acknowledgement: extractAcknowledgement(responseToText(response)),
           });
           if (validated.success) {
             return validated.data;
           }
         }
+
+        // Check for text-based tool calls when the model writes them as roleplay
         const text = responseToText(response);
+        const textBasedTool = extractTextBasedToolCall(text, logger);
+        if (textBasedTool) {
+          const validated = agentToolCallSchema.safeParse({
+            type: "tool_call",
+            toolName: textBasedTool.toolName,
+            arguments: {},
+            acknowledgement: textBasedTool.acknowledgement || undefined,
+          });
+          if (validated.success) {
+            logger.info(
+              { toolName: textBasedTool.toolName },
+              "workers_ai.text_tool_extraction.returning_tool_call",
+            );
+            return validated.data;
+          }
+        }
+
+        // Return empty text if no meaningful response - let conversation session add diagnostics
         return {
           type: "final",
-          text:
-            text?.trim() ||
-            "I could not interpret the request. Can you rephrase?",
+          text: text?.trim() || "",
         };
-      } catch {
+      } catch (error) {
+        logger.error(
+          {
+            error: error instanceof Error ? error.message : "unknown",
+          },
+          "workers_ai.tool_call.fallback",
+        );
         const fallbackPayload = {
           messages: buildMessages(instructions, input.context, input.messages),
-          max_new_tokens: MAX_NEW_TOKENS,
-          max_tokens: MAX_NEW_TOKENS,
+          max_new_tokens: params.maxTokens,
+          max_tokens: params.maxTokens,
         };
         logger.info(
           {
             model,
-            max_new_tokens: MAX_NEW_TOKENS,
-            max_tokens: MAX_NEW_TOKENS,
+            max_new_tokens: params.maxTokens,
+            max_tokens: params.maxTokens,
             messageCount: fallbackPayload.messages.length,
           },
           "workers_ai.tool_call.fallback_payload",
@@ -458,11 +635,10 @@ export const createWorkersAiAdapter = (
           max_tokens: fallbackPayload.max_tokens,
         });
         const text = responseToText(fallbackResponse);
+        // Return empty text if no meaningful response - let conversation session add diagnostics
         return {
           type: "final",
-          text: text?.trim()
-            ? text
-            : "I could not interpret the request. Can you rephrase?",
+          text: text?.trim() || "",
         };
       }
     },
@@ -478,30 +654,24 @@ export const createWorkersAiAdapter = (
       logger.info(
         {
           model,
-          max_new_tokens: MAX_NEW_TOKENS,
-          max_tokens: MAX_NEW_TOKENS,
+          max_new_tokens: params.maxTokens,
+          max_tokens: params.maxTokens,
           messageCount: 1 + (input.messages?.length ?? 0),
         },
         "workers_ai.respond.payload",
       );
       const response = await ai.run(model as keyof AiModels, {
         messages: buildMessages(instructions, input.context, input.messages),
-        response_format: {
-          type: "json_schema",
-          json_schema: responseJsonSchema,
-        },
-        max_new_tokens: MAX_NEW_TOKENS,
-        max_tokens: MAX_NEW_TOKENS,
+        max_new_tokens: params.maxTokens,
+        max_tokens: params.maxTokens,
       });
-      const parsed =
-        responseToJsonObject<z.infer<typeof responseSchema>>(response);
-      const validated = responseSchema.safeParse(parsed);
-      if (!validated.success) {
-        throw new AppError("Invalid JSON response", {
-          code: "JSON_MODE_FAILED",
-        });
+      const text = responseToText(response)?.trim();
+      if (text) {
+        return text;
       }
-      return validated.data.answer.trim();
+      throw new AppError("Empty response from model", {
+        code: "RESPOND_EMPTY",
+      });
     },
     async route(input: AgentModelInput) {
       if (!ai) {
@@ -514,8 +684,8 @@ export const createWorkersAiAdapter = (
       logger.info(
         {
           model,
-          max_new_tokens: MAX_NEW_TOKENS,
-          max_tokens: MAX_NEW_TOKENS,
+          max_new_tokens: params.maxTokens,
+          max_tokens: params.maxTokens,
         },
         "workers_ai.route.payload",
       );
@@ -530,11 +700,13 @@ export const createWorkersAiAdapter = (
           type: "json_schema",
           json_schema: routeJsonSchema,
         },
-        max_new_tokens: MAX_NEW_TOKENS,
-        max_tokens: MAX_NEW_TOKENS,
+        max_new_tokens: params.maxTokens,
+        max_tokens: params.maxTokens,
       });
-      const parsed =
-        responseToJsonObject<z.infer<typeof agentRouteSchema>>(response);
+      const parsed = responseToJsonObject<z.infer<typeof agentRouteSchema>>(
+        response,
+        logger,
+      );
       const validated = agentRouteSchema.safeParse(parsed);
       if (!validated.success) {
         throw new AppError("Invalid JSON routing response", {
@@ -554,8 +726,8 @@ export const createWorkersAiAdapter = (
       logger.info(
         {
           model,
-          max_new_tokens: MAX_NEW_TOKENS,
-          max_tokens: MAX_NEW_TOKENS,
+          max_new_tokens: params.maxTokens,
+          max_tokens: params.maxTokens,
           optionCount: input.options.length,
           kind: input.kind,
         },
@@ -579,11 +751,13 @@ export const createWorkersAiAdapter = (
           type: "json_schema",
           json_schema: selectionJsonSchema,
         },
-        max_new_tokens: MAX_NEW_TOKENS,
-        max_tokens: MAX_NEW_TOKENS,
+        max_new_tokens: params.maxTokens,
+        max_tokens: params.maxTokens,
       });
-      const parsed =
-        responseToJsonObject<z.infer<typeof selectionSchema>>(response);
+      const parsed = responseToJsonObject<z.infer<typeof selectionSchema>>(
+        response,
+        logger,
+      );
       const validated = selectionSchema.safeParse(parsed);
       if (!validated.success) {
         throw new AppError("Invalid JSON selection response", {
@@ -611,32 +785,44 @@ export const createWorkersAiAdapter = (
       logger.info(
         {
           model,
-          max_new_tokens: MAX_NEW_TOKENS,
-          max_tokens: MAX_NEW_TOKENS,
+          max_new_tokens: params.maxTokens,
+          max_tokens: params.maxTokens,
           contextHint: input.contextHint ?? null,
         },
         "workers_ai.status.payload",
       );
+      const statusMessages: Array<{
+        role: "system" | "user" | "assistant";
+        content: string;
+      }> = [
+        {
+          role: "system",
+          content: buildStatusInstructions(input.contextHint),
+        },
+      ];
+      if (input.context) {
+        statusMessages.push({ role: "system", content: input.context });
+      }
+      if (input.messages?.length) {
+        statusMessages.push(...input.messages);
+      }
+      statusMessages.push({
+        role: "user",
+        content: input.text,
+      });
       const response = await ai.run(model as keyof AiModels, {
-        messages: [
-          {
-            role: "system",
-            content: buildStatusInstructions(input.contextHint),
-          },
-          {
-            role: "user",
-            content: input.text,
-          },
-        ],
+        messages: statusMessages,
         response_format: {
           type: "json_schema",
           json_schema: statusJsonSchema,
         },
-        max_new_tokens: MAX_NEW_TOKENS,
-        max_tokens: MAX_NEW_TOKENS,
+        max_new_tokens: params.maxTokens,
+        max_tokens: params.maxTokens,
       });
-      const parsed =
-        responseToJsonObject<z.infer<typeof statusSchema>>(response);
+      const parsed = responseToJsonObject<z.infer<typeof statusSchema>>(
+        response,
+        logger,
+      );
       const validated = statusSchema.safeParse(parsed);
       if (!validated.success) {
         throw new AppError("Invalid JSON status response", {

@@ -6,6 +6,7 @@ import type {
   TicketEventTypeValue,
   TicketStatus,
 } from "@pestcall/core";
+import type { Logger } from "../logger";
 
 type JoinedCustomerRow = {
   customer_id?: string | null;
@@ -15,6 +16,7 @@ type JoinedCustomerRow = {
   customer_display_name?: string | null;
   customer_address_summary?: string | null;
   customer_zip_code?: string | null;
+  customer_participant_id?: string | null;
   customer_updated_at?: string | null;
 };
 
@@ -83,17 +85,24 @@ export type CustomerCacheRow = {
   display_name: string;
   address_summary: string | null;
   zip_code: string | null;
+  participant_id: string | null;
   updated_at: string;
 };
 
-const safeJsonParse = (value: string): Record<string, unknown> => {
+const safeJsonParse = (
+  value: string,
+  logger?: Logger,
+): Record<string, unknown> => {
   try {
     const parsed = JSON.parse(value);
     if (parsed && typeof parsed === "object") {
       return parsed as Record<string, unknown>;
     }
-  } catch {
-    // fall through
+  } catch (error) {
+    logger?.error(
+      { error: error instanceof Error ? error.message : "unknown" },
+      "db.safeJsonParse.failed",
+    );
   }
   return {};
 };
@@ -117,15 +126,16 @@ const mapJoinedCustomer = (
     phoneE164: row.customer_phone_e164,
     addressSummary: row.customer_address_summary ?? null,
     zipCode: row.customer_zip_code ?? null,
+    participantId: row.customer_participant_id ?? null,
     updatedAt: row.customer_updated_at,
   };
 };
 
-const extractCallSummary = (summary: string | null) => {
+const extractCallSummary = (summary: string | null, logger?: Logger) => {
   if (!summary) {
     return null;
   }
-  const parsed = safeJsonParse(summary) as { callSummary?: unknown };
+  const parsed = safeJsonParse(summary, logger) as { callSummary?: unknown };
   const value = parsed.callSummary;
   return typeof value === "string" ? value : null;
 };
@@ -149,17 +159,20 @@ export const mapTicketRow = (row: TicketRow): Ticket => {
   };
 };
 
-export const mapTicketEventRow = (row: TicketEventRow): TicketEvent => {
+export const mapTicketEventRow = (
+  row: TicketEventRow,
+  logger?: Logger,
+): TicketEvent => {
   return {
     id: row.id,
     ticketId: row.ticket_id,
     ts: row.ts,
     type: row.type,
-    payload: safeJsonParse(row.payload_json),
+    payload: safeJsonParse(row.payload_json, logger),
   };
 };
 
-export const mapCallSessionRow = (row: CallSessionRow) => {
+export const mapCallSessionRow = (row: CallSessionRow, logger?: Logger) => {
   return {
     id: row.id,
     startedAt: row.started_at,
@@ -169,19 +182,19 @@ export const mapCallSessionRow = (row: CallSessionRow) => {
     status: row.status,
     transport: row.transport,
     summary: row.summary ?? null,
-    callSummary: extractCallSummary(row.summary ?? null),
+    callSummary: extractCallSummary(row.summary ?? null, logger),
     customer: mapJoinedCustomer(row),
   };
 };
 
-export const mapCallTurnRow = (row: CallTurnRow) => {
+export const mapCallTurnRow = (row: CallTurnRow, logger?: Logger) => {
   return {
     id: row.id,
     callSessionId: row.call_session_id,
     ts: row.ts,
     speaker: row.speaker,
     text: row.text,
-    meta: safeJsonParse(row.meta_json),
+    meta: safeJsonParse(row.meta_json, logger),
   };
 };
 
@@ -210,6 +223,7 @@ export const mapCustomerCacheRow = (row: CustomerCacheRow): CustomerCache => {
     phoneE164: row.phone_e164,
     addressSummary: row.address_summary ?? null,
     zipCode: row.zip_code ?? null,
+    participantId: row.participant_id ?? null,
     updatedAt: row.updated_at,
   };
 };

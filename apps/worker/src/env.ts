@@ -1,10 +1,8 @@
 import { z } from "zod";
 
-export const crmProviderSchema = z.enum(["mock", "http"]);
-export type CrmProvider = z.infer<typeof crmProviderSchema>;
-
-export const agentModelSchema = z.enum(["mock", "workers-ai", "openrouter"]);
-export const agentToneSchema = z.enum(["warm", "neutral", "direct"]);
+const crmProviderSchema = z.enum(["mock", "http", "d1"]);
+const agentModelSchema = z.enum(["mock", "workers-ai", "openrouter"]);
+const agentToneSchema = z.enum(["warm", "neutral", "direct"]);
 
 export const envSchema = z.object({
   DB: z.custom<D1Database>(),
@@ -14,6 +12,8 @@ export const envSchema = z.object({
   CRM_BASE_URL: z.string().optional(),
   CRM_API_KEY: z.string().optional(),
   AGENT_MODEL: agentModelSchema.optional(),
+  AGENT_INTERPRETER_MODEL: agentModelSchema.optional(),
+  AGENT_NARRATOR_MODEL: agentModelSchema.optional(),
   AGENT_TONE: agentToneSchema.optional(),
   AGENT_GREETING: z.string().optional(),
   AGENT_OFFTOPIC_MESSAGE: z.string().optional(),
@@ -22,12 +22,33 @@ export const envSchema = z.object({
   AGENT_PERSONA_SUMMARY: z.string().optional(),
   AGENT_TOOL_GUIDANCE: z.string().optional(),
   AGENT_MODEL_ID: z.string().optional(),
+  AGENT_INTERPRETER_MODEL_ID: z.string().optional(),
+  AGENT_NARRATOR_MODEL_ID: z.string().optional(),
   BUILD_ID: z.string().optional(),
   AI: z.custom<Ai>().optional(),
+  KNOWLEDGE_VECTORS: z.custom<VectorizeIndex>().optional(),
   AI_GATEWAY_ACCOUNT_ID: z.string().optional(),
   AI_GATEWAY_ID: z.string().optional(),
+  AI_GATEWAY_TOKEN: z.string().optional(),
   OPENROUTER_TOKEN: z.string().optional(),
-  PestCallAgent: z.custom<DurableObjectNamespace>().optional(),
+  OPENROUTER_REFERER: z.string().optional(),
+  OPENROUTER_TITLE: z.string().optional(),
+  OPENROUTER_BASE_URL: z.string().optional(),
+  CONVERSATION_HUB: z.custom<DurableObjectNamespace>().optional(),
+  CONVERSATION_SESSION_V2: z.custom<DurableObjectNamespace>().optional(),
+  VOICE_AGENT: z.custom<DurableObjectNamespace>().optional(),
+  RESCHEDULE_WORKFLOW: z.custom<Workflow>().optional(),
+  VERIFY_WORKFLOW: z.custom<Workflow>().optional(),
+  CANCEL_WORKFLOW: z.custom<Workflow>().optional(),
+  REALTIMEKIT_ACCOUNT_ID: z.string().optional(),
+  REALTIMEKIT_APP_ID: z.string().optional(),
+  REALTIMEKIT_MEETING_ID: z.string().optional(),
+  REALTIMEKIT_API_TOKEN: z.string().optional(),
+  REALTIMEKIT_PRESET_NAME: z.string().optional(),
+  REALTIMEKIT_API_BASE_URL: z.string().url().optional(),
+  // Voice agent API keys (optional - only needed for voice features)
+  DEEPGRAM_API_KEY: z.string().optional(),
+  ELEVENLABS_API_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -8,6 +8,16 @@ export const serviceAppointmentStatusSchema = z.enum([
   "cancelled",
 ]);
 
+export const ServiceAppointmentStatus = {
+  Scheduled: "scheduled",
+  Rescheduled: "rescheduled",
+  Cancelled: "cancelled",
+} as const;
+
+export type ServiceAppointmentStatus = z.infer<
+  typeof serviceAppointmentStatusSchema
+>;
+
 export const serviceAppointmentSchema = z.object({
   id: z.string(),
   customerId: z.string(),

@@ -1,5 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import {
+  ServiceAppointmentStatus,
   serviceAppointmentIdInputSchema,
   serviceAppointmentListInputSchema,
   serviceAppointmentListOutputSchema,
@@ -45,7 +46,7 @@ const hydrateAppointments = async (
         addressSummary: string;
         date: string;
         timeWindow: string;
-        status: "scheduled";
+        status: ServiceAppointmentStatus;
         createdAt: string;
         updatedAt: string;
       }) => Promise<void>;
@@ -75,7 +76,7 @@ const hydrateAppointments = async (
         addressSummary: appointment.addressSummary,
         date: appointment.date,
         timeWindow: appointment.timeWindow,
-        status: "scheduled",
+        status: ServiceAppointmentStatus.Scheduled,
         createdAt: nowIso,
         updatedAt: nowIso,
       });

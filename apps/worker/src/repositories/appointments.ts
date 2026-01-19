@@ -1,4 +1,7 @@
-import type { ServiceAppointment } from "@pestcall/core";
+import {
+  type ServiceAppointment,
+  ServiceAppointmentStatus,
+} from "@pestcall/core";
 
 import { type AppointmentRow, mapAppointmentRow } from "../db/mappers";
 
@@ -109,12 +112,12 @@ export const createAppointmentRepository = (db: D1Database) => {
           FROM appointments
           LEFT JOIN customers_cache
             ON customers_cache.id = appointments.customer_id
-          WHERE appointments.customer_id = ? AND appointments.status = 'scheduled'
+          WHERE appointments.customer_id = ? AND appointments.status = ?
           ORDER BY appointments.date DESC
           LIMIT 1
           `,
         )
-        .bind(customerId)
+        .bind(customerId, ServiceAppointmentStatus.Scheduled)
         .first<AppointmentRowResult>();
 
       return row ? mapAppointmentRow(row) : null;
@@ -166,9 +169,14 @@ export const createAppointmentRepository = (db: D1Database) => {
     }) {
       await db
         .prepare(
-          "UPDATE appointments SET status = 'cancelled', rescheduled_to_id = ?, updated_at = ? WHERE id = ?",
+          "UPDATE appointments SET status = ?, rescheduled_to_id = ?, updated_at = ? WHERE id = ?",
         )
-        .bind(input.rescheduledToId, input.updatedAt, input.appointmentId)
+        .bind(
+          ServiceAppointmentStatus.Cancelled,
+          input.rescheduledToId,
+          input.updatedAt,
+          input.appointmentId,
+        )
         .run();
     },
     async linkReschedule(input: {
@@ -186,9 +194,13 @@ export const createAppointmentRepository = (db: D1Database) => {
     async markCancelled(input: { appointmentId: string; updatedAt: string }) {
       await db
         .prepare(
-          "UPDATE appointments SET status = 'cancelled', updated_at = ? WHERE id = ?",
+          "UPDATE appointments SET status = ?, updated_at = ? WHERE id = ?",
         )
-        .bind(input.updatedAt, input.appointmentId)
+        .bind(
+          ServiceAppointmentStatus.Cancelled,
+          input.updatedAt,
+          input.appointmentId,
+        )
         .run();
     },
   };

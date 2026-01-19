@@ -17,25 +17,72 @@ export const agentToolNameSchema = z.enum([
   "crm.escalate",
   "agent.escalate",
   "agent.fallback",
+  // Workflow selection tools
+  "workflow.selectAppointment",
+  "workflow.selectSlot",
+  "workflow.confirm",
 ]);
 
 export const agentToolCallSchema = z.object({
   type: z.literal("tool_call"),
   toolName: agentToolNameSchema,
   arguments: z.record(z.unknown()).optional(),
+  acknowledgement: z.string().optional(),
 });
 
-export const agentFinalSchema = z.object({
+/** Schema for multiple parallel tool calls */
+export const agentToolCallsSchema = z.object({
+  type: z.literal("tool_calls"),
+  calls: z.array(
+    z.object({
+      toolName: agentToolNameSchema,
+      arguments: z.record(z.unknown()).optional(),
+    }),
+  ),
+  acknowledgement: z.string().optional(),
+});
+
+const agentFinalSchema = z.object({
   type: z.literal("final"),
   text: z.string().min(1),
 });
 
-export const agentModelOutputSchema = z.union([
+const agentModelOutputSchema = z.union([
   agentToolCallSchema,
+  agentToolCallsSchema,
   agentFinalSchema,
 ]);
 
 export type AgentModelOutput = z.infer<typeof agentModelOutputSchema>;
+
+/** Type guard for single tool call */
+export const isSingleToolCall = (
+  output: AgentModelOutput,
+): output is z.infer<typeof agentToolCallSchema> => output.type === "tool_call";
+
+/** Type guard for multiple tool calls */
+export const isMultipleToolCalls = (
+  output: AgentModelOutput,
+): output is z.infer<typeof agentToolCallsSchema> =>
+  output.type === "tool_calls";
+
+const actionPreconditionSchema = z.enum([
+  "verified",
+  "has_appointments",
+  "has_available_slots",
+  "pending_cancellation",
+]);
+
+export type ActionPrecondition = z.infer<typeof actionPreconditionSchema>;
+
+export const actionPlanSchema = z.object({
+  kind: z.literal("tool"),
+  toolName: agentToolNameSchema,
+  arguments: z.record(z.unknown()).optional(),
+  required: z.array(actionPreconditionSchema).optional(),
+});
+
+export type ActionPlan = z.infer<typeof actionPlanSchema>;
 
 export const agentRouteSchema = z.object({
   intent: z.enum([
@@ -89,11 +136,11 @@ export const rescheduleResultSchema = z.object({
   timeWindow: z.string(),
 });
 
-export const cancelAppointmentResultSchema = z.object({
+const cancelAppointmentResultSchema = z.object({
   ok: z.boolean(),
 });
 
-export const availableSlotResultSchema = z.object({
+const availableSlotResultSchema = z.object({
   date: z.string(),
   timeWindow: z.string(),
 });
@@ -142,7 +189,19 @@ export const crmEscalateResultSchema = z.object({
   ticketId: z.string().optional(),
 });
 
-export const agentMessageResultSchema = z.object({
+// Workflow tool result schemas
+export const workflowSelectResultSchema = z.object({
+  ok: z.boolean(),
+  selectedId: z.string().optional(),
+  selectedLabel: z.string().optional(),
+});
+
+export const workflowConfirmResultSchema = z.object({
+  ok: z.boolean(),
+  confirmed: z.boolean(),
+});
+
+const agentMessageResultSchema = z.object({
   kind: z.string().min(1),
   details: z.string().optional(),
   options: z
@@ -156,7 +215,7 @@ export const agentMessageResultSchema = z.object({
 });
 
 // Discriminated union for tool results
-export const toolResultSchema = z.discriminatedUnion("toolName", [
+const toolResultSchema = z.discriminatedUnion("toolName", [
   z.object({
     toolName: z.literal("crm.lookupCustomerByPhone"),
     result: customerMatchResultSchema,
@@ -221,6 +280,19 @@ export const toolResultSchema = z.discriminatedUnion("toolName", [
     toolName: z.literal("agent.message"),
     result: agentMessageResultSchema,
   }),
+  // Workflow tools
+  z.object({
+    toolName: z.literal("workflow.selectAppointment"),
+    result: workflowSelectResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("workflow.selectSlot"),
+    result: workflowSelectResultSchema,
+  }),
+  z.object({
+    toolName: z.literal("workflow.confirm"),
+    result: workflowConfirmResultSchema,
+  }),
 ]);
 
 export type ToolResult = z.infer<typeof toolResultSchema>;
@@ -249,6 +321,8 @@ export type AgentResponseInput = {
   messages?: Array<{ role: "user" | "assistant"; content: string }>;
   context?: string;
   hasContext?: boolean;
+  /** Prior acknowledgement text already shown to user (e.g. "Let me look that up...") */
+  priorAcknowledgement?: string;
 } & ToolResult;
 
 export type SelectionOption = {
@@ -256,28 +330,31 @@ export type SelectionOption = {
   label: string;
 };
 
-export type SelectionInput = {
+type SelectionInput = {
   text: string;
   options: SelectionOption[];
-  kind: "appointment" | "slot";
+  kind: "appointment" | "slot" | "confirmation";
 };
 
-export type SelectionResult = {
+type SelectionResult = {
   selectedId: string | null;
   index: number | null;
   reason?: string;
 };
 
-export type StatusInput = {
+type StatusInput = {
   text: string;
   contextHint?: string;
+  context?: string;
+  messages?: Array<{ role: "user" | "assistant"; content: string }>;
 };
 
 export type ModelAdapter = {
-  name: "mock" | "workers-ai" | "openrouter";
+  name: "mock" | "workers-ai" | "openrouter" | "hybrid" | "split";
   modelId?: string;
   generate: (input: AgentModelInput) => Promise<AgentModelOutput>;
   respond: (input: AgentResponseInput) => Promise<string>;
+  respondStream?: (input: AgentResponseInput) => AsyncIterable<string>;
   route: (input: AgentModelInput) => Promise<AgentRouteDecision>;
   selectOption: (input: SelectionInput) => Promise<SelectionResult>;
   status: (input: StatusInput) => Promise<string>;

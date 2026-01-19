@@ -1,4 +1,7 @@
-import type { ServiceAppointment } from "@pestcall/core";
+import {
+  type ServiceAppointment,
+  ServiceAppointmentStatus,
+} from "@pestcall/core";
 
 import type { createAppointmentRepository } from "../repositories/appointments";
 
@@ -17,11 +20,6 @@ export const getAppointment = (
   appointmentId: string,
 ) => repo.get(appointmentId);
 
-export const getNextAppointment = (
-  repo: ReturnType<typeof createAppointmentRepository>,
-  customerId: string,
-) => repo.getLatestForCustomer(customerId);
-
 export const rescheduleAppointment = async (
   repo: ReturnType<typeof createAppointmentRepository>,
   input: {
@@ -38,7 +36,7 @@ export const rescheduleAppointment = async (
     addressSummary: input.appointment.addressSummary,
     date: input.slot.date,
     timeWindow: input.slot.timeWindow,
-    status: "scheduled",
+    status: ServiceAppointmentStatus.Scheduled,
     rescheduledFromId: input.appointment.id,
     createdAt: nowIso,
     updatedAt: nowIso,
@@ -70,7 +68,7 @@ export const cancelAppointment = async (
   });
   return {
     ...input.appointment,
-    status: "cancelled",
+    status: ServiceAppointmentStatus.Cancelled,
     updatedAt: nowIso,
   };
 };

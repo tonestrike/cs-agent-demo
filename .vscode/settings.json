@@ -4,10 +4,14 @@
     "claudecode",
     "codexcli",
     "cspotcode",
+    "DEEPGRAM",
+    "ELEVENLABS",
     "emnapi",
+    "OPENROUTER",
     "orpc",
     "oxlint",
     "pestcall",
+    "REALTIMEKIT",
     "rulesync"
   ]
 }

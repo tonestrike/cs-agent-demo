@@ -1,15 +1,16 @@
-import type {
-  Ticket,
+import {
+  type Ticket,
   TicketCategory,
   TicketPriority,
-  TicketSource,
+  type TicketSource,
+  TicketStatus,
 } from "./types";
 
 export type CreateTicketInput = {
   id: string;
   createdAt: string;
   updatedAt?: string;
-  status?: "open" | "in_progress" | "resolved";
+  status?: TicketStatus;
   priority?: TicketPriority;
   category?: TicketCategory;
   customerCacheId?: string;
@@ -26,9 +27,9 @@ export const createTicket = (input: CreateTicketInput): Ticket => {
     id: input.id,
     createdAt: input.createdAt,
     updatedAt: input.updatedAt ?? input.createdAt,
-    status: input.status ?? "open",
-    priority: input.priority ?? "normal",
-    category: input.category ?? "unknown",
+    status: input.status ?? TicketStatus.Open,
+    priority: input.priority ?? TicketPriority.Normal,
+    category: input.category ?? TicketCategory.Unknown,
     customerCacheId: input.customerCacheId,
     phoneE164: input.phoneE164,
     subject: input.subject,

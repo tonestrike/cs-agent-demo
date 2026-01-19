@@ -26,6 +26,36 @@ This guide captures the conventions established in the repo so far.
 - **Repositories**: `repositories/*` abstract D1 access.
 - **Context**: `createContext` wires dependencies per request.
 
+## Formatting
+- **Multiline strings**: Use arrays of strings joined with newlines instead of template literals for long multiline strings (prompts, multi-section text). This improves readability and diff clarity.
+  ```typescript
+  // Good
+  const lines: string[] = [
+    "First line",
+    `Dynamic: ${value}`,
+    "",
+    "Section header",
+    "More content",
+  ];
+  return lines.join("\n");
+
+  // Avoid
+  return `First line
+  Dynamic: ${value}
+
+  Section header
+  More content`;
+  ```
+
+## Type Safety
+- **Avoid inline casts**: Don't use `(args as { topic: string }).topic`. Instead:
+  - Use generics with proper constraints
+  - Use Zod schemas with `.parse()` for runtime validation
+  - Use discriminated unions with type guards
+  - Use switch statements on discriminant fields for type narrowing
+- **Tool/Handler args**: Define typed arg schemas per tool. Validate at dispatch time and pass strongly-typed args to handlers.
+- **Prefer inference**: Let TypeScript infer types from schemas (`z.infer<typeof schema>`) rather than duplicating type definitions.
+
 ## Testing
 - Prefer integration tests for Worker/D1 behavior.
 - Use local D1 via Wrangler proxy in integration tests.

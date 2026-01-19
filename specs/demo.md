@@ -12,7 +12,6 @@ Broaden model selection to the full Cloudflare Workers AI catalog so prompt tuni
 - oRPC Worker API: tickets, calls, CRM mock, and agent RPC.
 - Agent use-case logs call sessions and turns in D1, including summary metadata.
 - CRM mock fixtures with appointments/invoices for demos.
-- Agents SDK wired with `PestCallAgent` Durable Object and WebSocket handling. See [`pestcall.ts`](../apps/worker/src/agents/pestcall.ts).
 - Model adapter with tool-calling loop in [`models`](../apps/worker/src/models/).
 - Call summaries stored on call sessions and surfaced in the UI.
 - Calls, tickets, and appointments include customer context in list results (name, phone, address).

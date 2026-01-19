@@ -4,7 +4,6 @@ import { getAgentConfig } from "./agents/config";
 import { getCrmAdapter } from "./crm";
 import { type Env, envSchema } from "./env";
 import { type Logger, createLogger } from "./logger";
-import { getModelAdapter } from "./models";
 import {
   createAgentConfigRepository,
   createAppointmentRepository,
@@ -18,12 +17,14 @@ export type Dependencies = {
   tickets: ReturnType<typeof createTicketRepository>;
   calls: ReturnType<typeof createCallRepository>;
   customers: ReturnType<typeof createCustomerRepository>;
-  modelFactory: (
-    config: ReturnType<typeof getAgentConfig>,
-  ) => ReturnType<typeof getModelAdapter>;
   agentConfigDefaults: ReturnType<typeof getAgentConfig>;
   agentConfig: ReturnType<typeof createAgentConfigRepository>;
   appointments: ReturnType<typeof createAppointmentRepository>;
+  workflows: {
+    reschedule?: Workflow;
+    verify?: Workflow;
+    cancel?: Workflow;
+  };
   logger: Logger;
 };
 
@@ -37,13 +38,17 @@ export const createDependencies = (env: Env): Dependencies => {
   const logger = createLogger(env);
   return {
     crm: getCrmAdapter(env),
-    tickets: createTicketRepository(env.DB),
-    calls: createCallRepository(env.DB),
+    tickets: createTicketRepository(env.DB, logger),
+    calls: createCallRepository(env.DB, logger),
     customers: createCustomerRepository(env.DB),
     appointments: createAppointmentRepository(env.DB),
-    modelFactory: (config) => getModelAdapter(env, config, logger),
+    workflows: {
+      reschedule: env.RESCHEDULE_WORKFLOW,
+      verify: env.VERIFY_WORKFLOW,
+      cancel: env.CANCEL_WORKFLOW,
+    },
     agentConfigDefaults: getAgentConfig(env),
-    agentConfig: createAgentConfigRepository(env.DB),
+    agentConfig: createAgentConfigRepository(env.DB, logger),
     logger,
   };
 };

@@ -1,0 +1,602 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { apiBaseUrl, demoAuthToken } from "../../../lib/env";
+import type { ChatMessage, ClientLog, TurnMetric } from "../types";
+
+export function useConversationSession(phoneNumber: string) {
+  const [callSessionId, setCallSessionId] = useState<string | null>(null);
+  const [confirmedSessionId, setConfirmedSessionId] = useState<string | null>(
+    null,
+  );
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState("New session");
+  const [logs, setLogs] = useState<ClientLog[]>([]);
+  const [turnMetrics, setTurnMetrics] = useState<TurnMetric[]>([]);
+
+  const socketRef = useRef<WebSocket | null>(null);
+  const responseIdRef = useRef<string | null>(null);
+  const sessionRef = useRef<string | null>(null);
+  const hasDeltaRef = useRef(false);
+  const autoZipTimerRef = useRef<number | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const maxReconnectAttempts = 5;
+  const pendingTurnsRef = useRef<
+    Array<{ sessionId: string; startedAt: number; userText: string }>
+  >([]);
+  const turnMetricsRef = useRef(new Map<number, TurnMetric>());
+
+  const clearAutoZipTimer = useCallback(() => {
+    if (autoZipTimerRef.current !== null) {
+      window.clearTimeout(autoZipTimerRef.current);
+      autoZipTimerRef.current = null;
+    }
+  }, []);
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Ref to always access the latest sendMessage callback
+  const sendMessageRef = useRef<typeof sendMessage | null>(null);
+
+  useEffect(() => {
+    return () => {
+      clearAutoZipTimer();
+      clearReconnectTimer();
+      socketRef.current?.close();
+    };
+  }, [clearAutoZipTimer, clearReconnectTimer]);
+
+  const logEvent = useCallback(
+    (
+      message: string,
+      data?: Record<string, unknown>,
+      options?: { level?: "info" | "warn" | "error"; source?: string },
+    ) => {
+      const level =
+        options?.level ??
+        (/error|failed|issue/i.test(message)
+          ? "error"
+          : /timeout|retry/i.test(message)
+            ? "warn"
+            : "info");
+      const entry: ClientLog = {
+        id: crypto.randomUUID(),
+        ts: new Date().toISOString(),
+        message,
+        data,
+        contextMessages: messagesRef.current.map((msg) => ({ ...msg })),
+        level,
+        source: options?.source ?? message.split(".")[0] ?? "client",
+      };
+      setLogs((prev) => [entry, ...prev].slice(0, 200));
+    },
+    [],
+  );
+
+  const syncTurnMetrics = useCallback(() => {
+    const items = Array.from(turnMetricsRef.current.values()).sort(
+      (a, b) => a.turnId - b.turnId,
+    );
+    setTurnMetrics(items);
+  }, []);
+
+  const ensureTurnMetric = useCallback(
+    (turnId: number, sessionId: string) => {
+      const existing = turnMetricsRef.current.get(turnId);
+      if (existing) {
+        return existing;
+      }
+      const pending = pendingTurnsRef.current.shift();
+      const startedAt = pending?.startedAt ?? Date.now();
+      const userText = pending?.userText ?? "";
+      const metric: TurnMetric = {
+        turnId,
+        sessionId,
+        userText,
+        userTextLength: userText.length,
+        startedAt,
+        firstTokenAt: null,
+        firstStatusAt: null,
+        finalAt: null,
+        firstTokenMs: null,
+        firstStatusMs: null,
+        totalMs: null,
+        statusTexts: [],
+      };
+      turnMetricsRef.current.set(turnId, metric);
+      syncTurnMetrics();
+      return metric;
+    },
+    [syncTurnMetrics],
+  );
+
+  const updateTurnMetric = useCallback(
+    (
+      turnId: number,
+      sessionId: string,
+      updater: (metric: TurnMetric) => void,
+    ) => {
+      const metric = ensureTurnMetric(turnId, sessionId);
+      updater(metric);
+      turnMetricsRef.current.set(turnId, { ...metric });
+      syncTurnMetrics();
+    },
+    [ensureTurnMetric, syncTurnMetrics],
+  );
+
+  const buildWsUrl = useCallback((sessionId: string) => {
+    const base = apiBaseUrl || window.location.origin;
+    const url = new URL(base);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.pathname = `/api/conversations/${sessionId}/socket`;
+    // Pass callSessionId so DO can detect new calls and reset greeting
+    url.searchParams.set("callSessionId", sessionId);
+    if (demoAuthToken) {
+      url.searchParams.set("token", demoAuthToken);
+    }
+    return url.toString();
+  }, []);
+
+  const ensureSocket = useCallback(
+    (sessionId: string) => {
+      if (socketRef.current && sessionRef.current === sessionId) {
+        if (socketRef.current.readyState === WebSocket.OPEN) {
+          logEvent("ws.reuse.open", { sessionId });
+          setConnectionStatus("Connected");
+          return Promise.resolve(socketRef.current);
+        }
+        logEvent("ws.reuse.wait", {
+          sessionId,
+          state: socketRef.current.readyState,
+        });
+        return new Promise<WebSocket>((resolve, reject) => {
+          const socket = socketRef.current;
+          if (!socket) {
+            reject(new Error("Socket unavailable"));
+            return;
+          }
+          const timeoutId = window.setTimeout(() => {
+            reject(new Error("Socket timeout"));
+          }, 3000);
+          socket.addEventListener("open", () => {
+            window.clearTimeout(timeoutId);
+            logEvent("ws.reuse.opened", { sessionId });
+            resolve(socket);
+          });
+          socket.addEventListener("error", () => {
+            window.clearTimeout(timeoutId);
+            logEvent("ws.reuse.error", { sessionId });
+            reject(new Error("Socket error"));
+          });
+        });
+      }
+      socketRef.current?.close();
+      const socket = new WebSocket(buildWsUrl(sessionId));
+      logEvent("ws.connect.start", { sessionId });
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(String(event.data)) as {
+            id?: number;
+            seq?: number;
+            turnId?: number;
+            messageId?: string | null;
+            role?: "assistant" | "system";
+            correlationId?: string;
+            type?: string;
+            text?: string;
+            data?: { callSessionId?: string; replyText?: string };
+          };
+          logEvent("ws.message", {
+            sessionId,
+            type: payload.type ?? "unknown",
+            textLength: payload.text?.length ?? 0,
+            hasData: Boolean(payload.data),
+            turnId: payload.turnId,
+            messageId: payload.messageId,
+          });
+          if (payload.type === "status") {
+            const text = payload.text ?? "";
+            if (text.trim()) {
+              setMessages((prev) => {
+                const statusId = `status-${payload.seq ?? payload.id ?? crypto.randomUUID()}`;
+                return [...prev, { id: statusId, role: "status", text }];
+              });
+              if (typeof payload.turnId === "number") {
+                updateTurnMetric(payload.turnId, sessionId, (metric) => {
+                  const now = Date.now();
+                  if (metric.firstStatusAt === null) {
+                    metric.firstStatusAt = now;
+                    metric.firstStatusMs = now - metric.startedAt;
+                  }
+                  metric.statusTexts = [...metric.statusTexts, text];
+                });
+              }
+            }
+            return;
+          }
+          if (payload.type === "token") {
+            const text = payload.text ?? "";
+            const messageId = payload.messageId ?? responseIdRef.current;
+            if (!messageId || !text) {
+              return;
+            }
+            if (typeof payload.turnId === "number") {
+              updateTurnMetric(payload.turnId, sessionId, (metric) => {
+                const now = Date.now();
+                if (metric.firstTokenAt === null) {
+                  metric.firstTokenAt = now;
+                  metric.firstTokenMs = now - metric.startedAt;
+                }
+              });
+            }
+            hasDeltaRef.current = true;
+            setMessages((prev) => {
+              const exists = prev.some((message) => message.id === messageId);
+              if (exists) {
+                return prev.map((message) =>
+                  message.id === messageId
+                    ? { ...message, text: `${message.text}${text}` }
+                    : message,
+                );
+              }
+              return [...prev, { id: messageId, role: "agent", text }];
+            });
+            return;
+          }
+          if (payload.type === "final") {
+            const data = payload.data as
+              | {
+                  callSessionId?: string;
+                  replyText?: string;
+                  debug?: Record<string, unknown>;
+                }
+              | undefined;
+            const replyText = data?.replyText ?? "";
+            const messageId = payload.messageId ?? responseIdRef.current;
+            if (messageId && replyText) {
+              setMessages((prev) => {
+                const exists = prev.some((message) => message.id === messageId);
+                if (!exists) {
+                  return [
+                    ...prev,
+                    { id: messageId, role: "agent", text: replyText },
+                  ];
+                }
+                return prev.map((message) =>
+                  message.id === messageId && !message.text
+                    ? { ...message, text: replyText }
+                    : message,
+                );
+              });
+            }
+            if (data?.debug) {
+              logEvent(
+                "ws.final.debug",
+                {
+                  sessionId,
+                  messageId,
+                  replyLength: replyText.length,
+                  ...data.debug,
+                },
+                { level: "warn", source: "ws" },
+              );
+            }
+            // Ignore server-suggested callSessionId; we own session ids per tab.
+            if (typeof payload.turnId === "number") {
+              updateTurnMetric(payload.turnId, sessionId, (metric) => {
+                const now = Date.now();
+                if (metric.finalAt === null) {
+                  metric.finalAt = now;
+                  metric.totalMs = now - metric.startedAt;
+                }
+              });
+            }
+            return;
+          }
+          if (payload.type === "error") {
+            setConnectionStatus("Connection issue. Try again.");
+            return;
+          }
+          if (payload.type === "tool_call") {
+            // Log tool call for visibility in event timeline
+            const toolData = payload.data as
+              | {
+                  toolName?: string;
+                  args?: Record<string, unknown>;
+                  result?: unknown;
+                  durationMs?: number;
+                  success?: boolean;
+                }
+              | undefined;
+            logEvent(
+              "tool_call",
+              {
+                sessionId,
+                turnId: payload.turnId,
+                toolName: toolData?.toolName ?? payload.text ?? "unknown",
+                durationMs: toolData?.durationMs,
+                success: toolData?.success ?? true,
+                args: toolData?.args,
+                result: toolData?.result,
+              },
+              {
+                level: toolData?.success === false ? "warn" : "info",
+                source: "tool",
+              },
+            );
+            return;
+          }
+        } catch {
+          setConnectionStatus("Connection issue. Try again.");
+          logEvent("ws.message.parse_failed", { sessionId });
+        }
+      };
+      socket.onerror = () => {
+        setConnectionStatus("Connection issue. Try again.");
+        logEvent("ws.error", { sessionId });
+      };
+      socket.onclose = (event) => {
+        const wasClean = event.wasClean;
+        logEvent("ws.close", { sessionId, wasClean, code: event.code });
+
+        if (sessionRef.current === sessionId) {
+          socketRef.current = null;
+        }
+
+        // Don't reconnect if it was a clean close (intentional disconnect)
+        // or if we've exceeded max attempts
+        if (
+          wasClean ||
+          reconnectAttemptsRef.current >= maxReconnectAttempts ||
+          sessionRef.current !== sessionId
+        ) {
+          setConnectionStatus("Disconnected");
+          reconnectAttemptsRef.current = 0;
+          return;
+        }
+
+        // Calculate backoff delay: 1s, 2s, 4s, 8s, 16s
+        const attempt = reconnectAttemptsRef.current;
+        const delay = Math.min(1000 * 2 ** attempt, 16000);
+        reconnectAttemptsRef.current += 1;
+
+        setConnectionStatus(
+          `Reconnecting (${reconnectAttemptsRef.current}/${maxReconnectAttempts})...`,
+        );
+        logEvent("ws.reconnect.scheduled", {
+          sessionId,
+          attempt: reconnectAttemptsRef.current,
+          delayMs: delay,
+        });
+
+        clearReconnectTimer();
+        reconnectTimerRef.current = window.setTimeout(() => {
+          if (sessionRef.current === sessionId) {
+            logEvent("ws.reconnect.attempt", {
+              sessionId,
+              attempt: reconnectAttemptsRef.current,
+            });
+            ensureSocket(sessionId).catch(() => {
+              // Error handling is done in ensureSocket
+            });
+          }
+        }, delay);
+      };
+      socketRef.current = socket;
+      sessionRef.current = sessionId;
+      return new Promise<WebSocket>((resolve, reject) => {
+        const timeoutId = window.setTimeout(() => {
+          logEvent("ws.connect.timeout", { sessionId });
+          reject(new Error("Socket timeout"));
+        }, 3000);
+        socket.addEventListener("open", () => {
+          window.clearTimeout(timeoutId);
+          reconnectAttemptsRef.current = 0; // Reset reconnect counter on success
+          logEvent("ws.connect.open", { sessionId });
+          setConnectionStatus("Connected");
+          resolve(socket);
+        });
+        socket.addEventListener("error", () => {
+          window.clearTimeout(timeoutId);
+          setConnectionStatus("Connection issue. Try again.");
+          logEvent("ws.connect.error", { sessionId });
+          reject(new Error("Socket error"));
+        });
+      });
+    },
+    [buildWsUrl, clearReconnectTimer, logEvent, updateTurnMetric],
+  );
+
+  const resetSessionState = useCallback(
+    (reason: "manual" | "start_call" = "manual") => {
+      hasDeltaRef.current = false;
+      responseIdRef.current = null;
+      setMessages([]);
+      setConnectionStatus("New session");
+      pendingTurnsRef.current = [];
+      turnMetricsRef.current.clear();
+      setTurnMetrics([]);
+      clearReconnectTimer();
+      reconnectAttemptsRef.current = 0;
+      socketRef.current?.close();
+      socketRef.current = null;
+      sessionRef.current = null;
+      clearAutoZipTimer();
+      logEvent("session.reset", { phoneNumber, reason });
+    },
+    [clearAutoZipTimer, clearReconnectTimer, logEvent, phoneNumber],
+  );
+
+  const resetSession = useCallback(() => {
+    setCallSessionId(null);
+    setConfirmedSessionId(null);
+    resetSessionState("manual");
+  }, [resetSessionState]);
+
+  const sendMessage = useCallback(
+    async (
+      message: string,
+      options?: { skipUserMessage?: boolean; userMessageText?: string },
+    ) => {
+      const trimmed = message.trim();
+      if (!trimmed) {
+        return;
+      }
+      const sessionId = callSessionId ?? crypto.randomUUID();
+      if (!callSessionId) {
+        setCallSessionId(sessionId);
+        setConfirmedSessionId(sessionId);
+      }
+      logEvent("message.send.start", { sessionId, length: trimmed.length });
+      if (!options?.skipUserMessage) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "customer",
+            text: options?.userMessageText ?? trimmed,
+          },
+        ]);
+      }
+      const pendingEntry = {
+        sessionId,
+        startedAt: Date.now(),
+        userText: options?.userMessageText ?? trimmed,
+      };
+      pendingTurnsRef.current.push(pendingEntry);
+
+      const responseId = crypto.randomUUID();
+      responseIdRef.current = responseId;
+      hasDeltaRef.current = false;
+
+      try {
+        setConnectionStatus("Connecting");
+        await ensureSocket(sessionId);
+        logEvent("ws.ready", { sessionId });
+      } catch {
+        setConnectionStatus("Connection issue. Try again.");
+        logEvent("ws.unavailable", { sessionId });
+      }
+      const base = apiBaseUrl || window.location.origin;
+      try {
+        logEvent("api.conversation.message.start", { sessionId });
+        const response = await fetch(
+          new URL(`/api/conversations/${sessionId}/message`, base),
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...(demoAuthToken ? { "x-demo-auth": demoAuthToken } : {}),
+            },
+            body: JSON.stringify({
+              phoneNumber,
+              text: trimmed,
+              callSessionId: sessionId,
+            }),
+          },
+        );
+        logEvent("api.conversation.message.response", {
+          sessionId,
+          status: response.status,
+        });
+        if (!response.ok) {
+          throw new Error("Request failed");
+        }
+        await response.json();
+        logEvent("api.conversation.message.done", {
+          sessionId,
+          replyLength: 0,
+          usedFallback: false,
+        });
+      } catch {
+        setConnectionStatus("Connection issue. Try again.");
+        logEvent("api.conversation.message.failed", { sessionId });
+        const pendingTurns = pendingTurnsRef.current;
+        const entryIndex = pendingTurns.lastIndexOf(pendingEntry);
+        if (entryIndex >= 0) {
+          pendingTurns.splice(entryIndex, 1);
+        }
+      }
+    },
+    [callSessionId, phoneNumber, ensureSocket, logEvent],
+  );
+
+  // Keep ref in sync with latest sendMessage to avoid stale closures in timeouts
+  sendMessageRef.current = sendMessage;
+
+  const startCall = useCallback(
+    async (options?: { fresh?: boolean }) => {
+      if (!phoneNumber) {
+        return;
+      }
+      clearAutoZipTimer();
+      const forceFresh = options?.fresh ?? false;
+      let sessionId = callSessionId;
+      if (forceFresh || !sessionId) {
+        resetSessionState("start_call");
+        sessionId = crypto.randomUUID();
+        setCallSessionId(sessionId);
+        setConfirmedSessionId(sessionId);
+      }
+      if (!sessionId) {
+        return;
+      }
+      logEvent("chat.start_call", {
+        phoneNumber,
+        sessionId,
+        fresh: forceFresh || !callSessionId,
+      });
+      try {
+        setConnectionStatus("Connecting");
+        await ensureSocket(sessionId);
+        logEvent("ws.ready", { sessionId });
+      } catch {
+        setConnectionStatus("Connection issue. Try again.");
+        logEvent("ws.unavailable", { sessionId });
+      }
+    },
+    [
+      callSessionId,
+      clearAutoZipTimer,
+      ensureSocket,
+      logEvent,
+      phoneNumber,
+      resetSessionState,
+    ],
+  );
+
+  const recordClientLog = useCallback(
+    (
+      message: string,
+      data?: Record<string, unknown>,
+      options?: { level?: "info" | "warn" | "error"; source?: string },
+    ) => {
+      logEvent(message, data, options);
+    },
+    [logEvent],
+  );
+
+  return {
+    messages,
+    status: connectionStatus,
+    logs,
+    turnMetrics,
+    confirmedSessionId,
+    callSessionId,
+    sendMessage,
+    startCall,
+    resetSession,
+    recordClientLog,
+  };
+}

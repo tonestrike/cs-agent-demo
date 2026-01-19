@@ -4,8 +4,9 @@ import {
   mapCallSessionRow,
   mapCallTurnRow,
 } from "../db/mappers";
+import type { Logger } from "../logger";
 
-export const createCallRepository = (db: D1Database) => {
+export const createCallRepository = (db: D1Database, logger: Logger) => {
   return {
     async list(params: {
       limit?: number;
@@ -64,7 +65,7 @@ export const createCallRepository = (db: D1Database) => {
         rows.length > limit ? (rows[limit]?.started_at ?? null) : null;
 
       return {
-        items: trimmed.map(mapCallSessionRow),
+        items: trimmed.map((row) => mapCallSessionRow(row, logger)),
         nextCursor,
       };
     },
@@ -102,8 +103,10 @@ export const createCallRepository = (db: D1Database) => {
         .all<CallTurnRow>();
 
       return {
-        session: mapCallSessionRow(session),
-        turns: (turnsResult.results ?? []).map(mapCallTurnRow),
+        session: mapCallSessionRow(session, logger),
+        turns: (turnsResult.results ?? []).map((row) =>
+          mapCallTurnRow(row, logger),
+        ),
       };
     },
     async createSession(input: {
@@ -170,7 +173,7 @@ export const createCallRepository = (db: D1Database) => {
         .bind(callSessionId)
         .first<CallSessionRow>();
 
-      return session ? mapCallSessionRow(session) : null;
+      return session ? mapCallSessionRow(session, logger) : null;
     },
     async findSessionByTicketId(ticketId: string) {
       const row = await db
@@ -208,12 +211,14 @@ export const createCallRepository = (db: D1Database) => {
       const limit = input.limit ?? 6;
       const result = await db
         .prepare(
-          "SELECT * FROM call_turns WHERE call_session_id = ? ORDER BY ts DESC LIMIT ?",
+          "SELECT * FROM call_turns WHERE call_session_id = ? ORDER BY ts DESC, id DESC LIMIT ?",
         )
         .bind(input.callSessionId, limit)
         .all<CallTurnRow>();
 
-      return (result.results ?? []).map(mapCallTurnRow).reverse();
+      return (result.results ?? [])
+        .map((row) => mapCallTurnRow(row, logger))
+        .reverse();
     },
     async getTurns(callSessionId: string) {
       const result = await db
@@ -223,7 +228,7 @@ export const createCallRepository = (db: D1Database) => {
         .bind(callSessionId)
         .all<CallTurnRow>();
 
-      return (result.results ?? []).map(mapCallTurnRow);
+      return (result.results ?? []).map((row) => mapCallTurnRow(row, logger));
     },
     async getLatestAgentTurn(callSessionId: string) {
       const row = await db
@@ -233,7 +238,7 @@ export const createCallRepository = (db: D1Database) => {
         .bind(callSessionId)
         .first<CallTurnRow>();
 
-      return row ? mapCallTurnRow(row) : null;
+      return row ? mapCallTurnRow(row, logger) : null;
     },
   };
 };

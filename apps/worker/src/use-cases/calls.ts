@@ -1,3 +1,4 @@
+import type { Logger } from "../logger";
 import type { createCallRepository } from "../repositories";
 
 export const listCalls = (
@@ -17,7 +18,7 @@ export const getCallDetail = (
   return repo.get(callSessionId);
 };
 
-const parseSummary = (summary: string | null) => {
+const parseSummary = (summary: string | null, logger: Logger) => {
   if (!summary) {
     return null;
   }
@@ -26,14 +27,18 @@ const parseSummary = (summary: string | null) => {
     if (parsed && typeof parsed === "object") {
       return parsed as Record<string, unknown>;
     }
-  } catch {
-    // fall through
+  } catch (error) {
+    logger.error(
+      { error: error instanceof Error ? error.message : "unknown" },
+      "calls.summary.parse_failed",
+    );
   }
   return null;
 };
 
 export const getCallContext = async (
   repo: ReturnType<typeof createCallRepository>,
+  logger: Logger,
   callSessionId: string,
 ) => {
   const session = await repo.getSession(callSessionId);
@@ -43,7 +48,7 @@ export const getCallContext = async (
   const lastAgentTurn = await repo.getLatestAgentTurn(callSessionId);
   return {
     session,
-    summary: parseSummary(session.summary ?? null),
+    summary: parseSummary(session.summary ?? null, logger),
     lastAgentTurn,
   };
 };

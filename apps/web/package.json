@@ -10,15 +10,17 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@cloudflare/realtimekit": "^1.0.0",
+    "@cloudflare/realtimekit-ui": "^1.0.8",
     "@orpc/client": "1.13.4",
     "@orpc/react-query": "^1.13.4",
     "@pestcall/core": "workspace:*",
     "@tanstack/react-query": "^5.90.16",
-    "agents": "^0.3.5",
     "clsx": "^2.1.1",
     "next": "14.2.5",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "pino": "^9.3.2",
     "zod": "^3.23.8"
   },
   "devDependencies": {

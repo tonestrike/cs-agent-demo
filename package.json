@@ -1,30 +1,5 @@
 {
   "name": "pestcall",
-  "private": true,
-  "type": "module",
-  "packageManager": "bun@1.1.0",
-  "workspaces": ["apps/*", "packages/*"],
-  "scripts": {
-    "dev": "concurrently -k -n worker,web -c yellow,cyan \"cd apps/worker && wrangler dev --local\" \"cd apps/web && bun dev\"",
-    "lint": "biome lint .",
-    "lint:fix": "biome lint . --write",
-    "format": "biome format . --write",
-    "format:check": "biome check .",
-    "fix": "biome check . --write",
-    "deploy:worker": "bun scripts/deploy-worker.ts",
-    "smoke:agent": "bun scripts/smoke-agent.ts",
-    "logs:worker": "wrangler tail pestcall-worker --format pretty",
-    "db:migrate:local": "wrangler d1 migrations apply pestcall_local --local --config apps/worker/wrangler.toml",
-    "db:seed:local": "wrangler d1 execute pestcall_local --local --config apps/worker/wrangler.toml --file apps/worker/seeds/20250201120000_seed.sql",
-    "typecheck": "tsc -b",
-    "test": "vitest run --config vitest.unit.config.ts",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts",
-    "test:e2e:remote": "E2E_BASE_URL=https://pestcall-worker.tonyvantur.workers.dev E2E_AUTH_TOKEN=dev-demo-token E2E_EXPECT_REAL_MODEL=true E2E_EXPECT_MODEL_NAME=workers-ai E2E_EXPECT_MODEL_ID=@cf/meta/llama-3.1-8b-instruct vitest run --config vitest.e2e.config.ts",
-    "qa": "bun run typecheck && bun run lint && bun run format:check && bun run test && bun run test:integration && bun run test:e2e",
-    "vercel-build": "bun run --cwd apps/web build",
-    "sync:rules": "npx rulesync generate"
-  },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@cloudflare/vitest-pool-workers": "^0.12.4",
@@ -39,5 +14,30 @@
     "typescript": "^5.6.3",
     "vitest": "^2.1.4",
     "wrangler": "4"
-  }
+  },
+  "packageManager": "bun@1.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n worker,web -c yellow,cyan \"cd apps/worker && wrangler dev --local\" \"cd apps/web && bun dev\"",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint . --write",
+    "format": "biome format . --write",
+    "format:check": "biome check .",
+    "fix": "biome check . --write",
+    "deploy:worker": "bun scripts/deploy-worker.ts",
+    "logs:worker": "wrangler tail pestcall-worker --format pretty",
+    "logs:call": "bun scripts/logs-call-session.ts",
+    "db:migrate:local": "wrangler d1 migrations apply pestcall_local --local --config apps/worker/wrangler.toml",
+    "db:seed:local": "wrangler d1 execute pestcall_local --local --config apps/worker/wrangler.toml --file apps/worker/seeds/20250201120000_seed.sql",
+    "typecheck": "tsc -b",
+    "test": "vitest run --config vitest.unit.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:e2e:remote": "E2E_BASE_URL=https://pestcall-worker.tonyvantur.workers.dev E2E_AUTH_TOKEN=dev-demo-token E2E_EXPECT_REAL_MODEL=true E2E_EXPECT_MODEL_NAME=workers-ai E2E_EXPECT_MODEL_ID=@cf/meta/llama-3.1-8b-instruct vitest run --config vitest.e2e.config.ts",
+    "qa": "bun run typecheck && bun run lint && bun run format:check && bun run test && bun run test:integration && bun run test:e2e",
+    "vercel-build": "bun run --cwd apps/web build",
+    "sync:rules": "npx rulesync generate"
+  },
+  "type": "module",
+  "workspaces": ["apps/*", "packages/*"]
 }
