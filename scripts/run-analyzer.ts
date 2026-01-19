@@ -393,9 +393,8 @@ class LocalScenarioRunner {
 
           // Get the debug state
           const debug = await this.getDebugState(conversationId);
-          const sessionPhone = (
-            debug.sessionState as { phoneNumber?: string }
-          )?.phoneNumber;
+          const sessionPhone = (debug.sessionState as { phoneNumber?: string })
+            ?.phoneNumber;
           if (i === 1 && options.verbose) {
             // Log session phone on step 2 (when ZIP is provided and verification runs)
             console.log(
@@ -456,10 +455,6 @@ class LocalScenarioRunner {
     const passedSteps = stepResults.filter((r) => r.passed).length;
 
     // Check success criteria
-    const meetsMinSteps =
-      scenario.successCriteria.minPassingSteps === undefined ||
-      passedSteps >= scenario.successCriteria.minPassingSteps;
-
     const meetsFinalState =
       !scenario.successCriteria.finalState ||
       this.checkFinalState(

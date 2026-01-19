@@ -48,7 +48,8 @@ export async function handleCancelAppointment(
     activeSelection?.kind === "appointment" &&
     activeSelection?.options?.length === 1
   ) {
-    appointmentId = activeSelection.options[0].id;
+    // Safe to access [0] since we checked length === 1
+    appointmentId = activeSelection.options[0]?.id ?? "";
     ctx.logger.info(
       { appointmentId, source: "activeSelection_single" },
       "tool_handler.cancel_appointment.using_active_selection",
