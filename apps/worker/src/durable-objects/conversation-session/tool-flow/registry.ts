@@ -6,6 +6,7 @@
  */
 
 import type { AgentToolName } from "../../../models/tool-definitions";
+import { handleCancelAppointment } from "./handlers/cancel-appointment";
 import { handleEscalate } from "./handlers/escalate";
 import {
   handleGetAppointmentById,
@@ -30,6 +31,7 @@ export const toolHandlerRegistry: ToolHandlerRegistry = {
   "crm.getAvailableSlots": handleGetAvailableSlots,
   "crm.getOpenInvoices": handleGetInvoices,
   "crm.getServicePolicy": handleGetServicePolicy,
+  "crm.cancelAppointment": handleCancelAppointment,
   "crm.escalate": handleEscalate,
   "agent.escalate": handleEscalate,
 };

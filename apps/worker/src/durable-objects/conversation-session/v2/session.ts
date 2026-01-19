@@ -12,7 +12,6 @@
  * - Workflow state management
  */
 
-import { runWithTools } from "@cloudflare/ai-utils";
 import type {
   Ai,
   DurableObjectState,
@@ -614,7 +613,8 @@ export class ConversationSessionV2 {
   }
 
   /**
-   * Run the agent loop with tools.
+   * Run the agent loop with tools using direct AI.run calls.
+   * This bypasses runWithTools for better control over the tool format.
    */
   private async runAgentLoop(
     input: MessageInput,
@@ -634,7 +634,7 @@ export class ConversationSessionV2 {
       input.text,
     );
 
-    // Build messages
+    // Build messages - mutable for tool call loop
     const messages: RoleScopedChatInput[] = [
       { role: "system", content: systemPrompt },
       ...this.messageHistory.map((m) => ({
@@ -656,101 +656,238 @@ export class ConversationSessionV2 {
     // Get tools from provider
     const tools = this.toolProvider.getTools(sessionState);
 
-    // Build tools for runWithTools
-    const toolsForModel = tools.map((tool) => ({
-      name: tool.definition.name,
-      description: tool.definition.description,
-      parameters: tool.definition.parameters,
-      function: async (args: Record<string, unknown>): Promise<string> => {
-        // Queue acknowledgement prompt for aggregation
-        // Skip acknowledgements during verification phase - the model's response
-        // will naturally include the request for ZIP code
-        // Also skip if tool has no acknowledgement defined
-        if (tool.definition.acknowledgement && turn.isVerified) {
-          // Support conditional acknowledgements - function returns null to skip
-          const ack = tool.definition.acknowledgement;
-          const ackText = typeof ack === "function" ? ack(sessionState) : ack;
-          if (ackText) {
-            turn.acknowledgementPrompts.push(ackText);
+    // Build tool executors map for quick lookup
+    const toolExecutors = new Map<
+      string,
+      {
+        execute: (args: Record<string, unknown>) => Promise<string>;
+        definition: (typeof tools)[0]["definition"];
+      }
+    >();
+    for (const tool of tools) {
+      toolExecutors.set(tool.definition.name, {
+        definition: tool.definition,
+        execute: async (args: Record<string, unknown>): Promise<string> => {
+          // Queue acknowledgement prompt for aggregation
+          if (tool.definition.acknowledgement && turn.isVerified) {
+            const ack = tool.definition.acknowledgement;
+            const ackText = typeof ack === "function" ? ack(sessionState) : ack;
+            if (ackText) {
+              turn.acknowledgementPrompts.push(ackText);
+            }
           }
-        }
 
-        // Emit aggregated acknowledgement once per turn (only if verified and has prompts)
-        if (
-          turn.isVerified &&
-          !turn.acknowledged &&
-          turn.acknowledgementPrompts.length > 0 &&
-          !turn.acknowledgementTask
-        ) {
-          turn.acknowledged = true;
-          turn.acknowledgementTask = this.emitAggregatedAcknowledgement(turn);
-        }
+          // Emit aggregated acknowledgement once per turn
+          if (
+            turn.isVerified &&
+            !turn.acknowledged &&
+            turn.acknowledgementPrompts.length > 0 &&
+            !turn.acknowledgementTask
+          ) {
+            turn.acknowledged = true;
+            turn.acknowledgementTask = this.emitAggregatedAcknowledgement(turn);
+          }
 
-        this.logger.info(
-          { toolName: tool.definition.name, turnId: turn.turnId },
-          "session.tool_call",
-        );
-
-        const startTime = Date.now();
-        try {
-          const result = await tool.execute(args, toolContext);
-          const durationMs = Date.now() - startTime;
-
-          // Emit tool_call event for visibility in event timeline
-          this.events.emitToolCall(tool.definition.name, {
-            turnId: turn.turnId,
-            args,
-            result,
-            durationMs,
-            success: true,
-          });
-
-          return JSON.stringify(result);
-        } catch (error) {
-          const durationMs = Date.now() - startTime;
-
-          // Emit tool_call event even on failure for visibility
-          this.events.emitToolCall(tool.definition.name, {
-            turnId: turn.turnId,
-            args,
-            result: {
-              error: error instanceof Error ? error.message : "unknown",
-            },
-            durationMs,
-            success: false,
-          });
-
-          this.logger.error(
-            {
-              toolName: tool.definition.name,
-              error: error instanceof Error ? error.message : "unknown",
-            },
-            "session.tool_error",
+          this.logger.info(
+            { toolName: tool.definition.name, turnId: turn.turnId },
+            "session.tool_call",
           );
-          return JSON.stringify({ error: "Tool execution failed" });
-        }
+
+          const startTime = Date.now();
+          try {
+            const result = await tool.execute(args, toolContext);
+            const durationMs = Date.now() - startTime;
+
+            this.events.emitToolCall(tool.definition.name, {
+              turnId: turn.turnId,
+              args,
+              result,
+              durationMs,
+              success: true,
+            });
+
+            return JSON.stringify(result);
+          } catch (error) {
+            const durationMs = Date.now() - startTime;
+
+            this.events.emitToolCall(tool.definition.name, {
+              turnId: turn.turnId,
+              args,
+              result: {
+                error: error instanceof Error ? error.message : "unknown",
+              },
+              durationMs,
+              success: false,
+            });
+
+            this.logger.error(
+              {
+                toolName: tool.definition.name,
+                error: error instanceof Error ? error.message : "unknown",
+              },
+              "session.tool_error",
+            );
+            return JSON.stringify({ error: "Tool execution failed" });
+          }
+        },
+      });
+    }
+
+    // Build tools in the format that works with AI.run (proven via debug endpoint)
+    const toolsForAI = tools.map((tool) => ({
+      type: "function" as const,
+      function: {
+        name: tool.definition.name,
+        description: tool.definition.description,
+        parameters: tool.definition.parameters,
       },
     }));
 
-    // Run with tools - streaming enabled for RTK
-    const response = await runWithTools(
-      this.ai,
-      this.config.model as Parameters<typeof runWithTools>[1],
-      { messages, tools: toolsForModel },
+    // Log available tools for debugging
+    this.logger.info(
       {
-        maxRecursiveToolRuns: this.config.maxToolRuns,
-        streamFinalResponse: true,
-        verbose: this.config.verbose,
+        turnId: turn.turnId,
+        toolCount: tools.length,
+        toolNames: tools.map((t) => t.definition.name),
+        model: this.config.model,
+        sampleToolSchema: toolsForAI[0] ?? null,
       },
+      "session.tools_available",
     );
 
-    // Handle streaming response
-    if (this.isReadableStream(response)) {
-      return this.handleStreamingResponse(response, turn, streamId);
+    // Tool call loop - max iterations to prevent infinite loops
+    let iterations = 0;
+    const maxIterations = this.config.maxToolRuns;
+
+    while (iterations < maxIterations) {
+      iterations++;
+
+      // Check for barge-in cancellation
+      if (this.isStreamCanceled(streamId)) {
+        this.logger.info(
+          { turnId: turn.turnId, streamId, iteration: iterations },
+          "session.agent_loop_canceled",
+        );
+        return "Request was interrupted.";
+      }
+
+      // Call AI with tools
+      this.logger.info(
+        {
+          turnId: turn.turnId,
+          iteration: iterations,
+          messageCount: messages.length,
+        },
+        "session.ai_run_start",
+      );
+
+      // Cast model to any since config.model is a string but AI.run expects keyof AiModels
+      const aiResponse = (await this.ai.run(
+        this.config.model as Parameters<typeof this.ai.run>[0],
+        {
+          messages,
+          tools: toolsForAI.length > 0 ? toolsForAI : undefined,
+        },
+      )) as {
+        response?: string;
+        tool_calls?: Array<{
+          name: string;
+          arguments: Record<string, unknown> | string;
+        }>;
+      };
+
+      this.logger.info(
+        {
+          turnId: turn.turnId,
+          iteration: iterations,
+          hasResponse: Boolean(aiResponse.response),
+          hasToolCalls: Boolean(aiResponse.tool_calls?.length),
+          toolCallCount: aiResponse.tool_calls?.length ?? 0,
+        },
+        "session.ai_run_complete",
+      );
+
+      // If no tool calls, we have the final response
+      if (!aiResponse.tool_calls || aiResponse.tool_calls.length === 0) {
+        const responseText = aiResponse.response?.trim() ?? "";
+
+        // Stream the final response (emit tokens)
+        if (responseText && !this.isStreamCanceled(streamId)) {
+          // Emit the response as a single chunk for now
+          // TODO: Could implement word-by-word streaming for better UX
+          this.events.emitToken(responseText, {
+            turnId: turn.turnId,
+            messageId: turn.messageId,
+          });
+        }
+
+        return responseText || "I'm not sure how to respond to that.";
+      }
+
+      // Execute tool calls
+      const toolResults: Array<{
+        role: "tool";
+        name: string;
+        content: string;
+      }> = [];
+
+      for (const toolCall of aiResponse.tool_calls) {
+        const executor = toolExecutors.get(toolCall.name);
+
+        if (!executor) {
+          this.logger.warn(
+            { toolName: toolCall.name, turnId: turn.turnId },
+            "session.unknown_tool_call",
+          );
+          toolResults.push({
+            role: "tool",
+            name: toolCall.name,
+            content: JSON.stringify({
+              error: `Unknown tool: ${toolCall.name}`,
+            }),
+          });
+          continue;
+        }
+
+        // Parse arguments if they're a string
+        let args: Record<string, unknown>;
+        if (typeof toolCall.arguments === "string") {
+          try {
+            args = JSON.parse(toolCall.arguments) as Record<string, unknown>;
+          } catch {
+            args = {};
+          }
+        } else {
+          args = toolCall.arguments ?? {};
+        }
+
+        const result = await executor.execute(args);
+        toolResults.push({
+          role: "tool",
+          name: toolCall.name,
+          content: result,
+        });
+      }
+
+      // Add assistant message with tool calls and tool results to messages
+      // The assistant "called" these tools
+      messages.push({
+        role: "assistant",
+        content: aiResponse.response ?? "",
+      });
+
+      // Add tool results
+      for (const toolResult of toolResults) {
+        messages.push(toolResult as unknown as RoleScopedChatInput);
+      }
     }
 
-    // Fallback to non-streaming response extraction
-    return this.extractResponseText(response);
+    // Max iterations reached
+    this.logger.warn(
+      { turnId: turn.turnId, iterations },
+      "session.max_tool_iterations_reached",
+    );
+    return "I apologize, but I'm having trouble completing this request. Please try again.";
   }
 
   /**
@@ -1023,19 +1160,16 @@ export class ConversationSessionV2 {
         : `${customerRequest}Write a single acknowledgement that covers these actions:\n${prompts.map((p) => `- ${p}`).join("\n")}`;
 
     try {
-      // Use non-streaming to get the complete response
-      const response = await runWithTools(
-        this.ai,
-        this.config.model as Parameters<typeof runWithTools>[1],
+      // Use direct AI.run for simple acknowledgement generation (no tools needed)
+      const response = (await this.ai.run(
+        this.config.model as Parameters<typeof this.ai.run>[0],
         {
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
           ],
-          tools: [],
         },
-        { streamFinalResponse: false, maxRecursiveToolRuns: 0 },
-      );
+      )) as { response?: string };
 
       const text = this.extractResponseText(response).replace(
         /^["']|["']$/g,

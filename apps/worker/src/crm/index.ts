@@ -12,8 +12,9 @@ export const getCrmAdapter = (env: Env): CrmAdapter => {
       return createHttpCrmAdapter(env);
     case "mock":
       return mockCrmAdapter;
+    case "d1":
     default:
-      // Default to D1 adapter for real database operations
+      // D1 adapter for real database operations
       return createD1CrmAdapter(env.DB);
   }
 };

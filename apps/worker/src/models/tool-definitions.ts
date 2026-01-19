@@ -54,12 +54,20 @@ export type ToolGatingState = {
  */
 export type DomainState = Record<string, unknown>;
 
-const fiveDigitZip = z.string().regex(/^\d{5}$/);
+const fiveDigitZip = z
+  .string()
+  .regex(/^\d{5}$/)
+  .describe("5-digit ZIP code");
 
 export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
   "crm.lookupCustomerByPhone": {
     description: "Look up a customer by phone number.",
-    inputSchema: z.object({ phoneE164: z.string().optional() }),
+    inputSchema: z.object({
+      phoneE164: z
+        .string()
+        .optional()
+        .describe("Phone number in E.164 format (e.g., +15551234567)"),
+    }),
     outputSchema: customerMatchResultSchema,
     missingArgsMessage: "A phone number is required to look up the account.",
     acknowledgement: "Got it—pulling up your account now.",
@@ -67,7 +75,7 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
   "crm.lookupCustomerByNameAndZip": {
     description: "Look up a customer by full name and ZIP code.",
     inputSchema: z.object({
-      fullName: z.string().min(1),
+      fullName: z.string().min(1).describe("Customer's full name"),
       zipCode: fiveDigitZip,
     }),
     outputSchema: customerMatchResultSchema,
@@ -77,25 +85,40 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
   },
   "crm.lookupCustomerByEmail": {
     description: "Look up a customer by email address.",
-    inputSchema: z.object({ email: z.string().email() }),
+    inputSchema: z.object({
+      email: z.string().email().describe("Customer's email address"),
+    }),
     outputSchema: customerMatchResultSchema,
     missingArgsMessage:
       "A valid email address is required to look up the account.",
     acknowledgement: "On it—searching for your account by email.",
   },
   "crm.verifyAccount": {
-    description: "Verify a customer account with ZIP code.",
+    description:
+      "Verify a customer account using their ZIP code. Call this when the customer provides their ZIP code.",
     inputSchema: z.object({
-      customerId: z.string().optional(),
-      zipCode: fiveDigitZip,
+      customerId: z
+        .string()
+        .optional()
+        .describe("Customer ID if known, otherwise omit"),
+      zipCode: z
+        .string()
+        .regex(/^\d{5}$/)
+        .describe("5-digit ZIP code provided by the customer"),
     }),
     outputSchema: verifyAccountResultSchema,
     missingArgsMessage:
       "Please provide a 5-digit ZIP code to verify the account.",
+    acknowledgement: "Got it—verifying your account now.",
   },
   "crm.getNextAppointment": {
-    description: "Fetch the next scheduled appointment.",
-    inputSchema: z.object({ customerId: z.string().optional() }),
+    description: "Fetch the next scheduled appointment for the customer.",
+    inputSchema: z.object({
+      customerId: z
+        .string()
+        .optional()
+        .describe("Customer ID (auto-populated from session)"),
+    }),
     outputSchema: appointmentResultSchema,
     missingArgsMessage: "Customer ID is required to load appointments.",
     requiresVerification: true,
@@ -108,10 +131,19 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     },
   },
   "crm.listUpcomingAppointments": {
-    description: "List upcoming appointments for a customer.",
+    description:
+      "List all upcoming appointments for the customer. Use this to see what appointments they have scheduled.",
     inputSchema: z.object({
-      customerId: z.string().optional(),
-      limit: z.number().int().positive().optional(),
+      customerId: z
+        .string()
+        .optional()
+        .describe("Customer ID (auto-populated from session)"),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Maximum number of appointments to return"),
     }),
     outputSchema: appointmentListResultSchema,
     missingArgsMessage: "Customer ID is required to list appointments.",
@@ -125,8 +157,10 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     },
   },
   "crm.getAppointmentById": {
-    description: "Fetch a specific appointment by ID.",
-    inputSchema: z.object({ appointmentId: z.string().min(1) }),
+    description: "Fetch a specific appointment by its ID.",
+    inputSchema: z.object({
+      appointmentId: z.string().min(1).describe("Unique appointment ID"),
+    }),
     outputSchema: appointmentResultSchema,
     missingArgsMessage: "Appointment ID is required to load that appointment.",
     requiresVerification: true,
@@ -140,21 +174,40 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
   },
   "crm.getOpenInvoices": {
     description: "Fetch open invoices for a customer.",
-    inputSchema: z.object({ customerId: z.string().optional() }),
+    inputSchema: z.object({
+      customerId: z
+        .string()
+        .optional()
+        .describe("Customer ID (auto-populated from session)"),
+    }),
     outputSchema: invoicesSummaryResultSchema,
     missingArgsMessage: "Customer ID is required to look up invoices.",
     requiresVerification: true,
     acknowledgement: "Reviewing your invoices now.",
   },
   "crm.getAvailableSlots": {
-    description: "Fetch available appointment slots for a customer.",
+    description: "Fetch available appointment slots for rescheduling.",
     inputSchema: z.object({
-      appointmentId: z.string().optional(),
-      customerId: z.string().optional(),
-      daysAhead: z.number().int().positive().optional(),
-      fromDate: z.string().optional(),
-      toDate: z.string().optional(),
-      preference: z.enum(["morning", "afternoon", "any"]).optional(),
+      appointmentId: z
+        .string()
+        .optional()
+        .describe("ID of appointment being rescheduled"),
+      customerId: z
+        .string()
+        .optional()
+        .describe("Customer ID (auto-populated from session)"),
+      daysAhead: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Number of days to look ahead for slots"),
+      fromDate: z.string().optional().describe("Start date for slot search"),
+      toDate: z.string().optional().describe("End date for slot search"),
+      preference: z
+        .enum(["morning", "afternoon", "any"])
+        .optional()
+        .describe("Time of day preference"),
     }),
     outputSchema: availableSlotListResultSchema,
     missingArgsMessage: "Customer ID is required to look up available slots.",
@@ -168,10 +221,13 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     },
   },
   "crm.rescheduleAppointment": {
-    description: "Reschedule an appointment to a chosen slot.",
+    description: "Reschedule an appointment to a new time slot.",
     inputSchema: z.object({
-      appointmentId: z.string().min(1),
-      slotId: z.string().min(1),
+      appointmentId: z
+        .string()
+        .min(1)
+        .describe("ID of appointment to reschedule"),
+      slotId: z.string().min(1).describe("ID of new time slot"),
     }),
     outputSchema: rescheduleResultSchema,
     missingArgsMessage:
@@ -180,9 +236,10 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     acknowledgement: "Got it—rescheduling that appointment now.",
   },
   "crm.cancelAppointment": {
-    description: "Cancel a scheduled appointment.",
+    description:
+      "Cancel a scheduled appointment. Call this when the customer confirms they want to cancel.",
     inputSchema: z.object({
-      appointmentId: z.string().min(1),
+      appointmentId: z.string().min(1).describe("ID of appointment to cancel"),
     }),
     outputSchema: z.object({ ok: z.boolean() }),
     missingArgsMessage:
@@ -193,10 +250,19 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
   "crm.createAppointment": {
     description: "Create a new appointment for a customer.",
     inputSchema: z.object({
-      customerId: z.string().optional(),
-      preferredWindow: z.string().min(1),
-      notes: z.string().optional(),
-      pestType: z.string().optional(),
+      customerId: z
+        .string()
+        .optional()
+        .describe("Customer ID (auto-populated from session)"),
+      preferredWindow: z
+        .string()
+        .min(1)
+        .describe("Preferred time window for the appointment"),
+      notes: z
+        .string()
+        .optional()
+        .describe("Additional notes for the appointment"),
+      pestType: z.string().optional().describe("Type of pest issue"),
     }),
     outputSchema: createAppointmentResultSchema,
     missingArgsMessage:
@@ -205,18 +271,27 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
     acknowledgement: "I'll schedule that appointment now.",
   },
   "crm.getServicePolicy": {
-    description: "Fetch a service policy by topic.",
-    inputSchema: z.object({ topic: z.string().min(1) }),
+    description:
+      "Fetch service policy information by topic (e.g., cancellation, pricing, guarantees).",
+    inputSchema: z.object({
+      topic: z
+        .string()
+        .min(1)
+        .describe("Policy topic to look up (e.g., cancellation, pricing)"),
+    }),
     outputSchema: servicePolicyResultSchema,
     missingArgsMessage: "A policy topic is required.",
     acknowledgement: "Checking that policy for you.",
   },
   "crm.escalate": {
-    description: "Escalate a request and create a ticket.",
+    description: "Escalate a request and create a support ticket.",
     inputSchema: z.object({
-      reason: z.string().optional(),
-      summary: z.string().optional(),
-      message: z.string().optional(),
+      reason: z.string().optional().describe("Reason for escalation"),
+      summary: z.string().optional().describe("Brief summary of the issue"),
+      message: z
+        .string()
+        .optional()
+        .describe("Detailed message for the support team"),
     }),
     outputSchema: crmEscalateResultSchema,
     missingArgsMessage: "Escalation details are required.",
@@ -226,9 +301,9 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
   "agent.escalate": {
     description: "Escalate to a human agent.",
     inputSchema: z.object({
-      reason: z.string().optional(),
-      summary: z.string().optional(),
-      message: z.string().optional(),
+      reason: z.string().optional().describe("Reason for escalation"),
+      summary: z.string().optional().describe("Brief summary of the issue"),
+      message: z.string().optional().describe("Detailed message for the agent"),
     }),
     outputSchema: escalateResultSchema,
     missingArgsMessage: "Escalation details are required.",

@@ -7,75 +7,148 @@ globs: ["**/*"]
 
 # CS-Agent Project Overview
 
-This is a Customer Success (CS) Agent system built with Cloudflare Workers. The project is organized as a monorepo with multiple applications and shared packages.
+PestCall is an AI-powered customer service agent for pest control, built on Cloudflare Workers. It handles customer verification, appointment management (reschedule/cancel), billing inquiries, and ticket creation through voice and chat interfaces.
 
-## Project Structure
+## Common Commands
 
-- **[apps/worker](../../apps/worker/)**: Main Cloudflare Worker application with Hono.js router
-  - Handles API routes for tickets, calls, and CRM operations
-  - Uses Cloudflare D1 for database operations
-  - Includes [repositories](../../apps/worker/src/repositories/), [use-cases](../../apps/worker/src/use-cases/), and [route handlers](../../apps/worker/src/routes/)
-- **apps/web**: Web application (to be developed)
-- **[packages/core](../../packages/core/)**: Shared core functionality
-  - [CRM schemas](../../packages/core/src/crm/schemas.ts) and types
-  - [Ticket management](../../packages/core/src/tickets/) with status transitions
-  - Database utilities and migrations
+```bash
+# Development
+bun dev                    # Run worker + web concurrently
+bun db:migrate:local       # Apply D1 migrations locally
+bun db:seed:local          # Seed local D1 with demo data
 
-## Technology Stack
+# Quality checks (run before pushing)
+bun qa                     # Full suite: typecheck + lint + format:check + all tests
+bun typecheck              # TypeScript compilation check
+bun lint                   # Lint with Biome
+bun fix                    # Auto-fix format + lint issues
 
-- **Runtime**: Cloudflare Workers
-- **Framework**: Hono.js for routing
-- **Database**: Cloudflare D1 (SQLite)
-- **Language**: TypeScript
-- **Package Manager**: Bun
-- **Testing**: Vitest
-- **Linting**: Biome, oxlint, cspell
+# Testing
+bun test                   # Unit tests (*.unit.test.ts)
+bun test:integration       # Integration tests with D1 (*.integration.test.ts)
+bun test:e2e               # E2E tests against local worker (*.e2e.test.ts)
 
-## Development Guidelines
+# Run a single test file
+bunx vitest run path/to/file.unit.test.ts -c vitest.unit.config.ts
+bunx vitest run path/to/file.integration.test.ts -c vitest.integration.config.ts
 
-### Code Style
+# Deployment
+bun deploy:worker          # Deploy worker (creates DB, applies migrations)
+bun deploy:worker --seed   # Deploy + seed demo data
+bun logs:worker            # Tail worker logs
 
-- Follow the [styleguide](../../docs/styleguide.md) for detailed implementation patterns
-- Use TypeScript for all code with strict type checking
-- Use 2-space indentation (tabs in some files)
-- Prefer functional programming patterns where appropriate
-- Use meaningful variable and function names
+# AI tool config (run after pulling changes to .rulesync/)
+bun sync:rules             # Regenerate Claude/Cursor/Copilot configs
 
-### Documentation
+# Conversation Analyzer (evaluation)
+bun run scripts/run-analyzer.ts --category <category> --with-analysis --save
+# Categories: verification, reschedule, cancel
+```
 
-- Follow the [documentation styleguide](../../docs/docs-styleguide.md) for all documentation
-- Highly readable and highly concise - write precisely the right context
-- Use relative markdown links for all references
-- Link to relevant code files when explaining concepts
-- Focus on "why" and "how it fits together", not obvious details
-- Update docs when changing behavior, delete docs for removed features
+## Architecture
 
-### Architecture Principles
+### Monorepo Structure
 
-- **Repository Pattern**: Database access through repository layer
-- **Use Cases**: Business logic in dedicated use-case files
-- **Dependency Injection**: Pass dependencies through context
-- **Error Handling**: Use proper HTTP status codes and error responses
-- **Testing**: Write integration tests for routes and unit tests for core logic
+- `apps/worker/` - Cloudflare Worker API (Hono.js + oRPC)
+- `apps/web/` - Next.js 14 UI (customer portal + agent dashboard)
+- `packages/core/` - Shared domain logic and Zod schemas (no Cloudflare bindings)
 
-### Database
+### Request Flow Pattern
 
-- Migrations are stored in [`apps/worker/migrations/`](../../apps/worker/migrations/)
-- Use D1 database through the [repository pattern](../../apps/worker/src/repositories/)
-- All database operations should go through repositories
-- Use proper SQL parameterization to prevent injection
+Routes → Use-cases → Repositories → D1/CRM
 
-### API Design
+- **Routes** (`apps/worker/src/routes/`): Thin handlers, validate with Zod, call use-cases
+- **Use-cases** (`apps/worker/src/use-cases/`): Business logic orchestration
+- **Repositories** (`apps/worker/src/repositories/`): D1 database access abstraction
+- **Context** (`apps/worker/src/context.ts`): Dependency injection via `createContext(env)`
 
-- RESTful endpoints following standard conventions
-- JSON request/response bodies
-- Proper HTTP status codes
-- Authentication via middleware when needed
+### Agent Architecture (Durable Objects)
 
-## Key Conventions
+The agent uses a strict separation between generic orchestration and domain logic:
 
-- Feature-based organization within `apps/worker/src/`
-- Shared types in `packages/core`
-- Route handlers call use-cases, use-cases call repositories
-- Mock CRM data available for testing
-- Integration tests use real D1 database instances
+**Generic Agent Layer** (`apps/worker/src/durable-objects/conversation-session/v2/`):
+- `session.ts` - Coordinator, WebSocket handling, model calls
+- `state.ts` - Session state management
+- `events.ts` - Event streaming and buffer for resync
+- No domain concepts - treats `domainState` as opaque `Record<string, unknown>`
+
+**Configuration Layer** (domain-specific):
+- `providers/tool-provider.ts` - Tool definitions, gating rules, acknowledgements
+- `providers/prompt-provider.ts` - Context-aware prompt building
+- `models/tool-definitions.ts` - Tool schemas with Zod
+
+**Constraint**: The agent layer must never contain domain-specific types. Logic like "is customer verified" or "has appointments" belongs in providers, not session.ts.
+
+### Tool Flow
+
+- Definitions: `apps/worker/src/models/tool-definitions.ts`
+- Handlers: `apps/worker/src/durable-objects/conversation-session/tool-flow/registry.ts`
+- Workflows (cancel/reschedule): `apps/worker/src/workflows/`
+
+## Key Patterns
+
+### Zod Schemas as Source of Truth
+```typescript
+// Define schema, infer type
+const customerSchema = z.object({ id: z.string(), name: z.string() });
+type Customer = z.infer<typeof customerSchema>;
+```
+
+### Multiline Strings (for prompts)
+```typescript
+// Use arrays joined with newlines, not template literals
+const lines = [
+  "First line",
+  `Dynamic: ${value}`,
+  "",
+  "Section header",
+];
+return lines.join("\n");
+```
+
+### Type Safety
+- Avoid inline casts like `(args as Type).field`
+- Use Zod `.parse()` for runtime validation
+- Use discriminated unions with type guards
+- Validate tool args at dispatch time
+
+### Testing
+- Integration tests use `getPlatformProxy` for Worker emulation with isolated D1
+- Each test gets fresh database via `persist: false`
+- Long-running tests need explicit timeouts: `{ timeout: 30000 }`
+
+## Conversation Analyzer (Evaluation System)
+
+The analyzer evaluates bot conversation quality against defined scenarios.
+
+**Key files:**
+- `scripts/run-analyzer.ts` - CLI for running evaluations
+- `apps/worker/src/analyzer/evaluator.ts` - AI analysis using Workers AI
+- `apps/worker/src/analyzer/best-practices.ts` - Scoring criteria and best practices
+
+**Understanding results:**
+- **Pass/Fail**: Whether step expectations matched (patterns, tool calls, state changes)
+- **AI Score**: True quality metric (0-100, strict scoring)
+
+**Critical insight**: Pass/fail is NOT the same as conversation quality. A scenario can "pass" while having a terrible conversation. Always check AI scores and read transcripts.
+
+See [Evaluation Improvement Guide](../../docs/evaluation-improvement-guide.md) for how to use evaluation results to improve the system.
+
+## Database
+
+Migrations: `apps/worker/migrations/` (format: `YYYYMMDDHHMMSS_description.sql`)
+
+Key tables: `call_sessions`, `call_turns`, `customers_cache`, `appointments`, `tickets`, `agent_prompt_config`
+
+## Documentation
+
+- [Styleguide](../../docs/styleguide.md) - Code patterns and conventions
+- [Testing](../../docs/testing.md) - Test structure and setup
+- [AI Agent Architecture](../../docs/ai-agent-architecture.md) - Agent design (source of truth)
+- [Documentation Styleguide](../../docs/docs-styleguide.md) - How to write docs
+- [Evaluation Improvement Guide](../../docs/evaluation-improvement-guide.md) - Using evaluations to improve the bot
+
+### Evaluation Issues (tracked problems)
+- [Verification Issues](../../docs/evaluation-issues/verification-issues.md)
+- [Cancel Issues](../../docs/evaluation-issues/cancel-issues.md)
+- [Architectural Issues](../../docs/evaluation-issues/architectural-issues.md) - Butt-in, response format, seeding

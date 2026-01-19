@@ -14,9 +14,10 @@ export async function handleGetAvailableSlots(
   ctx: ToolFlowContext,
   { args }: ToolExecutionInput<"crm.getAvailableSlots">,
 ): Promise<ToolRawResult> {
+  // Always use the session's verified customerId - never trust model input for customer identity
   const customerId =
-    args.customerId ??
     ctx.sessionState.conversation?.verification.customerId ??
+    args.customerId ??
     "";
 
   const slots = await getAvailableSlots(ctx.deps.crm, customerId, args);

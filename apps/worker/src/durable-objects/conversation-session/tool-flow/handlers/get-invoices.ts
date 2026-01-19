@@ -14,9 +14,10 @@ export async function handleGetInvoices(
   ctx: ToolFlowContext,
   { args }: ToolExecutionInput<"crm.getOpenInvoices">,
 ): Promise<ToolRawResult> {
+  // Always use the session's verified customerId - never trust model input for customer identity
   const customerId =
-    args.customerId ??
     ctx.sessionState.conversation?.verification.customerId ??
+    args.customerId ??
     "";
 
   const invoices = await getOpenInvoices(ctx.deps.crm, customerId);

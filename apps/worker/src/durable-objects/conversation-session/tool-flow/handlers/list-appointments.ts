@@ -18,9 +18,10 @@ export async function handleListAppointments(
   ctx: ToolFlowContext,
   { args, input }: ToolExecutionInput<"crm.listUpcomingAppointments">,
 ): Promise<ToolRawResult> {
+  // Always use the session's verified customerId - never trust model input for customer identity
   const customerId =
-    args.customerId ??
     ctx.sessionState.conversation?.verification.customerId ??
+    args.customerId ??
     "";
   const limit = args.limit ?? 3;
 

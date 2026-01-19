@@ -13,9 +13,10 @@ export async function handleGetNextAppointment(
   ctx: ToolFlowContext,
   { args }: ToolExecutionInput<"crm.getNextAppointment">,
 ): Promise<ToolRawResult> {
+  // Always use the session's verified customerId - never trust model input for customer identity
   const customerId =
-    args.customerId ??
     ctx.sessionState.conversation?.verification.customerId ??
+    args.customerId ??
     "";
 
   const appointment = await ctx.deps.crm.getNextAppointment(customerId);

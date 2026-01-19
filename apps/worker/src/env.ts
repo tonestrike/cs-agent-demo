@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const crmProviderSchema = z.enum(["mock", "http"]);
+const crmProviderSchema = z.enum(["mock", "http", "d1"]);
 const agentModelSchema = z.enum(["mock", "workers-ai", "openrouter"]);
 const agentToneSchema = z.enum(["warm", "neutral", "direct"]);
 

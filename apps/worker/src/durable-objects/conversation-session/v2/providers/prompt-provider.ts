@@ -93,133 +93,80 @@ function buildWorkflowContext(state: SessionState): string | null {
 export function createPromptProvider(
   config: PromptProviderConfig,
 ): PromptProvider {
-  const { agentConfig, knowledgeRetriever } = config;
+  const { agentConfig } = config;
 
   return {
     getGreeting: (): string => {
       return agentConfig.greeting;
     },
 
-    buildSystemPrompt: async (
-      state: SessionState,
-      userMessage?: string,
-    ): Promise<string> => {
+    buildSystemPrompt: async (state: SessionState): Promise<string> => {
       const verified = isVerified(state);
       const activeWorkflow = hasActiveWorkflow(state);
       const workflowContext = buildWorkflowContext(state);
 
+      // Use minimal, focused prompts for function calling
+      // The Hermes model works better with shorter prompts
+      if (!verified) {
+        return [
+          `You are a friendly ${agentConfig.companyName} customer service agent on a phone call.`,
+          "",
+          "CRITICAL: You MUST verify the customer before helping them.",
+          "",
+          "STEP 1 - ASK FOR ZIP (do NOT call any tools yet):",
+          "- Greet the customer warmly",
+          "- Ask for their ZIP code to pull up their account",
+          '- Example: "Hi there! I\'d be happy to help. Could you please provide your ZIP code so I can pull up your account?"',
+          "",
+          "STEP 2 - VERIFY (only after customer provides a 5-digit ZIP):",
+          "- When customer provides a ZIP code (5 digits like 98109 or 94107), call crm.verifyAccount with that ZIP",
+          "- After verification succeeds, greet them by name and ask how you can help",
+          "- If verification fails, kindly ask them to try again with the correct ZIP",
+          "",
+          "IMPORTANT RULES:",
+          "- Do NOT call crm.verifyAccount until the customer gives you a 5-digit ZIP code",
+          "- If the customer says something other than a ZIP code, acknowledge and ask again for their ZIP",
+          "- Never say 'I'm not sure how to respond' - always acknowledge and guide the conversation",
+          "",
+          "RESPONSE FORMAT (THIS IS A PHONE CALL):",
+          "- Speak naturally as if on a phone - no markdown, bullets, numbered lists, or formatting",
+          "- Say dates casually: 'February 10th' not 'February 10, 2025'",
+          "- Say times casually: 'between 10 and noon' not '10:00 AM - 12:00 PM'",
+          "- Never start with 'I understand that...' - just address their request directly",
+          "- Keep responses brief and conversational",
+        ].join("\n");
+      }
+
+      // Build a short, focused prompt for verified customers
       const lines: string[] = [
-        agentConfig.personaSummary,
-        `Company: ${agentConfig.companyName}.`,
-        `Tone: ${agentConfig.tone}.`,
+        `You are a helpful ${agentConfig.companyName} customer service agent on a phone call.`,
+        "The customer is VERIFIED. You have full access to their account.",
         "",
-        "## Current State",
-        `- Customer verified: ${verified ? "yes" : "no"}`,
-        `- Active workflow: ${activeWorkflow ? "yes" : "no"}`,
+        "APPOINTMENT WORKFLOW:",
+        "1. FIRST: Call crm.listUpcomingAppointments to get their appointments",
+        "2. Tell customer what appointments they have (date, time, address)",
+        "3. When they confirm cancel/reschedule, use crm.cancelAppointment or crm.rescheduleAppointment",
+        "   with the EXACT id from step 1 (like 'appt_002', NOT made-up IDs like '123' or '12345')",
         "",
+        "RESPONSE FORMAT (THIS IS A PHONE CALL):",
+        "- Speak naturally as if on a phone - no markdown, bullets, numbered lists, or formatting",
+        "- Say dates casually: 'February 10th' not 'February 10, 2025'",
+        "- Say times casually: 'between 10 and noon' not '10:00 AM - 12:00 PM'",
+        "- Never mention appointment IDs to customers - just describe the appointment",
+        "- Never start with 'I understand that...' - just address their request directly",
+        "- Keep responses brief and conversational - one or two sentences when possible",
+        "",
+        "CRITICAL RULES:",
+        "- Appointment IDs look like 'appt_001', 'appt_002'. ONLY use IDs from crm.listUpcomingAppointments results",
+        "- NEVER invent/make up appointment IDs - get them from tool results first",
+        "- NEVER ask customer for IDs or verification info - look it up yourself",
+        "- NEVER mention tool names to customers",
       ];
 
-      if (verified) {
-        lines.push(
-          "## Verified Customer (IMPORTANT)",
-          "The customer is ALREADY VERIFIED. You have full access to their account.",
-          "",
-          "DO NOT ask for:",
-          "- Address confirmation",
-          "- Phone number",
-          "- ZIP code",
-          "- Name confirmation",
-          "- Any other account verification details",
-          "",
-          "When the customer asks about appointments, reschedule, cancel, or account info:",
-          "- Use your tools DIRECTLY to look up the information",
-          "- Do NOT ask clarifying questions unless truly needed (e.g., they have multiple appointments and you need to know which one)",
-          "- Present the information from tool results naturally",
-          "",
-          'BAD: "Can you please confirm your address so I can look that up?"',
-          'GOOD: "Let me pull up your appointments." *calls tool* "I see you have..."',
-          "",
-        );
-      } else {
-        lines.push(
-          "## Verification Required",
-          "The customer is NOT verified. You can only:",
-          "- Ask for their 5-digit ZIP code to verify",
-          "- Answer general service policy questions",
-          "- Acknowledge their request and explain you need to verify first",
-          "",
-          'Example: "Happy to help you reschedule! First, can you confirm your ZIP code?"',
-          "",
-        );
-      }
-
+      // Add workflow context if active
       if (activeWorkflow && workflowContext) {
-        lines.push(
-          "## Active Workflow",
-          workflowContext,
-          "",
-          "Use the workflow tools (selectAppointment, selectSlot, confirm) to help the customer complete this flow.",
-          "",
-        );
+        lines.push("", `ACTIVE WORKFLOW: ${workflowContext}`);
       }
-
-      // RAG: Inject relevant knowledge if retriever is available and we have a user message
-      if (knowledgeRetriever && userMessage) {
-        try {
-          const results = await knowledgeRetriever.retrieve(userMessage, 3);
-
-          if (results.chunks.length > 0) {
-            lines.push(
-              "## Relevant Knowledge",
-              "Use this information to help answer the customer's question:",
-              "",
-            );
-
-            for (const chunk of results.chunks) {
-              lines.push(`### ${chunk.metadata.section}`, chunk.content, "");
-            }
-          }
-        } catch {
-          // Silently fail if RAG retrieval fails - agent can still respond without it
-        }
-      }
-
-      lines.push(
-        "## Guidelines",
-        "- Call tools when you need information or need to take action",
-        "- Keep responses warm, concise, and conversational",
-        "- Never mention tool names or internal systems to the customer",
-        "- If you don't have access to a tool you need, explain why (e.g., need verification)",
-        `- ${agentConfig.scopeMessage}`,
-        "",
-        "## Voice Output (CRITICAL)",
-        "Your responses will be read aloud via text-to-speech. Format everything for natural speech:",
-        '- Time ranges: "from 1 to 3pm" NOT "1-3pm"',
-        '- Dates: "January 15th" NOT "1/15" or "Jan 15"',
-        '- Numbers: "five" for small numbers, digits for larger ones',
-        '- Addresses: Read naturally, "123 Main Street" NOT "123 Main St."',
-        '- Abbreviations: Expand them - "appointment" NOT "appt", "minutes" NOT "mins"',
-        "- Avoid symbols that don't speak well: &, /, #, etc.",
-        '- Lists: Use "and" before the last item, pause naturally',
-        "",
-        "## Conversational Awareness",
-        '- When the customer repeats or confirms information you just gave them (e.g., "Tomorrow at 8am?"), they\'re confirming understanding. Just say "Yes, that\'s right!" or similar - do NOT re-explain or call tools again.',
-        '- When the customer says goodbye ("Bye!", "Thanks, bye!", "Have a good one!"), respond warmly and briefly. Do NOT call any tools or mention appointments.',
-        "- Match the energy of the conversation - if winding down, keep responses short.",
-        "- Avoid repeating the same information multiple times in a conversation.",
-        "",
-        "## Tool Usage",
-        "- When you call a tool, you'll receive the result automatically",
-        "- You can call multiple tools if needed",
-        "- After getting tool results, formulate a natural response",
-        "- Do NOT call tools for social pleasantries (greetings, confirmations, goodbyes)",
-        "",
-        "## Response Format (CRITICAL)",
-        "- Your response MUST be natural conversational language only",
-        "- NEVER output JSON, code, or structured data in your response",
-        '- NEVER write tool calls as text like {"type": "function"...}',
-        "- If unsure whether to call a tool, respond conversationally instead",
-      );
 
       return lines.join("\n");
     },

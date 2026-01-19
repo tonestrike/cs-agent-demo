@@ -232,7 +232,10 @@ const buildDecisionInstructions = (
     `If out of scope, respond politely. Guidance: ${config.scopeMessage}`,
     "Ask follow-up questions when details are missing.",
     "Prefer tool calls over assumptions or guesses.",
-    "Never include tool names like crm.* or agent.* in responses.",
+    "Never include tool names like crm.* or agent.* in responses except when calling a tool.",
+    "CRITICAL: When you need to perform an action (verify, cancel, reschedule, list), you MUST call the tool. Just SAYING you did something does NOT make it happen.",
+    "If you say 'I cancelled your appointment' WITHOUT calling crm.cancelAppointment, you are LYING to the customer.",
+    "NEVER skip a required tool call. If you need to cancel, you MUST call crm.cancelAppointment FIRST.",
     "Avoid repeating acknowledgements back-to-back.",
     "If the caller is just greeting or chatting, respond briefly and ask how you can help.",
     "If hasContext is true, do not repeat the greeting or reintroduce yourself.",
@@ -326,6 +329,54 @@ const extractAcknowledgement = (text: string | null | undefined) => {
     return null;
   }
   return trimmed;
+};
+
+/**
+ * Extract tool call from text-based roleplay patterns.
+ * The model sometimes outputs *call crm.toolName* instead of using the function calling API.
+ * This function detects and extracts the tool name from such patterns.
+ */
+const extractTextBasedToolCall = (
+  text: string | null | undefined,
+  logger: Logger,
+): { toolName: string; acknowledgement: string } | null => {
+  if (!text) return null;
+
+  // Pattern matches: *call crm.toolName*, *crm.toolName(args)*, *crm.toolName*
+  const patterns = [
+    /\*call\s+(crm\.[a-zA-Z]+|agent\.[a-zA-Z]+|workflow\.[a-zA-Z]+)\*/gi,
+    /\*(crm\.[a-zA-Z]+|agent\.[a-zA-Z]+|workflow\.[a-zA-Z]+)\s*\([^)]*\)\*/gi,
+    /\*(crm\.[a-zA-Z]+|agent\.[a-zA-Z]+|workflow\.[a-zA-Z]+)\*/gi,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      // Extract the tool name from the first match
+      const toolMatch = match[0].match(
+        /(?:call\s+)?(crm\.[a-zA-Z]+|agent\.[a-zA-Z]+|workflow\.[a-zA-Z]+)/i,
+      );
+      if (toolMatch?.[1]) {
+        const toolName = toolMatch[1];
+        // Remove all roleplay patterns from text to get the acknowledgement
+        let acknowledgement = text;
+        for (const p of patterns) {
+          acknowledgement = acknowledgement.replace(p, "").trim();
+        }
+        // Clean up extra whitespace and newlines
+        acknowledgement = acknowledgement.replace(/\s+/g, " ").trim();
+
+        logger.info(
+          { extractedToolName: toolName, pattern: match[0] },
+          "workers_ai.text_tool_extraction.detected",
+        );
+
+        return { toolName, acknowledgement };
+      }
+    }
+  }
+
+  return null;
 };
 
 const selectionSchema = z.object({
@@ -532,7 +583,26 @@ export const createWorkersAiAdapter = (
             return validated.data;
           }
         }
+
+        // Check for text-based tool calls when the model writes them as roleplay
         const text = responseToText(response);
+        const textBasedTool = extractTextBasedToolCall(text, logger);
+        if (textBasedTool) {
+          const validated = agentToolCallSchema.safeParse({
+            type: "tool_call",
+            toolName: textBasedTool.toolName,
+            arguments: {},
+            acknowledgement: textBasedTool.acknowledgement || undefined,
+          });
+          if (validated.success) {
+            logger.info(
+              { toolName: textBasedTool.toolName },
+              "workers_ai.text_tool_extraction.returning_tool_call",
+            );
+            return validated.data;
+          }
+        }
+
         // Return empty text if no meaningful response - let conversation session add diagnostics
         return {
           type: "final",

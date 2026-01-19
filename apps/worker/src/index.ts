@@ -272,6 +272,92 @@ export default {
       }
     }
 
+    // Debug endpoint for AI function calling test
+    if (url.pathname === "/debug/ai-tools" && request.method === "POST") {
+      if (!env.AI) {
+        return withCors(
+          Response.json(
+            { ok: false, error: "AI binding not configured" },
+            { status: 500 },
+          ),
+        );
+      }
+      try {
+        const body = (await request.json()) as { message?: string };
+        const message =
+          body.message ?? "My zip code is 98109. Please verify my account.";
+
+        // Test with the same format as our session uses (with dots in tool name)
+        const result = await env.AI.run(
+          "@hf/nousresearch/hermes-2-pro-mistral-7b",
+          {
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You are a helpful assistant that uses tools when needed. When the user provides a ZIP code, call the crm.verifyAccount tool.",
+              },
+              {
+                role: "user",
+                content: message,
+              },
+            ],
+            tools: [
+              {
+                type: "function",
+                function: {
+                  name: "crm.verifyAccount",
+                  description:
+                    "Verify a customer account using their ZIP code. Call this when the customer provides their ZIP code.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      customerId: {
+                        type: "string",
+                        description: "Customer ID if known, otherwise omit",
+                      },
+                      zipCode: {
+                        type: "string",
+                        description:
+                          "5-digit ZIP code provided by the customer",
+                      },
+                    },
+                    required: ["zipCode"],
+                  },
+                },
+              },
+            ],
+          },
+        );
+
+        return withCors(
+          Response.json({
+            ok: true,
+            message,
+            result,
+            hasToolCalls: Boolean(
+              (result as { tool_calls?: unknown }).tool_calls,
+            ),
+          }),
+        );
+      } catch (error) {
+        const logger = createLogger(env);
+        logger.error(
+          { error: error instanceof Error ? error.message : "unknown" },
+          "debug.ai_tools.error",
+        );
+        return withCors(
+          Response.json(
+            {
+              ok: false,
+              error: error instanceof Error ? error.message : "AI call failed",
+            },
+            { status: 500 },
+          ),
+        );
+      }
+    }
+
     if (url.pathname === "/health/openrouter") {
       const baseUrl = env.OPENROUTER_BASE_URL?.trim() ?? "";
       const token = env.OPENROUTER_TOKEN ?? "";

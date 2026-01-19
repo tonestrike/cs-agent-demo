@@ -112,9 +112,11 @@ export type SessionConfig = {
 /** Default session configuration */
 export const defaultSessionConfig: SessionConfig = {
   maxEventBuffer: 100,
-  model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  // Use Hermes 2 Pro - specifically fine-tuned for function calling
+  // See: https://developers.cloudflare.com/workers-ai/features/function-calling/
+  model: "@hf/nousresearch/hermes-2-pro-mistral-7b",
   maxToolRuns: 5,
-  verbose: false,
+  verbose: true, // Enable verbose logging for debugging function calling
 };
 
 /**
