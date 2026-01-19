@@ -289,7 +289,7 @@ How do we know if the bot is doing a good job? The analyzer runs test scenarios 
 
 ### Step 1: Define a Scenario
 
-Scenarios live in [`apps/worker/src/analyzer/scenarios/`](../apps/worker/src/analyzer/scenarios/):
+Scenarios live in [apps/worker/src/analyzer/scenarios](../apps/worker/src/analyzer/scenarios):
 
 ```typescript
 // cancel.ts
