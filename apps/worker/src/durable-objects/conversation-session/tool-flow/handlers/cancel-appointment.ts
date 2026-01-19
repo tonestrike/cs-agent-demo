@@ -17,11 +17,34 @@ export async function handleCancelAppointment(
   ctx: ToolFlowContext,
   { args }: ToolExecutionInput<"crm.cancelAppointment">,
 ): Promise<ToolRawResult> {
+  // Log the raw args to see what the model is passing
+  ctx.logger.info(
+    { argsRaw: JSON.stringify(args) },
+    "tool_handler.cancel_appointment.start",
+  );
+
   // Get appointment ID from args or from pending cancellation
   const appointmentId =
     args.appointmentId ??
     ctx.sessionState.conversation?.pendingCancellationId ??
     "";
+
+  // Also check activeSelection for the appointment ID
+  const activeSelection = ctx.sessionState.activeSelection as {
+    kind: string;
+    options: Array<{ id: string; label: string }>;
+    workflowType: string;
+  } | undefined;
+
+  ctx.logger.info(
+    {
+      appointmentId,
+      argsAppointmentId: args.appointmentId,
+      pendingCancellationId: ctx.sessionState.conversation?.pendingCancellationId,
+      activeSelectionOptions: activeSelection?.options?.map(o => o.id),
+    },
+    "tool_handler.cancel_appointment.resolved_id",
+  );
 
   if (!appointmentId) {
     return {

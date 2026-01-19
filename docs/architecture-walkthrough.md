@@ -10,7 +10,7 @@ Let's trace what happens when a customer says "Hi, I need to cancel my appointme
 
 ### Step 1: User Clicks "Start Call"
 
-The React app calls the [`useConversationSession`](../apps/web/src/app/customer/hooks/use-conversation-session.ts) hook:
+The React app calls the [useConversationSession](../apps/web/src/app/customer/hooks/use-conversation-session.ts) hook:
 
 ```typescript
 // use-conversation-session.ts:538-577
@@ -28,9 +28,9 @@ wss://pestcall-worker.../api/conversations/{sessionId}/socket
 ```
 
 **Related code:**
-- [`startCall` function (line 538)](../apps/web/src/app/customer/hooks/use-conversation-session.ts)
-- [`ensureSocket` function (line 151)](../apps/web/src/app/customer/hooks/use-conversation-session.ts) - WebSocket connection logic
-- [`buildWsUrl` function (line 138)](../apps/web/src/app/customer/hooks/use-conversation-session.ts) - URL construction
+- [startCall function (line 538)](../apps/web/src/app/customer/hooks/use-conversation-session.ts)
+- [ensureSocket function (line 151)](../apps/web/src/app/customer/hooks/use-conversation-session.ts) - WebSocket connection logic
+- [buildWsUrl function (line 138)](../apps/web/src/app/customer/hooks/use-conversation-session.ts) - URL construction
 
 ---
 
@@ -52,10 +52,10 @@ if (url.pathname.match(/\/api\/conversations\/([^/]+)\/socket/)) {
 }
 ```
 
-The Durable Object ([`ConversationSessionV2`](../apps/worker/src/durable-objects/conversation-session/v2/session.ts)) handles the WebSocket upgrade and is now ready to receive messages.
+The Durable Object ([ConversationSessionV2](../apps/worker/src/durable-objects/conversation-session/v2/session.ts)) handles the WebSocket upgrade and is now ready to receive messages.
 
 **Related code:**
-- [Worker entry point (`index.ts`)](../apps/worker/src/index.ts) - All request routing
+- [Worker entry point - index.ts](../apps/worker/src/index.ts) - All request routing
 - [Conversation route matching (line 167)](../apps/worker/src/index.ts)
 - [DO class export (line 13)](../apps/worker/src/index.ts)
 
@@ -78,7 +78,7 @@ const sendMessage = useCallback(async (message: string) => {
 ```
 
 **Related code:**
-- [`sendMessage` function (line 447)](../apps/web/src/app/customer/hooks/use-conversation-session.ts)
+- [sendMessage function (line 447)](../apps/web/src/app/customer/hooks/use-conversation-session.ts)
 - [WebSocket message handler (line 187)](../apps/web/src/app/customer/hooks/use-conversation-session.ts) - Receives streamed responses
 
 ---
@@ -115,11 +115,11 @@ async handleMessage(input: { text: string, phoneNumber: string }) {
 ```
 
 **Related code:**
-- [Session class (`session.ts` line 76)](../apps/worker/src/durable-objects/conversation-session/v2/session.ts) - Main coordinator
+- [Session class - session.ts line 76](../apps/worker/src/durable-objects/conversation-session/v2/session.ts) - Main coordinator
 - [HTTP message handler (line 198)](../apps/worker/src/durable-objects/conversation-session/v2/session.ts)
-- [Intent detection (`intent.ts`)](../apps/worker/src/durable-objects/conversation-session/intent.ts) - Detects cancel/reschedule/etc
-- [Prompt provider (`prompt-provider.ts`)](../apps/worker/src/durable-objects/conversation-session/v2/providers/prompt-provider.ts) - Builds system prompt
-- [Event emitter (`events.ts`)](../apps/worker/src/durable-objects/conversation-session/v2/events.ts) - Streams to WebSocket
+- [Intent detection - intent.ts](../apps/worker/src/durable-objects/conversation-session/intent.ts) - Detects cancel/reschedule/etc
+- [Prompt provider - prompt-provider.ts](../apps/worker/src/durable-objects/conversation-session/v2/providers/prompt-provider.ts) - Builds system prompt
+- [Event emitter - events.ts](../apps/worker/src/durable-objects/conversation-session/v2/events.ts) - Streams to WebSocket
 
 ---
 
@@ -140,8 +140,8 @@ The AI sees the user wants to cancel but isn't verified yet. It responds asking 
 ```
 
 **Related code:**
-- [Tool definitions (`tool-definitions.ts` line 62)](../apps/worker/src/models/tool-definitions.ts) - All available tools
-- [`crm.verifyAccount` definition (line 96)](../apps/worker/src/models/tool-definitions.ts)
+- [Tool definitions - tool-definitions.ts line 62](../apps/worker/src/models/tool-definitions.ts) - All available tools
+- [crm.verifyAccount definition (line 96)](../apps/worker/src/models/tool-definitions.ts)
 
 ---
 
@@ -192,11 +192,11 @@ export async function handleVerifyAccount(ctx, { args }) {
 ```
 
 **Related code:**
-- [Tool handler registry (`registry.ts`)](../apps/worker/src/durable-objects/conversation-session/tool-flow/registry.ts)
-- [Verify account handler (`verify-account.ts`)](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers/verify-account.ts)
-- [Cancel appointment handler (`cancel-appointment.ts`)](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers/cancel-appointment.ts)
-- [List appointments handler (`list-appointments.ts`)](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers/list-appointments.ts)
-- [Get available slots handler (`get-available-slots.ts`)](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers/get-available-slots.ts)
+- [Tool handler registry - registry.ts](../apps/worker/src/durable-objects/conversation-session/tool-flow/registry.ts)
+- [Verify account handler - verify-account.ts](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers/verify-account.ts)
+- [Cancel appointment handler - cancel-appointment.ts](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers/cancel-appointment.ts)
+- [List appointments handler - list-appointments.ts](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers/list-appointments.ts)
+- [Get available slots handler - get-available-slots.ts](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers/get-available-slots.ts)
 
 ---
 
@@ -214,7 +214,7 @@ After verification, the [tool gating](../apps/worker/src/models/tool-definitions
 }
 ```
 
-The [`getAvailableTools`](../apps/worker/src/models/tool-definitions.ts) function filters based on state (line 398):
+The [getAvailableTools](../apps/worker/src/models/tool-definitions.ts) function filters based on state (line 398):
 
 ```typescript
 // tool-definitions.ts:398-424
@@ -331,17 +331,17 @@ Scenarios live in [apps/worker/src/analyzer/scenarios](../apps/worker/src/analyz
 ```
 
 **Related code:**
-- [Scenario registry (`index.ts`)](../apps/worker/src/analyzer/scenarios/index.ts) - All scenarios
-- [Cancel scenarios (`cancel.ts`)](../apps/worker/src/analyzer/scenarios/cancel.ts)
-- [Verification scenarios (`verification.ts`)](../apps/worker/src/analyzer/scenarios/verification.ts)
-- [Reschedule scenarios (`reschedule.ts`)](../apps/worker/src/analyzer/scenarios/reschedule.ts)
-- [Scenario types (`types.ts`)](../apps/worker/src/analyzer/types.ts)
+- [Scenario registry - index.ts](../apps/worker/src/analyzer/scenarios/index.ts) - All scenarios
+- [Cancel scenarios - cancel.ts](../apps/worker/src/analyzer/scenarios/cancel.ts)
+- [Verification scenarios - verification.ts](../apps/worker/src/analyzer/scenarios/verification.ts)
+- [Reschedule scenarios - reschedule.ts](../apps/worker/src/analyzer/scenarios/reschedule.ts)
+- [Scenario types - types.ts](../apps/worker/src/analyzer/types.ts)
 
 ---
 
 ### Step 2: Runner Executes Against Live API
 
-The [`ScenarioRunner`](../apps/worker/src/analyzer/runner.ts) executes scenarios (line 64):
+The [ScenarioRunner](../apps/worker/src/analyzer/runner.ts) executes scenarios (line 64):
 
 ```typescript
 // runner.ts:95-315 (simplified)
@@ -373,16 +373,16 @@ async runScenario(scenario) {
 
 **Related code:**
 - [ScenarioRunner class (line 64)](../apps/worker/src/analyzer/runner.ts)
-- [`runScenario` method (line 95)](../apps/worker/src/analyzer/runner.ts)
-- [`checkExpectations` method (line 475)](../apps/worker/src/analyzer/runner.ts)
-- [`seedCustomer` method (line 413)](../apps/worker/src/analyzer/runner.ts)
-- [`seedAppointment` method (line 432)](../apps/worker/src/analyzer/runner.ts)
+- [runScenario method (line 95)](../apps/worker/src/analyzer/runner.ts)
+- [checkExpectations method (line 475)](../apps/worker/src/analyzer/runner.ts)
+- [seedCustomer method (line 413)](../apps/worker/src/analyzer/runner.ts)
+- [seedAppointment method (line 432)](../apps/worker/src/analyzer/runner.ts)
 
 ---
 
 ### Step 3: AI Evaluates Conversation Quality
 
-Pass/fail tells us if tools were called correctly. But was the conversation *good*? The [`ConversationEvaluator`](../apps/worker/src/analyzer/evaluator.ts) scores it (line 106):
+Pass/fail tells us if tools were called correctly. But was the conversation *good*? The [ConversationEvaluator](../apps/worker/src/analyzer/evaluator.ts) scores it (line 106):
 
 ```typescript
 // evaluator.ts:136-202 (simplified)
@@ -418,9 +418,9 @@ async analyze(scenario, result) {
 
 **Related code:**
 - [ConversationEvaluator class (line 106)](../apps/worker/src/analyzer/evaluator.ts)
-- [`analyze` method (line 136)](../apps/worker/src/analyzer/evaluator.ts)
-- [`buildAnalysisPrompt` method (line 230)](../apps/worker/src/analyzer/evaluator.ts) - Full prompt with best practices
-- [Best practices reference (`best-practices.ts`)](../apps/worker/src/analyzer/best-practices.ts) - Scoring criteria
+- [analyze method (line 136)](../apps/worker/src/analyzer/evaluator.ts)
+- [buildAnalysisPrompt method (line 230)](../apps/worker/src/analyzer/evaluator.ts) - Full prompt with best practices
+- [Best practices reference - best-practices.ts](../apps/worker/src/analyzer/best-practices.ts) - Scoring criteria
 - [Analysis response schema (line 33)](../apps/worker/src/analyzer/evaluator.ts)
 
 ---
@@ -441,8 +441,8 @@ bun run scripts/run-analyzer.ts --category cancel --with-analysis
 ```
 
 **Related code:**
-- [CLI script (`run-analyzer.ts`)](../scripts/run-analyzer.ts)
-- [Analyzer route (`analyzer.ts`)](../apps/worker/src/routes/analyzer.ts) - RPC endpoint
+- [CLI script - run-analyzer.ts](../scripts/run-analyzer.ts)
+- [Analyzer route - analyzer.ts](../apps/worker/src/routes/analyzer.ts) - RPC endpoint
 
 ---
 
@@ -453,14 +453,14 @@ bun run scripts/run-analyzer.ts --category cancel --with-analysis
 
 2. **Tool Gating**
    Tools like `cancelAppointment` only become available after verification.
-   See: [`getAvailableTools` in tool-definitions.ts](../apps/worker/src/models/tool-definitions.ts)
+   See: [getAvailableTools in tool-definitions.ts](../apps/worker/src/models/tool-definitions.ts)
 
 3. **Domain Logic in Tools, Not Session**
    The session is generic. All business rules live in [tool handlers](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers).
 
 4. **Streaming First**
    Tokens stream via WebSocket for real-time UI updates.
-   See: [Event emitter (`events.ts`)](../apps/worker/src/durable-objects/conversation-session/v2/events.ts)
+   See: [Event emitter - events.ts](../apps/worker/src/durable-objects/conversation-session/v2/events.ts)
 
 5. **Evaluation-Driven**
    Scenarios define expected behavior. AI scoring catches quality issues.
@@ -472,11 +472,11 @@ bun run scripts/run-analyzer.ts --category cancel --with-analysis
 
 | What | Where |
 |------|-------|
-| WebSocket/HTTP hook | [`use-conversation-session.ts`](../apps/web/src/app/customer/hooks/use-conversation-session.ts) |
-| Worker entry/routing | [`index.ts`](../apps/worker/src/index.ts) |
-| Conversation session DO | [`session.ts`](../apps/worker/src/durable-objects/conversation-session/v2/session.ts) |
-| Tool definitions | [`tool-definitions.ts`](../apps/worker/src/models/tool-definitions.ts) |
+| WebSocket/HTTP hook | [use-conversation-session.ts](../apps/web/src/app/customer/hooks/use-conversation-session.ts) |
+| Worker entry/routing | [index.ts](../apps/worker/src/index.ts) |
+| Conversation session DO | [session.ts](../apps/worker/src/durable-objects/conversation-session/v2/session.ts) |
+| Tool definitions | [tool-definitions.ts](../apps/worker/src/models/tool-definitions.ts) |
 | Tool handlers | [handlers](../apps/worker/src/durable-objects/conversation-session/tool-flow/handlers) |
 | Scenario definitions | [scenarios](../apps/worker/src/analyzer/scenarios) |
-| Scenario runner | [`runner.ts`](../apps/worker/src/analyzer/runner.ts) |
-| AI evaluator | [`evaluator.ts`](../apps/worker/src/analyzer/evaluator.ts) |
+| Scenario runner | [runner.ts](../apps/worker/src/analyzer/runner.ts) |
+| AI evaluator | [evaluator.ts](../apps/worker/src/analyzer/evaluator.ts) |
