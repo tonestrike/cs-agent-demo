@@ -7,7 +7,6 @@ import { useState } from "react";
 const links = [
   { href: "/customer", label: "Customer" },
   { href: "/agent", label: "Agent" },
-  { href: "/agent/prompt-studio", label: "Prompt Studio" },
 ];
 
 export function NavLinks() {

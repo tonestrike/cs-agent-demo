@@ -8,7 +8,6 @@ import {
   formatAvailableSlotsResponse,
   formatSlotLabel,
 } from "../formatters/slot-formatter";
-import { formatConversationSummary } from "../formatters/summary-formatter";
 
 describe("appointment-formatter", () => {
   describe("formatAppointmentLabel", () => {
@@ -171,85 +170,6 @@ describe("invoice-formatter", () => {
       expect(result).toBe(
         "Here is your open invoice: 1) 100.00 EUR due 2024-02-01",
       );
-    });
-  });
-});
-
-describe("summary-formatter", () => {
-  describe("formatConversationSummary", () => {
-    it("formats basic session", () => {
-      const result = formatConversationSummary(
-        {
-          id: "session-123",
-          startedAt: "2024-01-15T10:00:00Z",
-          endedAt: null,
-          phoneE164: "+15551234567",
-          status: "active",
-          transport: "websocket",
-          summary: null,
-          callSummary: null,
-        },
-        [],
-      );
-      expect(result).toContain("# Conversation session-123");
-      expect(result).toContain("- Phone: +15551234567");
-      expect(result).toContain("- Status: active");
-      expect(result).toContain("- Ended: in progress");
-    });
-
-    it("includes customer info when present", () => {
-      const result = formatConversationSummary(
-        {
-          id: "session-123",
-          startedAt: "2024-01-15T10:00:00Z",
-          endedAt: "2024-01-15T10:30:00Z",
-          phoneE164: "+15551234567",
-          status: "completed",
-          transport: "websocket",
-          summary: null,
-          callSummary: null,
-          customer: {
-            id: "cust-1",
-            displayName: "John Doe",
-            phoneE164: "+15551234567",
-            addressSummary: "123 Main St",
-            zipCode: "12345",
-          },
-        },
-        [],
-      );
-      expect(result).toContain("- Customer: John Doe (+15551234567)");
-      expect(result).toContain("- Address: 123 Main St");
-      expect(result).toContain("- ZIP: 12345");
-    });
-
-    it("formats turns with correct roles", () => {
-      const result = formatConversationSummary(
-        {
-          id: "session-123",
-          startedAt: "2024-01-15T10:00:00Z",
-          endedAt: null,
-          phoneE164: "+15551234567",
-          status: "active",
-          transport: "websocket",
-          summary: null,
-          callSummary: null,
-        },
-        [
-          { id: "1", ts: "10:00:00", speaker: "customer", text: "Hello" },
-          { id: "2", ts: "10:00:01", speaker: "agent", text: "Hi there!" },
-          {
-            id: "3",
-            ts: "10:00:02",
-            speaker: "system",
-            text: "Processing",
-            meta: { kind: "status" },
-          },
-        ],
-      );
-      expect(result).toContain("### Turn 1 (Customer)");
-      expect(result).toContain("### Turn 2 (Assistant)");
-      expect(result).toContain("### Turn 3 (System)");
     });
   });
 });
