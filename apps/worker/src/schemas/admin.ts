@@ -44,3 +44,20 @@ export const adminGetAppointmentOutputSchema = z.object({
     })
     .nullable(),
 });
+
+// Debug endpoint to look up customers by phone
+export const adminLookupCustomerInputSchema = z.object({
+  phoneE164: z.string().min(1),
+});
+
+export const adminLookupCustomerOutputSchema = z.object({
+  customers: z.array(
+    z.object({
+      id: z.string(),
+      displayName: z.string(),
+      phoneE164: z.string(),
+      zipCode: z.string().nullable(),
+      addressSummary: z.string().nullable(),
+    }),
+  ),
+});

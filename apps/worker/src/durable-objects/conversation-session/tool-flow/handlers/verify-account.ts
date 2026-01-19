@@ -35,7 +35,7 @@ export async function handleVerifyAccount(
   const phoneNumber = ctx.sessionState.lastPhoneNumber;
 
   ctx.logger.info(
-    { zipCode, hasPhone: !!phoneNumber },
+    { zipCode, phoneNumber, argsRaw: JSON.stringify(args) },
     "tool.verify_account.start",
   );
 
@@ -73,7 +73,15 @@ export async function handleVerifyAccount(
   try {
     customers = await lookupCustomerByPhone(ctx.deps.crm, phoneNumber);
     ctx.logger.info(
-      { phoneNumber, customerCount: customers.length },
+      {
+        phoneNumber,
+        customerCount: customers.length,
+        customers: customers.map((c) => ({
+          id: c.id,
+          displayName: c.displayName,
+          zipCode: c.zipCode,
+        })),
+      },
       "tool.verify_account.lookup_complete",
     );
   } catch (error) {
@@ -126,8 +134,21 @@ export async function handleVerifyAccount(
 
   // Try to verify each customer with the ZIP
   for (const customer of customers) {
+    ctx.logger.info(
+      {
+        customerId: customer.id,
+        customerZip: customer.zipCode,
+        providedZip: zipCode,
+        wouldMatch: customer.zipCode === zipCode,
+      },
+      "tool.verify_account.checking_customer",
+    );
     try {
       const verified = await verifyAccount(ctx.deps.crm, customer.id, zipCode);
+      ctx.logger.info(
+        { customerId: customer.id, verified },
+        "tool.verify_account.verify_result",
+      );
       if (verified) {
         ctx.logger.info(
           { customerId: customer.id },

@@ -74,3 +74,19 @@ export const getAdminAppointment = async (
     },
   };
 };
+
+export const lookupAdminCustomer = async (
+  deps: Dependencies,
+  input: { phoneE164: string },
+) => {
+  const customers = await deps.customers.lookupByPhone(input.phoneE164);
+  return {
+    customers: customers.map((c) => ({
+      id: c.id,
+      displayName: c.displayName,
+      phoneE164: c.phoneE164,
+      zipCode: c.zipCode ?? null,
+      addressSummary: c.addressSummary ?? null,
+    })),
+  };
+};

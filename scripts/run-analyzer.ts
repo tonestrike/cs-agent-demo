@@ -71,9 +71,6 @@ const options = {
   save: !args.includes("--no-save"),
 };
 
-// Generate unique run ID to avoid database constraint issues
-const runId = Date.now().toString(36).slice(-4);
-
 // Use local URL if --local flag, otherwise default to remote
 const baseUrl =
   process.env.WORKER_BASE ?? (options.local ? LOCAL_URL : REMOTE_URL);
@@ -240,6 +237,7 @@ type ScenarioDefinition = {
     customerId?: string;
     appointmentId?: string;
     seedAppointment?: boolean;
+    seedCustomer?: boolean;
   };
   steps: Array<{
     userMessage: string;
@@ -382,6 +380,9 @@ class LocalScenarioRunner {
           // Send the message - use seeded phone if available, otherwise base phone
           const phone =
             this.seededPhones.get(scenario.id) ?? scenario.setup.phone;
+          if (i === 0) {
+            console.log(colorize.dim(`    Using phone: ${phone}`));
+          }
           const response = await this.sendMessage(conversationId, {
             text: step.userMessage,
             phone,
@@ -392,6 +393,15 @@ class LocalScenarioRunner {
 
           // Get the debug state
           const debug = await this.getDebugState(conversationId);
+          const sessionPhone = (
+            debug.sessionState as { phoneNumber?: string }
+          )?.phoneNumber;
+          if (i === 1 && options.verbose) {
+            // Log session phone on step 2 (when ZIP is provided and verification runs)
+            console.log(
+              colorize.dim(`    Session phone: ${sessionPhone ?? "not set"}`),
+            );
+          }
 
           // Extract tool calls from events
           const toolCalls = this.extractToolCalls(debug.eventBuffer ?? []);
@@ -531,8 +541,14 @@ class LocalScenarioRunner {
     // Use runId suffix to avoid database constraint issues across runs
     const baseCustomerId = scenario.setup.customerId ?? `cust_${scenario.id}`;
     const customerId = `${baseCustomerId}_${this.runId}`;
-    // Generate unique phone number per run to avoid conflicts with existing customers
+    // Generate unique phone number per scenario to avoid conflicts
     const uniquePhone = this.generateUniquePhone(scenario.setup.phone);
+
+    console.log(
+      colorize.dim(
+        `    Customer: id=${customerId}, phone=${uniquePhone}, zip=${scenario.setup.zip}`,
+      ),
+    );
 
     try {
       await callRpc("admin/createCustomer", {
@@ -544,8 +560,15 @@ class LocalScenarioRunner {
       });
       // Store the unique phone for use in the conversation
       this.seededPhones.set(scenario.id, uniquePhone);
-    } catch {
-      // Customer may already exist
+      console.log(colorize.dim("    ✓ Customer seeded successfully"));
+    } catch (error) {
+      console.log(
+        colorize.yellow(
+          `    ⚠ Customer seeding failed: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+      // Still store the phone so conversation uses it - customer might already exist
+      this.seededPhones.set(scenario.id, uniquePhone);
     }
   }
 
@@ -570,6 +593,12 @@ class LocalScenarioRunner {
     const nowDate = new Date();
     const date = nowDate.toISOString().slice(0, 10);
 
+    console.log(
+      colorize.dim(
+        `    Appointment: id=${appointmentId}, customer=${customerId}, date=${date}`,
+      ),
+    );
+
     try {
       await callRpc("admin/createAppointment", {
         id: appointmentId,
@@ -580,8 +609,13 @@ class LocalScenarioRunner {
         timeWindow: "10:00-12:00",
         status: "scheduled",
       });
-    } catch {
-      // Appointment may already exist
+      console.log(colorize.dim("    ✓ Appointment seeded successfully"));
+    } catch (error) {
+      console.log(
+        colorize.yellow(
+          `    ⚠ Appointment seeding failed: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
     }
   }
 

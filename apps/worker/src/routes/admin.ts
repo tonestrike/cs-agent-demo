@@ -6,11 +6,14 @@ import {
   adminCreateCustomerOutputSchema,
   adminGetAppointmentInputSchema,
   adminGetAppointmentOutputSchema,
+  adminLookupCustomerInputSchema,
+  adminLookupCustomerOutputSchema,
 } from "../schemas/admin";
 import {
   createAdminAppointment,
   createAdminCustomer,
   getAdminAppointment,
+  lookupAdminCustomer,
 } from "../use-cases/admin";
 
 export const adminProcedures = {
@@ -31,5 +34,11 @@ export const adminProcedures = {
     .output(adminGetAppointmentOutputSchema)
     .handler(async ({ input, context }) => {
       return getAdminAppointment(context.deps, input);
+    }),
+  lookupCustomer: authedProcedure
+    .input(adminLookupCustomerInputSchema)
+    .output(adminLookupCustomerOutputSchema)
+    .handler(async ({ input, context }) => {
+      return lookupAdminCustomer(context.deps, input);
     }),
 };
