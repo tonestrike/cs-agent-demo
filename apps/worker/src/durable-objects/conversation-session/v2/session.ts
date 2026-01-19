@@ -27,6 +27,7 @@ import {
   getRealtimeKitConfigSummary,
   refreshRealtimeKitToken,
 } from "../../../realtime-kit";
+import { detectActionIntent } from "../intent";
 import { type ConnectionManager, createConnectionManager } from "./connection";
 import { type EventEmitter, createEventEmitter } from "./events";
 import { type StateManager, createStateManager } from "./state";
@@ -56,6 +57,10 @@ type TurnState = {
   acknowledgementTask: Promise<void> | null;
   completed: boolean;
   fallbackTimer: ReturnType<typeof setTimeout> | null;
+  /** The user's message for this turn (used for contextual acknowledgements) */
+  userMessage?: string;
+  /** Whether the user is verified at the start of this turn */
+  isVerified?: boolean;
 };
 
 /**
@@ -501,12 +506,36 @@ export class ConversationSessionV2 {
       callSessionId: input.callSessionId,
     });
 
+    // Detect and store pending intent if customer is not verified
+    // This captures intents like "reschedule" or "cancel" expressed before verification
+    const currentState = this.state.get();
+    const conversation = currentState.domainState["conversation"] as
+      | { verification?: { verified?: boolean } }
+      | undefined;
+    const isVerified = Boolean(conversation?.verification?.verified);
+
+    if (!isVerified) {
+      const detectedIntent = detectActionIntent(input.text);
+      if (detectedIntent) {
+        this.logger.info(
+          {
+            intent: detectedIntent.kind,
+            text: detectedIntent.text.slice(0, 50),
+          },
+          "session.pending_intent_detected",
+        );
+        await this.state.updateDomain({ pendingIntent: detectedIntent });
+      }
+    }
+
     // Create new stream ID for this turn
     const streamId = ++this.activeStreamId;
     this.canceledStreamIds.delete(streamId);
 
-    // Create turn
+    // Create turn with context for acknowledgement generation
     const turn = this.createTurn();
+    turn.userMessage = input.text;
+    turn.isVerified = isVerified;
     this.activeTurn = turn;
 
     // Mark as speaking
@@ -634,14 +663,16 @@ export class ConversationSessionV2 {
       parameters: tool.definition.parameters,
       function: async (args: Record<string, unknown>): Promise<string> => {
         // Queue acknowledgement prompt for aggregation
-        // Note: Tools that shouldn't have acknowledgements (like verification)
-        // should not define an acknowledgement in their tool definition
-        if (tool.definition.acknowledgement) {
+        // Skip acknowledgements during verification phase - the model's response
+        // will naturally include the request for ZIP code
+        // Also skip if tool has no acknowledgement defined
+        if (tool.definition.acknowledgement && turn.isVerified) {
           turn.acknowledgementPrompts.push(tool.definition.acknowledgement);
         }
 
-        // Emit aggregated acknowledgement once per turn (only if at least one prompt)
+        // Emit aggregated acknowledgement once per turn (only if verified and has prompts)
         if (
+          turn.isVerified &&
           !turn.acknowledged &&
           turn.acknowledgementPrompts.length > 0 &&
           !turn.acknowledgementTask
@@ -949,30 +980,42 @@ export class ConversationSessionV2 {
       return;
     }
 
-    // Build a clear prompt for acknowledgement generation
+    // Build a contextual prompt for acknowledgement generation
+    // Include the user's actual request so the acknowledgement is relevant
     const systemPromptLines = [
-      "You are a friendly customer service agent. Generate a single, brief acknowledgement message to let the customer know you're working on their request.",
+      "You are a friendly customer service agent. Generate a brief, natural acknowledgement that responds to what the customer just asked.",
+      "This will be read aloud via text-to-speech, so write for natural speech.",
       "",
       "## Rules",
       "- Write exactly ONE short sentence (under 100 characters)",
-      "- Be warm and reassuring",
-      "- Use natural conversational language",
+      "- Reference what the customer actually asked for (reschedule, cancel, billing, etc.)",
+      "- Sound human and conversational, like you're actually helping them",
       "- Do NOT ask any questions",
-      "- Do NOT make promises about specific outcomes",
-      '- Do NOT use filler words like "certainly" or "absolutely"',
+      "- Do NOT use generic phrases like 'Let me check that policy' or 'One moment'",
+      "- Do NOT use filler words like 'certainly', 'absolutely', or 'of course'",
+      "- Use natural speech formatting (e.g., 'from 1 to 3pm' not '1-3pm')",
       "",
-      "## Examples",
-      '- "Let me pull that up for you."',
-      '- "One moment while I check on that."',
-      '- "Got it—looking into that now."',
-      '- "Let me check your account and appointments."',
+      "## Good examples (contextual to request):",
+      '- Customer wants to reschedule: "Sure, let me pull up your current appointments."',
+      '- Customer asks about billing: "Got it, checking your account balance now."',
+      '- Customer wants to cancel: "Understood, pulling up your appointments to cancel."',
+      "",
+      "## Bad examples (too generic):",
+      '- "Let me check that for you." (doesn\'t reference what they asked)',
+      '- "One moment please." (sounds robotic)',
+      '- "Let me check that policy." (irrelevant to most requests)',
     ];
     const systemPrompt = systemPromptLines.join("\n");
 
+    // Include the user's message for context
+    const customerRequest = turn.userMessage
+      ? `Customer said: "${turn.userMessage.slice(0, 200)}"\n\n`
+      : "";
+
     const userPrompt =
       prompts.length === 1
-        ? `Write an acknowledgement for: ${prompts[0]}`
-        : `Write a single acknowledgement that covers all of these actions:\n${prompts.map((p) => `- ${p}`).join("\n")}`;
+        ? `${customerRequest}Write an acknowledgement for this action: ${prompts[0]}`
+        : `${customerRequest}Write a single acknowledgement that covers these actions:\n${prompts.map((p) => `- ${p}`).join("\n")}`;
 
     try {
       // Use non-streaming to get the complete response

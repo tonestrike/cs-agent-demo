@@ -7,6 +7,7 @@ import type { Customer } from "../types";
 import {
   ChatHeader,
   CustomerBar,
+  EventStreamCard,
   RealtimeKitChatPanel,
   RealtimeLogsPanel,
 } from "./index";
@@ -145,38 +146,9 @@ export function RealtimeChatView({
                   ) : (
                     [...logs]
                       .sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts))
-                      .slice(0, 20)
+                      .slice(0, 30)
                       .map((entry) => (
-                        <div
-                          key={entry.id}
-                          className={`rounded-lg border p-2 text-[11px] ${
-                            entry.level === "error"
-                              ? "border-red-200 bg-red-50"
-                              : entry.level === "warn"
-                                ? "border-amber-200 bg-amber-50"
-                                : "border-ink-100 bg-sand-50"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span
-                              className={`font-semibold uppercase ${
-                                entry.level === "error"
-                                  ? "text-red-700"
-                                  : entry.level === "warn"
-                                    ? "text-amber-700"
-                                    : "text-ink-500"
-                              }`}
-                            >
-                              {entry.level ?? "info"}
-                            </span>
-                            <span className="font-mono text-ink-400">
-                              {entry.ts.slice(11, 19)}
-                            </span>
-                          </div>
-                          <p className="mt-1 truncate font-medium text-ink-700">
-                            {entry.message}
-                          </p>
-                        </div>
+                        <EventStreamCard key={entry.id} entry={entry} />
                       ))
                   )}
                 </div>

@@ -10,6 +10,7 @@ import {
   lookupCustomerByPhone,
   verifyAccount,
 } from "../../../../use-cases/crm";
+import { processPendingIntent } from "../../intent";
 import type {
   ToolExecutionInput,
   ToolFlowContext,
@@ -24,6 +25,7 @@ import type {
  * 2. Look up customer(s) by phone
  * 3. Try to verify each with the ZIP
  * 4. Update verification state if successful
+ * 5. Process any pending intent (reschedule, cancel, etc.)
  */
 export async function handleVerifyAccount(
   ctx: ToolFlowContext,
@@ -132,7 +134,35 @@ export async function handleVerifyAccount(
           "tool.verify_account.verified",
         );
 
-        // Success - update conversation state
+        // Check for and process pending intent (reschedule, cancel, appointments, etc.)
+        const pendingIntent = ctx.sessionState.pendingIntent;
+        if (pendingIntent) {
+          ctx.logger.info(
+            { customerId: customer.id, intent: pendingIntent.kind },
+            "tool.verify_account.processing_pending_intent",
+          );
+
+          try {
+            const intentResult = await processPendingIntent(pendingIntent, {
+              crm: ctx.deps.crm,
+              customerId: customer.id,
+              customerName: customer.displayName,
+              getConversationState: ctx.getConversationState,
+            });
+
+            if (intentResult) {
+              return intentResult;
+            }
+          } catch (error) {
+            ctx.logger.error(
+              { error: error instanceof Error ? error.message : "unknown" },
+              "tool.verify_account.intent_processing_failed",
+            );
+            // Fall through to default verification success
+          }
+        }
+
+        // Default success - no pending intent or unsupported intent
         return {
           toolName: "crm.verifyAccount",
           result: {
