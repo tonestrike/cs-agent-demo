@@ -95,16 +95,12 @@ export const toolDefinitions: Record<AgentToolName, ToolDefinition> = {
   },
   "crm.verifyAccount": {
     description:
-      "Verify a customer account using their ZIP code. Call this when the customer provides their ZIP code.",
+      "Verify a customer account using their ZIP code. Call this when the customer provides their ZIP code. IMPORTANT: Put the ZIP code in the 'zipCode' parameter, not 'customerId'.",
     inputSchema: z.object({
-      customerId: z
-        .string()
-        .optional()
-        .describe("Customer ID if known, otherwise omit"),
       zipCode: z
         .string()
         .regex(/^\d{5}$/)
-        .describe("5-digit ZIP code provided by the customer"),
+        .describe("The customer's 5-digit ZIP code (e.g. '98109', '94107')"),
     }),
     outputSchema: verifyAccountResultSchema,
     missingArgsMessage:

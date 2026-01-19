@@ -31,7 +31,21 @@ export async function handleVerifyAccount(
   ctx: ToolFlowContext,
   { args }: ToolExecutionInput<"crm.verifyAccount">,
 ): Promise<ToolRawResult> {
-  const { zipCode } = args;
+  // Handle model confusion: sometimes the model puts ZIP in customerId instead of zipCode
+  // If zipCode is missing but customerId looks like a ZIP code, use it
+  let zipCode = args.zipCode;
+  const rawArgs = args as Record<string, unknown>;
+  if (!zipCode && typeof rawArgs["customerId"] === "string") {
+    const maybeZip = rawArgs["customerId"];
+    if (/^\d{5}$/.test(maybeZip)) {
+      ctx.logger.warn(
+        { customerId: maybeZip },
+        "tool.verify_account.fixing_misplaced_zip",
+      );
+      zipCode = maybeZip;
+    }
+  }
+
   const phoneNumber = ctx.sessionState.lastPhoneNumber;
 
   ctx.logger.info(
