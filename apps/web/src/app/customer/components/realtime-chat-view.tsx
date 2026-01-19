@@ -69,6 +69,10 @@ export function RealtimeChatView({
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
   }, [callSessionId, phoneNumber, status, logs, turnMetrics]);
 
+  const copyEventStream = useCallback(async () => {
+    await navigator.clipboard.writeText(JSON.stringify(logs, null, 2));
+  }, [logs]);
+
   return (
     <div className="flex min-w-0 flex-1 overflow-hidden bg-sand-200">
       <aside
@@ -134,9 +138,18 @@ export function RealtimeChatView({
                   <h3 className="text-sm font-semibold text-ink">
                     Event Stream
                   </h3>
-                  <span className="rounded-full bg-sand-100 px-2 py-0.5 text-[11px] font-semibold text-ink-600">
-                    {logs.length}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={copyEventStream}
+                      className="rounded bg-sand-100 px-2 py-0.5 text-[10px] font-medium text-ink-600 hover:bg-sand-200 transition"
+                    >
+                      Copy
+                    </button>
+                    <span className="rounded-full bg-sand-100 px-2 py-0.5 text-[11px] font-semibold text-ink-600">
+                      {logs.length}
+                    </span>
+                  </div>
                 </div>
                 <div className="max-h-64 space-y-2 overflow-y-auto">
                   {logs.length === 0 ? (
