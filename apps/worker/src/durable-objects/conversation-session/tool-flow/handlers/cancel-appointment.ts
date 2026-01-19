@@ -23,25 +23,45 @@ export async function handleCancelAppointment(
     "tool_handler.cancel_appointment.start",
   );
 
-  // Get appointment ID from args or from pending cancellation
-  const appointmentId =
+  // Check activeSelection for appointments in a cancel workflow
+  const activeSelection = ctx.sessionState.activeSelection as
+    | {
+        kind: string;
+        options: Array<{ id: string; label: string }>;
+        workflowType: string;
+      }
+    | undefined;
+
+  // Get appointment ID from args, pending cancellation, or fall back to activeSelection
+  // This handles the case where the model doesn't pass the ID explicitly but
+  // the user has confirmed they want to cancel an appointment from the presented list
+  let appointmentId =
     args.appointmentId ??
     ctx.sessionState.conversation?.pendingCancellationId ??
     "";
 
-  // Also check activeSelection for the appointment ID
-  const activeSelection = ctx.sessionState.activeSelection as {
-    kind: string;
-    options: Array<{ id: string; label: string }>;
-    workflowType: string;
-  } | undefined;
+  // If no ID from args but we have a single appointment in activeSelection for cancel,
+  // assume the user wants to cancel that one
+  if (
+    !appointmentId &&
+    activeSelection?.workflowType === "cancel" &&
+    activeSelection?.kind === "appointment" &&
+    activeSelection?.options?.length === 1
+  ) {
+    appointmentId = activeSelection.options[0].id;
+    ctx.logger.info(
+      { appointmentId, source: "activeSelection_single" },
+      "tool_handler.cancel_appointment.using_active_selection",
+    );
+  }
 
   ctx.logger.info(
     {
       appointmentId,
       argsAppointmentId: args.appointmentId,
-      pendingCancellationId: ctx.sessionState.conversation?.pendingCancellationId,
-      activeSelectionOptions: activeSelection?.options?.map(o => o.id),
+      pendingCancellationId:
+        ctx.sessionState.conversation?.pendingCancellationId,
+      activeSelectionOptions: activeSelection?.options?.map((o) => o.id),
     },
     "tool_handler.cancel_appointment.resolved_id",
   );

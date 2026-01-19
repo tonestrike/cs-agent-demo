@@ -59,7 +59,10 @@ function buildWorkflowContext(state: SessionState): string | null {
       .join("\n");
 
     if (selection.kind === "appointment") {
-      const action = selection.workflowType === "cancel" ? "crm.cancelAppointment" : "crm.rescheduleAppointment";
+      const action =
+        selection.workflowType === "cancel"
+          ? "crm.cancelAppointment"
+          : "crm.rescheduleAppointment";
       return `Customer is selecting an appointment for ${selection.workflowType}:\n${optionsList}\n\nWhen customer confirms, call ${action} with the appointment ID (e.g., '${selection.options[0]?.id || "appt_xxx"}').`;
     }
     if (selection.kind === "slot") {
