@@ -53,15 +53,17 @@ function buildWorkflowContext(state: SessionState): string | null {
       workflowType: string;
     };
 
+    // Include appointment/slot IDs so the model can use them in tool calls
     const optionsList = selection.options
-      .map((opt, i) => `${i + 1}. ${opt.label}`)
+      .map((opt, i) => `${i + 1}. [id: ${opt.id}] ${opt.label}`)
       .join("\n");
 
     if (selection.kind === "appointment") {
-      return `Customer is selecting an appointment for ${selection.workflowType}:\n${optionsList}`;
+      const action = selection.workflowType === "cancel" ? "crm.cancelAppointment" : "crm.rescheduleAppointment";
+      return `Customer is selecting an appointment for ${selection.workflowType}:\n${optionsList}\n\nWhen customer confirms, call ${action} with the appointment ID (e.g., '${selection.options[0]?.id || "appt_xxx"}').`;
     }
     if (selection.kind === "slot") {
-      return `Customer is selecting a time slot:\n${optionsList}`;
+      return `Customer is selecting a time slot:\n${optionsList}\n\nWhen customer confirms, use the slot ID for rescheduling.`;
     }
     if (selection.kind === "confirmation") {
       return `Waiting for customer to confirm or decline the ${selection.workflowType}.`;
