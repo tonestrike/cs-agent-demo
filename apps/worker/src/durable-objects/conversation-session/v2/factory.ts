@@ -8,7 +8,9 @@
 import type { Ai, DurableObjectState } from "@cloudflare/workers-types";
 import type { AgentPromptConfig } from "@pestcall/core";
 import type { createDependencies } from "../../../context";
+import type { Env } from "../../../env";
 import type { Logger } from "../../../logger";
+import { createAnthropicAdapter } from "../../../models/anthropic";
 import type { KnowledgeRetriever } from "../../../rag";
 import { createPromptProvider } from "./providers/prompt-provider";
 import { createToolProvider } from "./providers/tool-provider";
@@ -30,8 +32,8 @@ export type SessionFactoryConfig = {
   agentConfig: AgentPromptConfig;
   /** Stream ID for cancellation */
   streamId?: number;
-  /** Environment bindings */
-  env?: Record<string, unknown>;
+  /** Environment bindings (typed as Env for model adapter creation) */
+  env?: Env;
   /** Knowledge retriever for RAG (optional) */
   knowledgeRetriever?: KnowledgeRetriever;
 };
@@ -67,7 +69,7 @@ export function createSession(
     deps,
     agentConfig,
     streamId = 1,
-    env = {},
+    env,
     knowledgeRetriever,
   } = config;
 
@@ -82,14 +84,30 @@ export function createSession(
     knowledgeRetriever,
   });
 
+  // Create model adapter if Anthropic is configured
+  const modelAdapter =
+    env?.ANTHROPIC_API_KEY && env.AGENT_MODEL === "anthropic"
+      ? createAnthropicAdapter(
+          env,
+          env.ANTHROPIC_MODEL_ID ?? "",
+          agentConfig,
+          logger,
+        )
+      : undefined;
+
   // Build session
-  return SessionBuilder.create(durableState)
+  const builder = SessionBuilder.create(durableState)
     .withLogger(logger)
     .withAI(ai)
     .withToolProvider(toolProvider)
     .withPromptProvider(promptProvider)
-    .withEnv(env)
-    .build();
+    .withEnv(env ?? {});
+
+  if (modelAdapter) {
+    builder.withModelAdapter(modelAdapter);
+  }
+
+  return builder.build();
 }
 
 /**

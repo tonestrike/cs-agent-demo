@@ -1,7 +1,12 @@
 import { z } from "zod";
 
 const crmProviderSchema = z.enum(["mock", "http", "d1"]);
-const agentModelSchema = z.enum(["mock", "workers-ai", "openrouter"]);
+const agentModelSchema = z.enum([
+  "mock",
+  "workers-ai",
+  "openrouter",
+  "anthropic",
+]);
 const agentToneSchema = z.enum(["warm", "neutral", "direct"]);
 
 export const envSchema = z.object({
@@ -34,6 +39,10 @@ export const envSchema = z.object({
   OPENROUTER_REFERER: z.string().optional(),
   OPENROUTER_TITLE: z.string().optional(),
   OPENROUTER_BASE_URL: z.string().optional(),
+  // Anthropic configuration
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL_ID: z.string().optional(),
+  ANTHROPIC_BASE_URL: z.string().optional(),
   CONVERSATION_HUB: z.custom<DurableObjectNamespace>().optional(),
   CONVERSATION_SESSION_V2: z.custom<DurableObjectNamespace>().optional(),
   VOICE_AGENT: z.custom<DurableObjectNamespace>().optional(),

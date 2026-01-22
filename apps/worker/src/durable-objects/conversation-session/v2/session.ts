@@ -20,6 +20,7 @@ import type {
 import { EventSourceParserStream } from "eventsource-parser/stream";
 import type pino from "pino";
 import type { Env } from "../../../env";
+import type { ModelAdapter } from "../../../models/types";
 import {
   addRealtimeKitGuestParticipant,
   createRealtimeKitMeeting,
@@ -63,6 +64,36 @@ type TurnState = {
 };
 
 /**
+ * Strip tool call text leakage that LLMs sometimes output as plain text.
+ * Removes patterns like `[tool_call]...[/tool_call]` from the response.
+ * This is a common issue with instruction-following models that echo tool syntax.
+ */
+const stripToolCallLeakage = (text: string): string => {
+  // Remove [tool_call]...[/tool_call] blocks (including Python dict-style content)
+  let cleaned = text.replace(/\[tool_call\][\s\S]*?\[\/tool_call\]/gi, "");
+
+  // Remove standalone tool call artifacts like {'arguments': ...} or {"name": "crm.xxx"}
+  cleaned = cleaned.replace(
+    /\{['"]?(?:arguments|name)['"]?\s*:\s*[\s\S]*?\}\s*/g,
+    "",
+  );
+
+  // Remove parenthesized action notes like "(Pause for effect)" or "(checking...)"
+  cleaned = cleaned.replace(
+    /\([^)]*(?:pause|checking|looking|moment).*?\)/gi,
+    "",
+  );
+
+  // Clean up any resulting double spaces or newlines
+  cleaned = cleaned
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/ {2,}/g, " ")
+    .trim();
+
+  return cleaned;
+};
+
+/**
  * ConversationSession v2
  *
  * A slim, generic coordinator that:
@@ -80,6 +111,7 @@ export class ConversationSessionV2 {
   private logger: Logger;
   private config: SessionConfig;
   private ai: Ai | undefined;
+  private modelAdapter: ModelAdapter | undefined;
   private toolProvider: ToolProvider;
   private promptProvider: PromptProvider;
   private env: Record<string, unknown>;
@@ -102,6 +134,7 @@ export class ConversationSessionV2 {
   constructor(durableState: DurableObjectState, deps: SessionDeps) {
     this.logger = deps.logger;
     this.ai = deps.ai;
+    this.modelAdapter = deps.modelAdapter;
     this.toolProvider = deps.toolProvider;
     this.promptProvider = deps.promptProvider;
     this.env = deps.env;
@@ -613,16 +646,27 @@ export class ConversationSessionV2 {
   }
 
   /**
-   * Run the agent loop with tools using direct AI.run calls.
-   * This bypasses runWithTools for better control over the tool format.
+   * Run the agent loop with tools using ModelAdapter or direct AI.run calls.
+   * Supports both external model adapters (Anthropic, OpenRouter) and Workers AI.
    */
   private async runAgentLoop(
     input: MessageInput,
     turn: TurnState,
     streamId: number,
   ): Promise<string> {
-    if (!this.ai) {
+    // Check for model availability
+    if (!this.modelAdapter && !this.ai) {
       this.logger.warn({}, "session.no_ai_binding");
+      return "AI is not available. Please try again later.";
+    }
+
+    // If we have a modelAdapter, use the adapter-based flow
+    if (this.modelAdapter) {
+      return this.runAgentLoopWithAdapter(input, turn, streamId);
+    }
+
+    // Fallback to Workers AI direct calls
+    if (!this.ai) {
       return "AI is not available. Please try again later.";
     }
 
@@ -809,7 +853,10 @@ export class ConversationSessionV2 {
 
       // If no tool calls, we have the final response
       if (!aiResponse.tool_calls || aiResponse.tool_calls.length === 0) {
-        const responseText = aiResponse.response?.trim() ?? "";
+        // Strip any tool call leakage from the response
+        const responseText = stripToolCallLeakage(
+          aiResponse.response?.trim() ?? "",
+        );
 
         // Stream the final response (emit tokens)
         if (responseText && !this.isStreamCanceled(streamId)) {
@@ -886,6 +933,356 @@ export class ConversationSessionV2 {
     this.logger.warn(
       { turnId: turn.turnId, iterations },
       "session.max_tool_iterations_reached",
+    );
+    return "I apologize, but I'm having trouble completing this request. Please try again.";
+  }
+
+  /**
+   * Run the agent loop using a ModelAdapter (Anthropic, OpenRouter, etc.).
+   * Handles tool calls and loops until a final response is generated.
+   *
+   * Uses proper Anthropic tool_result message threading with tool_use_id matching.
+   */
+  private async runAgentLoopWithAdapter(
+    input: MessageInput,
+    turn: TurnState,
+    streamId: number,
+  ): Promise<string> {
+    if (!this.modelAdapter) {
+      return "Model adapter is not available.";
+    }
+
+    // Get fresh state at start (will be refreshed each iteration)
+    let sessionState = this.state.get();
+
+    // Build system prompt via provider (async for RAG retrieval)
+    const systemPrompt = await this.promptProvider.buildSystemPrompt(
+      sessionState,
+      input.text,
+    );
+
+    // Helper to get fresh tool context each iteration
+    const getToolContext = (): ToolContext => ({
+      sessionState: this.state.get(), // Fresh state reference
+      updateState: async (updates) => {
+        await this.state.updateDomain(updates);
+      },
+      logger: this.logger,
+      input,
+    });
+
+    // Get tools from provider (will be refreshed each iteration for gating)
+    const getTools = () => this.toolProvider.getTools(this.state.get());
+
+    // Build tool executor for a given tool
+    const createToolExecutor = (
+      tool: ReturnType<typeof getTools>[0],
+      toolContext: ToolContext,
+    ) => {
+      return async (
+        args: Record<string, unknown>,
+      ): Promise<{ result: string; isError: boolean }> => {
+        // Queue acknowledgement prompt for aggregation
+        if (tool.definition.acknowledgement && turn.isVerified) {
+          const ack = tool.definition.acknowledgement;
+          const ackText =
+            typeof ack === "function" ? ack(toolContext.sessionState) : ack;
+          if (ackText) {
+            turn.acknowledgementPrompts.push(ackText);
+          }
+        }
+
+        // Emit aggregated acknowledgement once per turn
+        if (
+          turn.isVerified &&
+          !turn.acknowledged &&
+          turn.acknowledgementPrompts.length > 0 &&
+          !turn.acknowledgementTask
+        ) {
+          turn.acknowledged = true;
+          turn.acknowledgementTask = this.emitAggregatedAcknowledgement(turn);
+        }
+
+        this.logger.info(
+          { toolName: tool.definition.name, turnId: turn.turnId },
+          "session.adapter_tool_call",
+        );
+
+        const startTime = Date.now();
+        try {
+          const result = await tool.execute(args, toolContext);
+          const durationMs = Date.now() - startTime;
+
+          this.events.emitToolCall(tool.definition.name, {
+            turnId: turn.turnId,
+            args,
+            result,
+            durationMs,
+            success: true,
+          });
+
+          return { result: JSON.stringify(result), isError: false };
+        } catch (error) {
+          const durationMs = Date.now() - startTime;
+
+          this.events.emitToolCall(tool.definition.name, {
+            turnId: turn.turnId,
+            args,
+            result: {
+              error: error instanceof Error ? error.message : "unknown",
+            },
+            durationMs,
+            success: false,
+          });
+
+          this.logger.error(
+            {
+              toolName: tool.definition.name,
+              error: error instanceof Error ? error.message : "unknown",
+            },
+            "session.adapter_tool_error",
+          );
+          return {
+            result: JSON.stringify({ error: "Tool execution failed" }),
+            isError: true,
+          };
+        }
+      };
+    };
+
+    // Log available tools for debugging
+    const initialTools = getTools();
+    this.logger.info(
+      {
+        turnId: turn.turnId,
+        toolCount: initialTools.length,
+        toolNames: initialTools.map((t) => t.definition.name),
+        adapterName: this.modelAdapter.name,
+        modelId: this.modelAdapter.modelId,
+      },
+      "session.adapter_tools_available",
+    );
+
+    // Tool call loop - max iterations to prevent infinite loops
+    let iterations = 0;
+    const maxIterations = this.config.maxToolRuns;
+
+    // Proper tool result threading state
+    type ToolResultEntry = {
+      toolUseId: string;
+      toolName: string;
+      result: string;
+      isError: boolean;
+    };
+    type PriorToolCallEntry = {
+      toolUseId: string;
+      toolName: string;
+      arguments: Record<string, unknown>;
+    };
+
+    let toolResults: ToolResultEntry[] = [];
+    let priorToolCalls: PriorToolCallEntry[] = [];
+    let priorAcknowledgement: string | undefined;
+
+    while (iterations < maxIterations) {
+      iterations++;
+
+      // Check for barge-in cancellation
+      if (this.isStreamCanceled(streamId)) {
+        this.logger.info(
+          { turnId: turn.turnId, streamId, iteration: iterations },
+          "session.adapter_loop_canceled",
+        );
+        return "Request was interrupted.";
+      }
+
+      // Refresh state each iteration for proper tool gating
+      sessionState = this.state.get();
+      const toolContext = getToolContext();
+      const tools = getTools();
+
+      // Build tool executors map for this iteration (may change due to gating)
+      const toolExecutors = new Map<
+        string,
+        {
+          execute: (
+            args: Record<string, unknown>,
+          ) => Promise<{ result: string; isError: boolean }>;
+          definition: (typeof tools)[0]["definition"];
+        }
+      >();
+      for (const tool of tools) {
+        toolExecutors.set(tool.definition.name, {
+          definition: tool.definition,
+          execute: createToolExecutor(tool, toolContext),
+        });
+      }
+
+      // Build input for model adapter with proper tool result threading
+      const domainState = sessionState.domainState as {
+        conversation?: {
+          customer?: {
+            id?: string;
+            displayName?: string;
+            phoneE164?: string;
+            addressSummary?: string;
+          };
+        };
+      };
+      const customer = domainState.conversation?.customer;
+
+      this.logger.info(
+        {
+          turnId: turn.turnId,
+          iteration: iterations,
+          historyLength: this.messageHistory.length,
+          hasToolResults: toolResults.length > 0,
+          hasPriorToolCalls: priorToolCalls.length > 0,
+          toolResultCount: toolResults.length,
+        },
+        "session.adapter_generate_start",
+      );
+
+      // Call the model adapter with proper tool_result threading
+      const output = await this.modelAdapter.generate({
+        text: input.text,
+        customer: {
+          id: customer?.id ?? "unknown",
+          displayName: customer?.displayName ?? "Customer",
+          phoneE164: customer?.phoneE164 ?? sessionState.phoneNumber ?? "",
+          addressSummary: customer?.addressSummary ?? "",
+        },
+        messages: this.messageHistory,
+        context: systemPrompt,
+        hasContext: this.messageHistory.length > 0,
+        // Proper tool_result threading fields
+        toolResults: toolResults.length > 0 ? toolResults : undefined,
+        priorToolCalls: priorToolCalls.length > 0 ? priorToolCalls : undefined,
+        priorAcknowledgement,
+      });
+
+      this.logger.info(
+        {
+          turnId: turn.turnId,
+          iteration: iterations,
+          outputType: output.type,
+        },
+        "session.adapter_generate_complete",
+      );
+
+      // Handle final response
+      if (output.type === "final") {
+        // Strip any tool call leakage from the response
+        const responseText = stripToolCallLeakage(output.text.trim());
+
+        // Stream the final response (emit tokens)
+        if (responseText && !this.isStreamCanceled(streamId)) {
+          this.events.emitToken(responseText, {
+            turnId: turn.turnId,
+            messageId: turn.messageId,
+          });
+        }
+
+        return responseText || "I'm not sure how to respond to that.";
+      }
+
+      // Reset for new iteration
+      toolResults = [];
+      priorToolCalls = [];
+      priorAcknowledgement = undefined;
+
+      // Handle single tool call
+      if (output.type === "tool_call") {
+        const executor = toolExecutors.get(output.toolName);
+
+        // Track prior tool call for message threading
+        priorToolCalls.push({
+          toolUseId: output.toolUseId,
+          toolName: output.toolName,
+          arguments: output.arguments ?? {},
+        });
+
+        // Store acknowledgement for next iteration
+        priorAcknowledgement = output.acknowledgement;
+
+        if (!executor) {
+          this.logger.warn(
+            { toolName: output.toolName, turnId: turn.turnId },
+            "session.adapter_unknown_tool",
+          );
+          toolResults.push({
+            toolUseId: output.toolUseId,
+            toolName: output.toolName,
+            result: JSON.stringify({
+              error: `Unknown tool: ${output.toolName}`,
+            }),
+            isError: true,
+          });
+          continue;
+        }
+
+        const args = output.arguments ?? {};
+        const { result, isError } = await executor.execute(args);
+        toolResults.push({
+          toolUseId: output.toolUseId,
+          toolName: output.toolName,
+          result,
+          isError,
+        });
+        continue;
+      }
+
+      // Handle multiple tool calls - execute in parallel with Promise.all
+      if (output.type === "tool_calls") {
+        // Store acknowledgement for next iteration
+        priorAcknowledgement = output.acknowledgement;
+
+        // Build parallel execution tasks
+        const executionTasks = output.calls.map(async (call) => {
+          const executor = toolExecutors.get(call.toolName);
+
+          // Track prior tool call for message threading
+          priorToolCalls.push({
+            toolUseId: call.toolUseId,
+            toolName: call.toolName,
+            arguments: call.arguments ?? {},
+          });
+
+          if (!executor) {
+            this.logger.warn(
+              { toolName: call.toolName, turnId: turn.turnId },
+              "session.adapter_unknown_tool",
+            );
+            return {
+              toolUseId: call.toolUseId,
+              toolName: call.toolName,
+              result: JSON.stringify({
+                error: `Unknown tool: ${call.toolName}`,
+              }),
+              isError: true,
+            };
+          }
+
+          const args = call.arguments ?? {};
+          const { result, isError } = await executor.execute(args);
+          return {
+            toolUseId: call.toolUseId,
+            toolName: call.toolName,
+            result,
+            isError,
+          };
+        });
+
+        // Execute all tool calls in parallel
+        const results = await Promise.all(executionTasks);
+        toolResults.push(...results);
+      }
+    }
+
+    // Max iterations reached
+    this.logger.warn(
+      { turnId: turn.turnId, iterations },
+      "session.adapter_max_iterations_reached",
     );
     return "I apologize, but I'm having trouble completing this request. Please try again.";
   }
@@ -1359,6 +1756,7 @@ export class SessionBuilder {
   private durableState: DurableObjectState;
   private logger: Logger | null = null;
   private ai: Ai | undefined;
+  private modelAdapterInstance: ModelAdapter | undefined;
   private toolProvider: ToolProvider | null = null;
   private promptProvider: PromptProvider | null = null;
   private env: Record<string, unknown> = {};
@@ -1378,6 +1776,11 @@ export class SessionBuilder {
 
   withAI(ai: Ai | undefined): SessionBuilder {
     this.ai = ai;
+    return this;
+  }
+
+  withModelAdapter(adapter: ModelAdapter | undefined): SessionBuilder {
+    this.modelAdapterInstance = adapter;
     return this;
   }
 
@@ -1410,6 +1813,7 @@ export class SessionBuilder {
     return new ConversationSessionV2(this.durableState, {
       durableState: this.durableState,
       ai: this.ai,
+      modelAdapter: this.modelAdapterInstance,
       logger: this.logger,
       toolProvider: this.toolProvider,
       promptProvider: this.promptProvider,

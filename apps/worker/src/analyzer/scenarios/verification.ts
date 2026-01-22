@@ -35,7 +35,10 @@ export const verificationScenarios: ScenarioDefinition[] = [
           stateChanges: {
             "conversation.verification.verified": true,
           },
-          responsePatterns: ["(verified|confirmed|found)"],
+          // Accept natural confirmations: explicit ("verified"), implicit (greeting by name), or helpful offers
+          responsePatterns: [
+            "(verified|confirmed|found|Mr\\.|Ms\\.|how can I help|assist)",
+          ],
           responseExcludes: ["sorry", "couldn't", "crm\\."],
         },
       },

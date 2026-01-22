@@ -98,7 +98,7 @@ export class ConversationSessionV2DO {
       deps,
       agentConfig,
       streamId: 1,
-      env: this.env as unknown as Record<string, unknown>,
+      env: this.env,
       knowledgeRetriever,
     });
 

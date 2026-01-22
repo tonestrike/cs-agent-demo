@@ -86,6 +86,10 @@ const extractName = (text: string) => {
   return cleaned || "Unknown";
 };
 
+/** Generate a unique tool use ID for mock responses */
+const generateMockToolUseId = () =>
+  `mock_toolu_${crypto.randomUUID().slice(0, 8)}`;
+
 export const createMockModelAdapter = (
   config?: AgentPromptConfig,
 ): ModelAdapter => {
@@ -111,6 +115,7 @@ export const createMockModelAdapter = (
       if (toolName === "crm.verifyAccount") {
         return {
           type: "tool_call",
+          toolUseId: generateMockToolUseId(),
           toolName,
           arguments: {
             customerId: input.customer.id,
@@ -121,6 +126,7 @@ export const createMockModelAdapter = (
       if (toolName === "crm.lookupCustomerByNameAndZip") {
         return {
           type: "tool_call",
+          toolUseId: generateMockToolUseId(),
           toolName,
           arguments: {
             fullName: extractName(input.text),
@@ -130,6 +136,7 @@ export const createMockModelAdapter = (
       }
       return {
         type: "tool_call",
+        toolUseId: generateMockToolUseId(),
         toolName,
         arguments: { customerId: input.customer.id },
       };

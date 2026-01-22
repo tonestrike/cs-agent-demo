@@ -17,15 +17,21 @@ import type {
 export type EvaluatorConfig = {
   /** Workers AI binding */
   ai: Ai;
-  /** Model to use for analysis (default: llama-3.3-70b) */
+  /** Model to use for analysis (default: llama-3.3-70b or claude-sonnet-4 if API key available) */
   model?: string;
   /** Enable verbose logging */
   verbose?: boolean;
   /** Logger instance */
   logger?: Logger;
+  /** Anthropic API key for Claude evaluation (optional, uses Workers AI if not provided) */
+  anthropicApiKey?: string;
+  /** Anthropic base URL (optional) */
+  anthropicBaseUrl?: string;
 };
 
-const DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const DEFAULT_WORKERS_AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
+const ANTHROPIC_VERSION = "2023-06-01";
 
 /**
  * Schema for the AI analysis response
@@ -109,13 +115,24 @@ export class ConversationEvaluator {
   private verbose: boolean;
   private bestPractices: string;
   private logger?: Logger;
+  private anthropicApiKey?: string;
+  private anthropicBaseUrl: string;
+  private useAnthropic: boolean;
 
   constructor(config: EvaluatorConfig) {
     this.ai = config.ai;
-    this.model = config.model ?? DEFAULT_MODEL;
     this.verbose = config.verbose ?? false;
     this.bestPractices = loadBestPractices();
     this.logger = config.logger;
+    this.anthropicApiKey = config.anthropicApiKey;
+    this.anthropicBaseUrl =
+      config.anthropicBaseUrl || "https://api.anthropic.com";
+
+    // Use Anthropic if API key is provided
+    this.useAnthropic = Boolean(this.anthropicApiKey);
+    this.model =
+      config.model ??
+      (this.useAnthropic ? DEFAULT_ANTHROPIC_MODEL : DEFAULT_WORKERS_AI_MODEL);
   }
 
   private log(
@@ -139,7 +156,11 @@ export class ConversationEvaluator {
   ): Promise<AnalysisResult> {
     this.log(
       "info",
-      { scenarioId: scenario.id, model: this.model },
+      {
+        scenarioId: scenario.id,
+        model: this.model,
+        useAnthropic: this.useAnthropic,
+      },
       "Starting AI analysis",
     );
 
@@ -149,29 +170,31 @@ export class ConversationEvaluator {
     this.log("debug", { promptLength: prompt.length }, "Analysis prompt built");
 
     try {
-      this.log("info", { scenarioId: scenario.id }, "Calling Workers AI");
+      let response: unknown;
 
-      const response = await this.ai.run(this.model as keyof AiModels, {
-        messages: [
-          {
-            role: "system",
-            content: prompt,
+      if (this.useAnthropic && this.anthropicApiKey) {
+        this.log("info", { scenarioId: scenario.id }, "Calling Anthropic API");
+        response = await this.callAnthropic(prompt);
+      } else {
+        this.log("info", { scenarioId: scenario.id }, "Calling Workers AI");
+        response = await this.ai.run(this.model as keyof AiModels, {
+          messages: [
+            {
+              role: "system",
+              content: prompt,
+            },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: analysisJsonSchema,
           },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: analysisJsonSchema,
-        },
-        max_new_tokens: 2048,
-        max_tokens: 2048,
-        temperature: 0.3, // Lower temperature for more consistent analysis
-      });
+          max_new_tokens: 2048,
+          max_tokens: 2048,
+          temperature: 0.3, // Lower temperature for more consistent analysis
+        });
+      }
 
-      this.log(
-        "debug",
-        { scenarioId: scenario.id },
-        "Workers AI response received",
-      );
+      this.log("debug", { scenarioId: scenario.id }, "AI response received");
 
       const parsed = this.parseResponse(response);
 
@@ -198,6 +221,68 @@ export class ConversationEvaluator {
         "AI analysis failed, using fallback",
       );
       return this.generateFallbackAnalysis(result);
+    }
+  }
+
+  /**
+   * Call Anthropic API for analysis
+   */
+  private async callAnthropic(prompt: string): Promise<unknown> {
+    if (!this.anthropicApiKey) {
+      throw new Error("Anthropic API key not configured");
+    }
+
+    const endpoint = `${this.anthropicBaseUrl}/v1/messages`;
+
+    const payload = {
+      model: this.model,
+      max_tokens: 4096,
+      messages: [
+        {
+          role: "user",
+          content: `${prompt}\n\nRespond with ONLY valid JSON, no other text.`,
+        },
+      ],
+    };
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "x-api-key": this.anthropicApiKey,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Anthropic API error: ${response.status} - ${errorBody}`);
+    }
+
+    const data = (await response.json()) as {
+      content: Array<{ type: string; text?: string }>;
+    };
+
+    // Extract text from Claude response
+    const textBlock = data.content.find((block) => block.type === "text");
+    if (!textBlock?.text) {
+      throw new Error("No text in Anthropic response");
+    }
+
+    // Parse JSON from text response
+    try {
+      // Claude may include markdown code blocks, so extract JSON
+      let jsonText = textBlock.text;
+      const jsonMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (jsonMatch) {
+        jsonText = jsonMatch[1] ?? jsonText;
+      }
+      return JSON.parse(jsonText.trim());
+    } catch (error) {
+      throw new Error(
+        `Failed to parse Anthropic JSON response: ${textBlock.text.slice(0, 200)}`,
+      );
     }
   }
 
@@ -257,6 +342,10 @@ export class ConversationEvaluator {
       "## Conversation Transcript",
       transcript,
       "",
+      "NOTE: Lines starting with '*Tools:*' or 'Tools used:' are debug metadata added by the evaluation system.",
+      "These are NOT visible to the customer and should NOT count as tool leakage.",
+      "Only penalize tool leakage if the bot's response text itself mentions tool names like 'crm.verifyAccount'.",
+      "",
       "## Execution Results",
       `- Overall Pass: ${result.passed ? "Yes" : "No"}`,
       `- Steps Passed: ${result.passedSteps}/${result.totalSteps}`,
@@ -281,7 +370,8 @@ export class ConversationEvaluator {
       "- Failing to greet customer warmly = score below 50",
       "- Robotic phrases like 'Hello [Name]!' = score below 80",
       "- Redundant tool calls = deduct 20 points",
-      "- Tool leakage (mentioning tool names) = deduct 25 points",
+      "- Tool leakage (bot text mentions 'crm.xxx' or [tool_call] blocks) = deduct 25 points",
+      "- NOTE: '*Tools:*' metadata lines in transcript are evaluation annotations, NOT tool leakage",
       "",
       "CATEGORIES:",
       "1. **Accuracy (0-100)**: Correct understanding and tool usage. Tool failures cap at 60.",

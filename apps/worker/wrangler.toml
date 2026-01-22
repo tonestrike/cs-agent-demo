@@ -5,9 +5,18 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 CRM_PROVIDER = "d1"
+# AGENT_MODEL options: "workers-ai" (default), "anthropic", "openrouter", "auto"
+# - "auto" prioritizes: Anthropic > OpenRouter > Workers AI based on available API keys
+# For Anthropic, set ANTHROPIC_API_KEY secret via: wrangler secret put ANTHROPIC_API_KEY
+# For OpenRouter, set OPENROUTER_TOKEN secret via: wrangler secret put OPENROUTER_TOKEN
+# Options: "workers-ai" (default), "anthropic", "openrouter"
+# Currently using workers-ai since Anthropic account needs credits
+# To switch to Anthropic: Set AGENT_MODEL = "anthropic" and add credits at console.anthropic.com
 AGENT_MODEL = "workers-ai"
-AI_GATEWAY_ACCOUNT_ID = "197ac8ab6d5079d3faab60cea42eaa7e"
-AI_GATEWAY_ID = "cs-bot"
+# Direct Anthropic API (bypass AI Gateway since it requires separate token)
+ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+# AI_GATEWAY_ACCOUNT_ID = "197ac8ab6d5079d3faab60cea42eaa7e"
+# AI_GATEWAY_ID = "cs-bot"
 OPENROUTER_REFERER = "https://pestcall-worker.tonyvantur.workers.dev"
 OPENROUTER_TITLE = "PestCall CS Agent"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"

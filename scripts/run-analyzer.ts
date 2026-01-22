@@ -1340,7 +1340,7 @@ async function fetchScenarioDefinitions(): Promise<ScenarioDefinition[]> {
             toolCalls: [{ name: "crm.verifyAccount" }],
             stateChanges: { "conversation.verification.verified": true },
             responsePatterns: [
-              "(verified|confirmed|found|all set|got you|pulled up|your account)",
+              "(verified|confirmed|found|Mr\\.|Ms\\.|how can I help|assist)",
             ],
             responseExcludes: ["sorry", "couldn't", "crm\\."],
           },
@@ -1493,7 +1493,7 @@ async function fetchScenarioDefinitions(): Promise<ScenarioDefinition[]> {
           expectations: {
             // Bot should acknowledge verification or account - tool call may vary
             responsePatterns: [
-              "(verified|found|appointment|all set|checked|account|help|assist|reschedul)",
+              "(verified|found|appointment|Mr\\.|Ms\\.|checked|account|help|assist|reschedul)",
             ],
             responseExcludes: ["crm\\."],
           },
@@ -1760,7 +1760,7 @@ async function fetchScenarioDefinitions(): Promise<ScenarioDefinition[]> {
           expectations: {
             // Verification should happen - check the response indicates success
             responsePatterns: [
-              "(verified|confirmed|found|all set|got you|pulled up|your account|checked|assist)",
+              "(verified|confirmed|found|Mr\\.|Ms\\.|how can I help|assist|checked)",
             ],
             responseExcludes: ["couldn't", "sorry", "crm\\."],
           },

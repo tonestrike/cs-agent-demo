@@ -55,6 +55,8 @@ export const analyzerProcedures = {
         ai: context.env.AI,
         verbose: false,
         logger,
+        anthropicApiKey: context.env.ANTHROPIC_API_KEY,
+        anthropicBaseUrl: context.env.ANTHROPIC_BASE_URL,
       });
 
       const analysis = await evaluator.analyze(input.scenario, input.result);
@@ -151,6 +153,8 @@ export const analyzerProcedures = {
           ai: context.env.AI,
           verbose: false,
           logger,
+          anthropicApiKey: context.env.ANTHROPIC_API_KEY,
+          anthropicBaseUrl: context.env.ANTHROPIC_BASE_URL,
         });
 
         analysis = await evaluator.analyze(scenario, execution);
@@ -224,6 +228,8 @@ export const analyzerProcedures = {
           ai: context.env.AI,
           verbose: false,
           logger,
+          anthropicApiKey: context.env.ANTHROPIC_API_KEY,
+          anthropicBaseUrl: context.env.ANTHROPIC_BASE_URL,
         });
       }
 

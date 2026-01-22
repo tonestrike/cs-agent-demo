@@ -13,6 +13,7 @@
  */
 
 import type { Ai, DurableObjectState } from "@cloudflare/workers-types";
+import type { ModelAdapter } from "../../../models/types";
 
 /**
  * Generic session state stored in durable object storage.
@@ -207,6 +208,8 @@ export type SessionDeps = {
   durableState: DurableObjectState;
   /** Workers AI binding (optional - enables agent loop) */
   ai?: Ai;
+  /** Model adapter for LLM calls (optional - uses Workers AI fallback if not provided) */
+  modelAdapter?: ModelAdapter;
   /** Logger instance */
   logger: Logger;
   /** Tool provider - injects domain logic */

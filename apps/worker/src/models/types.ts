@@ -25,6 +25,7 @@ export const agentToolNameSchema = z.enum([
 
 export const agentToolCallSchema = z.object({
   type: z.literal("tool_call"),
+  toolUseId: z.string(), // Required for proper Anthropic tool_result threading
   toolName: agentToolNameSchema,
   arguments: z.record(z.unknown()).optional(),
   acknowledgement: z.string().optional(),
@@ -35,6 +36,7 @@ export const agentToolCallsSchema = z.object({
   type: z.literal("tool_calls"),
   calls: z.array(
     z.object({
+      toolUseId: z.string(), // Required for proper Anthropic tool_result threading
       toolName: agentToolNameSchema,
       arguments: z.record(z.unknown()).optional(),
     }),
@@ -297,6 +299,21 @@ const toolResultSchema = z.discriminatedUnion("toolName", [
 
 export type ToolResult = z.infer<typeof toolResultSchema>;
 
+/** Tool result for proper Anthropic tool_result threading */
+export type ToolResultInput = {
+  toolUseId: string;
+  toolName: string;
+  result: string;
+  isError?: boolean;
+};
+
+/** Prior tool call that was made by the model (for message threading) */
+export type PriorToolCall = {
+  toolUseId: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+};
+
 export type AgentModelInput = {
   text: string;
   customer: {
@@ -308,6 +325,12 @@ export type AgentModelInput = {
   messages?: Array<{ role: "user" | "assistant"; content: string }>;
   context?: string;
   hasContext?: boolean;
+  /** Tool results from previous iteration (for proper Anthropic tool_result threading) */
+  toolResults?: ToolResultInput[];
+  /** Prior tool calls the model made (to include in assistant message) */
+  priorToolCalls?: PriorToolCall[];
+  /** Any acknowledgement text from the prior model response */
+  priorAcknowledgement?: string;
 };
 
 export type AgentResponseInput = {
@@ -350,7 +373,7 @@ type StatusInput = {
 };
 
 export type ModelAdapter = {
-  name: "mock" | "workers-ai" | "openrouter" | "hybrid" | "split";
+  name: "mock" | "workers-ai" | "openrouter" | "hybrid" | "split" | "anthropic";
   modelId?: string;
   generate: (input: AgentModelInput) => Promise<AgentModelOutput>;
   respond: (input: AgentResponseInput) => Promise<string>;

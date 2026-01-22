@@ -99,7 +99,7 @@ export class VoiceAgentDO extends RealtimeAgent<Env> {
       deps,
       agentConfig,
       streamId: 1,
-      env: this.env as unknown as Record<string, unknown>,
+      env: this.env,
     });
 
     // Create the text processor that bridges to the session
